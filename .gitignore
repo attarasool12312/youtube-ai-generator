@@ -16,3 +16,4 @@ cache/
 *.gguf
 .venv/
 backend/data/
+*.bak
