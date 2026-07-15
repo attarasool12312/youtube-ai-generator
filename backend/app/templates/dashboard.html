@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dashboard-page">
+  <header class="topbar">
+    <div>
+      <h1>YouTube AI Video Generator</h1>
+      <p>by Atta Rasool</p>
+    </div>
+    <form method="post" action="/logout">
+      <button class="logout-button" type="submit">Logout</button>
+    </form>
+  </header>
+
+  <main class="dashboard">
+    <section class="panel">
+      <h2>Add Video Titles</h2>
+      <p>Enter up to 20 titles, one title per line.</p>
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+      {% if success %}
+      <div class="success">{{ success }}</div>
+      {% endif %}
+      <form method="post" action="/jobs">
+        <label for="titles">Video Titles</label>
+        <textarea id="titles" name="titles" rows="12" required></textarea>
+        <div class="settings-grid">
+          <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select></div>
+          <div><label>Language</label><input value="English" disabled></div>
+          <div><label>Main Narrator</label><select name="narrator_voice" required><option value="am_michael" selected>Michael - Male</option><option value="am_fenrir">Fenrir - Male</option><option value="am_puck">Puck - Male</option><option value="af_heart">Heart - Female</option><option value="af_bella">Bella - Female</option><option value="af_nicole">Nicole - Female</option></select></div>
+        </div>
+        <div class="voice-pool">
+          <label>Additional Voices</label>
+          <div class="voice-checkboxes">
+            <label><input type="checkbox" name="voice_pool" value="am_fenrir" checked> Fenrir</label>
+            <label><input type="checkbox" name="voice_pool" value="am_puck" checked> Puck</label>
+            <label><input type="checkbox" name="voice_pool" value="af_heart" checked> Heart</label>
+            <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
+            <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
+          </div>
+          <label>Voice Speed</label>
+          <select name="voice_speed">
+            <option value="0.85">Slow</option>
+            <option value="1.0" selected>Normal</option>
+            <option value="1.15">Fast</option>
+          </select>
+        </div>
+        <button type="submit">Add Titles to Queue</button>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>Video Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Progress</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr>
+            <td>{{ job.queue_position }}</td>
+            <td>{{ job.title }}</td>
+            <td>{{ job.status }}</td>
+            <td>{{ job.progress }}%</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4">No videos in queue yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
