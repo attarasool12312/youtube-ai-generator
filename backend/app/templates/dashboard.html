@@ -33,6 +33,7 @@
         <div class="settings-grid">
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select></div>
           <div><label>Language</label><input value="English" disabled></div>
+          <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
           <div><label>Main Narrator</label><select name="narrator_voice" required><option value="am_michael" selected>Michael - Male</option><option value="am_fenrir">Fenrir - Male</option><option value="am_puck">Puck - Male</option><option value="af_heart">Heart - Female</option><option value="af_bella">Bella - Female</option><option value="af_nicole">Nicole - Female</option></select></div>
         </div>
         <div class="voice-pool">
@@ -63,6 +64,7 @@
             <th>Title</th>
             <th>Status</th>
             <th>Progress</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -72,10 +74,16 @@
             <td>{{ job.title }}</td>
             <td>{{ job.status }}</td>
             <td>{{ job.progress }}%</td>
+            <td>
+              <form method="post" action="/jobs/{{ job.id }}/delete"
+                    onsubmit="return confirm('Permanently delete this job and all generated files?');">
+                <button type="submit" class="danger-button">Delete</button>
+              </form>
+            </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="4">No videos in queue yet.</td>
+            <td colspan="5">No videos in queue yet.</td>
           </tr>
           {% endfor %}
         </tbody>

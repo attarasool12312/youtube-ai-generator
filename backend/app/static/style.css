@@ -149,3 +149,15 @@ select {
   width: auto;
   margin-right: 5px;
 }
+
+.danger-button {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  background: #dc2626;
+  white-space: nowrap;
+}
+
+.danger-button:hover {
+  background: #b91c1c;
+}

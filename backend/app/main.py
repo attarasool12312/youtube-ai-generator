@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.database import get_db
 from app.models import User, VideoJob
+from app.job_cleanup import cleanup_job_files
 from app.security import verify_password
 
 app = FastAPI(title=settings.app_name)
@@ -90,6 +91,7 @@ def add_jobs(
     request: Request,
     titles: str = Form(...),
     duration_minutes: int = Form(10),
+    video_style: str = Form("auto"),
     narrator_voice: str = Form("am_michael"),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
@@ -114,6 +116,7 @@ def add_jobs(
         db.add(VideoJob(
             title=title,
             duration_minutes=duration_minutes,
+            video_style=video_style,
             voice_mode="multi",
             narrator_voice=narrator_voice,
             voice_pool=",".join(selected_voices),
@@ -126,5 +129,36 @@ def add_jobs(
     db.commit()
     return RedirectResponse(
         f"/?success={len(title_list)} title(s) added to queue.",
+        status_code=303,
+    )
+
+
+@app.post("/jobs/{job_id}/delete")
+def delete_job(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if not job:
+        return RedirectResponse(
+            "/?success=Job not found.",
+            status_code=303,
+        )
+
+    cleanup_job_files(
+        worker_pid=job.worker_pid,
+        output_directory=job.output_directory,
+    )
+
+    db.delete(job)
+    db.commit()
+
+    return RedirectResponse(
+        "/?success=Job and all related files deleted.",
         status_code=303,
     )
