@@ -28,14 +28,19 @@ def start_queue_worker() -> bool:
     environment = os.environ.copy()
     environment["PYTHONPATH"] = "backend"
 
-
-def start_queue_worker() -> bool:
-    if worker_is_running():
-        return False
-
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = "backend"
+    with LOG_FILE.open("a") as log:
+        process = subprocess.Popen(
+            [
+                str(PROJECT_ROOT / ".venv/bin/python"),
+                "-m",
+                "app.queue_worker",
+            ],
+            cwd=str(PROJECT_ROOT),
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
 
     PID_FILE.write_text(str(process.pid))
     return True

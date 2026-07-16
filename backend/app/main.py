@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import get_db
 from app.models import User, VideoJob
 from app.job_cleanup import cleanup_job_files
+from app.queue_launcher import start_queue_worker
 from app.security import verify_password
 
 app = FastAPI(title=settings.app_name)
@@ -127,6 +128,7 @@ def add_jobs(
         ))
 
     db.commit()
+    start_queue_worker()
     return RedirectResponse(
         f"/?success={len(title_list)} title(s) added to queue.",
         status_code=303,

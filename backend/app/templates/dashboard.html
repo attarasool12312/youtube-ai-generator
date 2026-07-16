@@ -90,5 +90,18 @@
       </table>
     </section>
   </main>
+
+
+
 </body>
 </html>
+
+<script>
+const activeStatuses = ["waiting", "processing", "generating_script"];
+const statuses = [...document.querySelectorAll("table tr td:nth-child(3)")]
+    .map(cell => cell.textContent.trim().toLowerCase());
+
+if (statuses.some(status => activeStatuses.includes(status))) {
+    setTimeout(() => window.location.reload(), 12000);
+}
+</script>
