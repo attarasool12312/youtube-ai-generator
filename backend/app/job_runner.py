@@ -5,6 +5,7 @@ from pathlib import Path
 from app.ai_pipeline import generate_video_package
 from app.database import SessionLocal
 from app.models import VideoJob
+from app.kokoro_service import generate_narration
 
 OUTPUT_ROOT = Path("/workspace/youtube-ai-generator/outputs/jobs")
 
@@ -25,6 +26,8 @@ def run_job(job_id: int) -> None:
         title = job.title
         duration_minutes = job.duration_minutes
         video_style = job.video_style
+        narrator_voice = job.narrator_voice
+        voice_speed = job.voice_speed
         db.commit()
 
     try:
@@ -44,6 +47,20 @@ def run_job(job_id: int) -> None:
 
         (output_dir / "package.json").write_text(
             json.dumps(package, indent=2), encoding="utf-8"
+        )
+
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
+            if job:
+                job.status = "generating_audio"
+                job.progress = 70
+                db.commit()
+
+        generate_narration(
+            package["script"],
+            narrator_voice,
+            voice_speed,
+            output_dir / "narration.wav",
         )
 
         with SessionLocal() as db:
