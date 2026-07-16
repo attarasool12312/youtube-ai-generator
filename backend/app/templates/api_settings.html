@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>API Settings</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="settings-card">
+  <h1>API Settings</h1>
+  <p>Leave a field empty to keep the existing key.</p>
+
+  <form method="post" action="/settings">
+    <label>Pexels API Key</label>
+    <input type="password" name="pexels_api_key"
+      placeholder="{{ 'Saved securely' if pexels_ready else 'Not configured' }}">
+
+    <label>Pixabay API Key</label>
+    <input type="password" name="pixabay_api_key"
+      placeholder="{{ 'Saved securely' if pixabay_ready else 'Not configured' }}">
+
+    <label>Coverr API Key</label>
+    <input type="password" name="coverr_api_key"
+      placeholder="{{ 'Saved securely' if coverr_ready else 'Not configured' }}">
+
+    <label>Openverse Client ID</label>
+    <input type="password" name="openverse_client_id"
+      placeholder="{{ 'Saved securely' if openverse_id_ready else 'Not configured' }}">
+
+    <label>Openverse Client Secret</label>
+    <input type="password" name="openverse_client_secret"
+      placeholder="{{ 'Saved securely' if openverse_secret_ready else 'Not configured' }}">
+
+    <button type="submit">Save API Keys</button>
+    <a href="/" class="settings-back">Back to Dashboard</a>
+  </form>
+</div>
+</body>
+</html>

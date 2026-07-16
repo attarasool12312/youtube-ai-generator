@@ -28,6 +28,7 @@ class VideoJob(Base):
     title: Mapped[str] = mapped_column(String(500))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=10)
     video_style: Mapped[str] = mapped_column(String(30), default="auto")
+    orientation: Mapped[str] = mapped_column(String(20), default="landscape")
     voice_mode: Mapped[str] = mapped_column(String(20), default="multi")
     narrator_voice: Mapped[str] = mapped_column(String(50), default="am_michael")
     voice_pool: Mapped[str] = mapped_column(Text, default="am_michael,am_fenrir,am_puck,af_heart,af_bella,af_nicole")
@@ -41,3 +42,14 @@ class VideoJob(Base):
     output_directory: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class ApiSetting(Base):
+    __tablename__ = "api_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    encrypted_value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now
+    )

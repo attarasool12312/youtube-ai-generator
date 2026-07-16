@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     app_name: str
     app_url: str
     secret_key: str
+    settings_encryption_key: str
 
     admin_username: str
     admin_email: str

@@ -3,9 +3,12 @@ import sys
 from pathlib import Path
 
 from app.ai_pipeline import generate_video_package
+from app.audio_timing import sync_scenes_to_audio
 from app.database import SessionLocal
 from app.models import VideoJob
 from app.kokoro_service import generate_narration
+from app.scene_media import download_scene_images
+from app.video_renderer import render_video
 
 OUTPUT_ROOT = Path("/workspace/youtube-ai-generator/outputs/jobs")
 
@@ -26,6 +29,8 @@ def run_job(job_id: int) -> None:
         title = job.title
         duration_minutes = job.duration_minutes
         video_style = job.video_style
+        orientation = job.orientation or 'landscape'
+        orientation = job.orientation or 'landscape'
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         db.commit()
@@ -49,6 +54,13 @@ def run_job(job_id: int) -> None:
             json.dumps(package, indent=2), encoding="utf-8"
         )
 
+        (output_dir / "scenes.json").write_text(
+            json.dumps(package["scenes"], indent=2), encoding="utf-8"
+        )
+        (output_dir / "package.json").write_text(
+            json.dumps(package, indent=2), encoding="utf-8"
+        )
+
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
@@ -62,6 +74,52 @@ def run_job(job_id: int) -> None:
             voice_speed,
             output_dir / "narration.wav",
         )
+
+        package["audio_duration_seconds"] = sync_scenes_to_audio(
+            package["scenes"],
+            output_dir / "narration.wav",
+        )
+
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
+            if job:
+                job.status = "generating_media"
+                job.progress = 80
+                db.commit()
+
+        download_scene_images(
+            package["scenes"], output_dir, orientation
+        )
+
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
+            if job:
+                job.status = "rendering_video"
+                job.progress = 90
+                db.commit()
+
+        package["video_file"] = render_video(
+            package["scenes"],
+            output_dir / "narration.wav",
+            output_dir / "final-video.mp4",
+            orientation,
+        )
+
+        (output_dir / "scenes.json").write_text(
+            json.dumps(package["scenes"], indent=2), encoding="utf-8"
+        )
+        (output_dir / "package.json").write_text(
+            json.dumps(package, indent=2), encoding="utf-8"
+        )
+        # final-package-saved
+
+        (output_dir / "scenes.json").write_text(
+            json.dumps(package["scenes"], indent=2), encoding="utf-8"
+        )
+        (output_dir / "package.json").write_text(
+            json.dumps(package, indent=2), encoding="utf-8"
+        )
+        # timing-files-saved
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)

@@ -35,7 +35,23 @@
           <div><label>Language</label><input value="English" disabled></div>
           <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
           <div><label>Main Narrator</label><select name="narrator_voice" required><option value="am_michael" selected>Michael - Male</option><option value="am_fenrir">Fenrir - Male</option><option value="am_puck">Puck - Male</option><option value="af_heart">Heart - Female</option><option value="af_bella">Bella - Female</option><option value="af_nicole">Nicole - Female</option></select></div>
-        </div>
+        <div>
+  <label>Voice Speed</label>
+  <select name="voice_speed">
+    <option value="0.85">Slow</option>
+    <option value="1.0" selected>Normal</option>
+    <option value="1.15">Fast</option>
+  </select>
+</div>
+<div>
+  <label>Orientation</label>
+  <select name="orientation">
+    <option value="landscape" selected>Landscape — 16:9</option>
+    <option value="portrait">Portrait — 9:16</option>
+    <option value="square">Square — 1:1</option>
+  </select>
+</div>
+</div>
         <div class="voice-pool">
           <label>Additional Voices</label>
           <div class="voice-checkboxes">
@@ -45,12 +61,6 @@
             <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
             <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
           </div>
-          <label>Voice Speed</label>
-          <select name="voice_speed">
-            <option value="0.85">Slow</option>
-            <option value="1.0" selected>Normal</option>
-            <option value="1.15">Fast</option>
-          </select>
         </div>
         <button type="submit">Add Titles to Queue</button>
       </form>
@@ -75,7 +85,12 @@
             <td>{{ job.status }}</td>
             <td>{{ job.progress }}%</td>
             <td>
-              <form method="post" action="/jobs/{{ job.id }}/delete"
+              {% if job.status == "completed" %}
+<a class="download-button" href="/jobs/{{ job.id }}/download">
+Download
+</a>
+{% endif %}
+<form method="post" action="/jobs/{{ job.id }}/delete"
                     onsubmit="return confirm('Permanently delete this job and all generated files?');">
                 <button type="submit" class="danger-button">Delete</button>
               </form>
@@ -96,12 +111,42 @@
 </body>
 </html>
 
-<script>
-const activeStatuses = ["waiting", "processing", "generating_script", "generating_audio"];
-const statuses = [...document.querySelectorAll("table tr td:nth-child(3)")]
-    .map(cell => cell.textContent.trim().toLowerCase());
 
-if (statuses.some(status => activeStatuses.includes(status))) {
-    setTimeout(() => window.location.reload(), 12000);
-}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const logout = [...document.querySelectorAll("a, button")]
+    .find(el => el.textContent.trim() === "Logout");
+
+  if (!logout || document.querySelector(".api-settings-link")) return;
+
+  const settings = document.createElement("a");
+  settings.href = "/settings";
+  settings.className = "api-settings-link";
+  settings.textContent = "API Settings";
+
+  logout.parentElement.insertBefore(settings, logout);
+});
 </script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const logout = [...document.querySelectorAll("a, button")]
+    .find(el => el.textContent.trim() === "Logout");
+
+  if (!logout) return;
+
+  let settings = document.querySelector(".api-settings-link");
+
+  if (!settings) {
+    settings = document.createElement("a");
+    settings.href = "/settings";
+    settings.className = "api-settings-link";
+    settings.textContent = "API Settings";
+  }
+
+  logout.parentElement.insertBefore(settings, logout);
+});
+</script>
+
+
+
