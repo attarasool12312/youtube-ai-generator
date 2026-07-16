@@ -15,6 +15,14 @@ def orientation_ok(width, height, orientation):
     return width >= height
 
 
+def rotate_items(items, offset):
+    items = list(items)
+    if not items:
+        return []
+    offset %= len(items)
+    return items[offset:] + items[:offset]
+
+
 def save_media(url, output_path, headers=None):
     response = CLIENT.get(url, headers=headers)
     response.raise_for_status()
@@ -25,7 +33,7 @@ def save_media(url, output_path, headers=None):
     return str(path)
 
 
-def pexels_video(query, output_path, orientation):
+def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://api.pexels.com/videos/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
@@ -33,7 +41,13 @@ def pexels_video(query, output_path, orientation):
     )
     response.raise_for_status()
 
-    for item in response.json().get("videos", []):
+    items = rotate_items(
+        response.json().get("videos", []), offset
+    )
+    for item in items:
+        source = item.get("url", "")
+        if source in (used_sources or set()):
+            continue
         files = sorted(
             item.get("video_files", []),
             key=lambda x: (x.get("width") or 0) *
@@ -56,7 +70,7 @@ def pexels_video(query, output_path, orientation):
             return {
                 "provider": "pexels",
                 "media_type": "video",
-                "source": item.get("url", ""),
+                "source": source,
                 "author": item.get("user", {}).get("name", ""),
                 "width": width,
                 "height": height,
@@ -65,7 +79,7 @@ def pexels_video(query, output_path, orientation):
     raise RuntimeError("No suitable Pexels video found.")
 
 
-def pixabay_video(query, output_path, orientation):
+def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://pixabay.com/api/videos/",
         params={
@@ -76,7 +90,13 @@ def pixabay_video(query, output_path, orientation):
         },
     )
     response.raise_for_status()
-    for item in response.json().get("hits", []):
+    items = rotate_items(
+        response.json().get("hits", []), offset
+    )
+    for item in items:
+        source = item.get("pageURL", "")
+        if source in (used_sources or set()):
+            continue
         if item.get("isLowQuality") or item.get("isGRated"):
             continue
 
@@ -93,7 +113,7 @@ def pixabay_video(query, output_path, orientation):
             return {
                 "provider": "pixabay",
                 "media_type": "video",
-                "source": item.get("pageURL", ""),
+                "source": source,
                 "author": item.get("user", ""),
                 "width": width,
                 "height": height,
@@ -102,7 +122,7 @@ def pixabay_video(query, output_path, orientation):
     raise RuntimeError("No suitable Pixabay video found.")
 
 
-def coverr_video(query, output_path, orientation):
+def coverr_video(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://api.coverr.co/videos",
         headers={"Authorization":
@@ -110,7 +130,16 @@ def coverr_video(query, output_path, orientation):
         params={"query": query, "page_size": 15, "urls": "true"},
     )
     response.raise_for_status()
-    for item in response.json().get("hits", []):
+    items = rotate_items(
+        response.json().get("hits", []), offset
+    )
+    for item in items:
+        source = (
+            "https://coverr.co/videos/"
+            + str(item.get("slug", ""))
+        )
+        if source in (used_sources or set()):
+            continue
         if item.get("is_premium"):
             continue
 
@@ -124,7 +153,7 @@ def coverr_video(query, output_path, orientation):
         save_media(url, output_path)
         return {
             "provider": "coverr", "media_type": "video",
-            "source": f"https://coverr.co/videos/{item.get('slug', '')}",
+            "source": source,
             "author": str(item.get("contributor_id") or ""),
             "width": width, "height": height,
         }
@@ -132,7 +161,7 @@ def coverr_video(query, output_path, orientation):
     raise RuntimeError("No suitable Coverr video found.")
 
 
-def pexels_image(query, output_path, orientation):
+def pexels_image(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://api.pexels.com/v1/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
@@ -140,21 +169,27 @@ def pexels_image(query, output_path, orientation):
     )
     response.raise_for_status()
 
-    for item in response.json().get("photos", []):
+    items = rotate_items(
+        response.json().get("photos", []), offset
+    )
+    for item in items:
+        source = item.get("url", "")
+        if source in (used_sources or set()):
+            continue
         width, height = item["width"], item["height"]
         if not orientation_ok(width, height, orientation):
             continue
         save_media(item["src"]["large2x"], output_path)
         return {
             "provider": "pexels", "media_type": "image",
-            "source": item["url"], "author": item["photographer"],
+            "source": source, "author": item["photographer"],
             "width": width, "height": height,
         }
 
     raise RuntimeError("No suitable Pexels image found.")
 
 
-def pixabay_image(query, output_path, orientation):
+def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://pixabay.com/api/",
         params={"key": get_api_key("pixabay_api_key"),
@@ -162,7 +197,13 @@ def pixabay_image(query, output_path, orientation):
     )
     response.raise_for_status()
 
-    for item in response.json().get("hits", []):
+    items = rotate_items(
+        response.json().get("hits", []), offset
+    )
+    for item in items:
+        source = item.get("pageURL", "")
+        if source in (used_sources or set()):
+            continue
         if item.get("isLowQuality") or item.get("isGRated"):
             continue
         width, height = item["imageWidth"], item["imageHeight"]
@@ -171,14 +212,14 @@ def pixabay_image(query, output_path, orientation):
         save_media(item["largeImageURL"], output_path)
         return {
             "provider": "pixabay", "media_type": "image",
-            "source": item["pageURL"], "author": item["user"],
+            "source": source, "author": item["user"],
             "width": width, "height": height,
         }
 
     raise RuntimeError("No suitable Pixabay image found.")
 
 
-def openverse_image(query, output_path, orientation):
+def openverse_image(query, output_path, orientation, used_sources=None, offset=0):
     response = CLIENT.get(
         "https://api.openverse.org/v1/images/",
         headers=openverse_headers(),
@@ -186,7 +227,16 @@ def openverse_image(query, output_path, orientation):
     )
     response.raise_for_status()
 
-    for item in response.json().get("results", []):
+    items = rotate_items(
+        response.json().get("results", []), offset
+    )
+    for item in items:
+        source = (
+            item.get("foreign_landing_url")
+            or item.get("url", "")
+        )
+        if source in (used_sources or set()):
+            continue
         width = item.get("width") or 0
         height = item.get("height") or 0
         if not item.get("url"):
@@ -198,7 +248,7 @@ def openverse_image(query, output_path, orientation):
         return {
             "provider": "openverse",
             "media_type": "image",
-            "source": item.get("foreign_landing_url", ""),
+            "source": source,
             "author": item.get("creator", ""),
             "license": item.get("license", ""),
             "license_url": item.get("license_url", ""),

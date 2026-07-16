@@ -10,6 +10,18 @@ def download_scene_images(
     media_dir = Path(output_dir) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     attributions = []
+    history_path = Path(
+        "/workspace/youtube-ai-generator/"
+        "backend/data/media_history.json"
+    )
+
+    try:
+        history = json.loads(history_path.read_text())
+    except Exception:
+        history = []
+
+    used_sources = set(history[-500:])
+    new_sources = []
 
     for scene in scenes:
         number = int(scene["scene_number"])
@@ -22,6 +34,8 @@ def download_scene_images(
                 query, media_dir, number,
                 scene.get("media_type", "video"),
                 orientation,
+                used_sources,
+                scene.get("image_prompt") or query,
             )
             scene["media_file"] = result["media_file"]
             scene["media_provider"] = result["provider"]
@@ -31,8 +45,25 @@ def download_scene_images(
             result["scene_number"] = number
             result["query"] = query
             attributions.append(result)
+
+            source = result.get("source")
+            if source:
+                used_sources.add(source)
+                new_sources.append(source)
         except Exception as error:
             scene["media_error"] = str(error)
+
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    combined = (history + new_sources)[-1000:]
+    history_path.write_text(
+        json.dumps(combined, indent=2)
+    )
+
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    combined = (history + new_sources)[-1000:]
+    history_path.write_text(
+        json.dumps(combined, indent=2)
+    )
 
     report = Path(output_dir) / "attributions.json"
     report.write_text(json.dumps(attributions, indent=2))

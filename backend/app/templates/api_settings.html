@@ -30,7 +30,16 @@
     <input type="password" name="openverse_client_secret"
       placeholder="{{ 'Saved securely' if openverse_secret_ready else 'Not configured' }}">
 
-    <button type="submit">Save API Keys</button>
+    
+      <label>Gemini API Key</label>
+      <input type="password" name="gemini_api_key"
+        placeholder="{{ 'Saved securely' if gemini_ready else 'Not configured' }}">
+
+      <label>Together AI API Key</label>
+      <input type="password" name="together_api_key"
+        placeholder="{{ 'Saved securely' if together_ready else 'Not configured' }}">
+
+<button type="submit">Save API Keys</button>
     <a href="/" class="settings-back">Back to Dashboard</a>
   </form>
 </div>

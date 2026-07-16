@@ -14,6 +14,7 @@ from app.models import User, VideoJob
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
 from app.api_settings import has_api_key, save_api_key
+from app.audio_export import create_narration_mp3
 from app.security import verify_password
 
 app = FastAPI(title=settings.app_name)
@@ -212,6 +213,8 @@ def api_settings_page(request: Request):
             "coverr_ready": has_api_key("coverr_api_key"),
             "openverse_id_ready": has_api_key("openverse_client_id"),
             "openverse_secret_ready": has_api_key("openverse_client_secret"),
+            "gemini_ready": has_api_key("gemini_api_key"),
+            "together_ready": has_api_key("together_api_key"),
         },
     )
 
@@ -224,6 +227,8 @@ def save_api_settings(
     coverr_api_key: str = Form(""),
     openverse_client_id: str = Form(""),
     openverse_client_secret: str = Form(""),
+    gemini_api_key: str = Form(""),
+    together_api_key: str = Form(""),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
@@ -237,4 +242,64 @@ def save_api_settings(
         openverse_client_secret.strip(),
     )
 
+    save_api_key("gemini_api_key", gemini_api_key.strip())
+    save_api_key("together_api_key", together_api_key.strip())
+
     return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+def _safe_job_file(job, filename):
+    if not job or not job.output_directory:
+        return None
+    root = Path("/workspace/youtube-ai-generator/outputs/jobs").resolve()
+    path = (Path(job.output_directory) / filename).resolve()
+    if root not in path.parents or not path.is_file():
+        return None
+    return path
+
+
+@app.get("/jobs/{job_id}/download/narration")
+def download_job_narration(
+    job_id: int, request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    job = db.get(VideoJob, job_id)
+    mp3 = _safe_job_file(job, "narration.mp3")
+    wav = _safe_job_file(job, "narration.wav")
+    if not mp3 and wav:
+        try:
+            mp3 = create_narration_mp3(
+                wav, wav.with_name("narration.mp3")
+            )
+        except Exception:
+            mp3 = None
+    if not mp3:
+        return RedirectResponse(
+            "/?success=Narration not found.", status_code=303
+        )
+    return FileResponse(
+        str(mp3), media_type="audio/mpeg",
+        filename=f"narration-job-{job_id}.mp3",
+    )
+
+
+@app.get("/jobs/{job_id}/download/script")
+def download_job_script(
+    job_id: int, request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    script = _safe_job_file(
+        db.get(VideoJob, job_id), "script.txt"
+    )
+    if not script:
+        return RedirectResponse(
+            "/?success=Script not found.", status_code=303
+        )
+    return FileResponse(
+        str(script), media_type="text/plain",
+        filename=f"script-job-{job_id}.txt",
+    )

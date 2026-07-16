@@ -4,26 +4,15 @@ import math
 import httpx
 
 from app.config import settings
+from app.ai_provider import (
+    call_ai, call_gemini, call_ollama, call_together,
+)
+from app.script_validator import validate_script
 
 
 def call_qwen(prompt: str) -> str:
-    response = httpx.post(
-        f"{settings.ollama_url}/api/generate",
-        json={
-            "model": settings.ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "think": False,
-            "options": {
-                "temperature": 0.45,
-                "num_predict": 4096,
-                "num_ctx": 32768,
-            },
-        },
-        timeout=1800,
-    )
-    response.raise_for_status()
-    return response.json()["response"].strip()
+    result = call_ai(prompt, json_mode=False)
+    return result.text
 
 
 def count_words(text: str) -> int:
@@ -119,26 +108,44 @@ def generate_script(title: str, duration_minutes: int, video_style: str) -> dict
     }
 
 
-def call_qwen_json(prompt: str) -> dict:
-    response = httpx.post(
-        f"{settings.ollama_url}/api/generate",
-        json={
-            "model": settings.ollama_model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "think": False,
-            "options": {
-                "temperature": 0.4,
-                "num_predict": 8192,
-                "num_ctx": 32768,
-            },
-        },
-        timeout=1800,
-    )
-    response.raise_for_status()
-    return json.loads(response.json()["response"])
+def _decode_ai_json(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0]
 
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("No JSON object returned.")
+
+    value, _ = json.JSONDecoder().raw_decode(text[start:])
+    return value
+
+
+def call_qwen_json(prompt: str) -> dict:
+    prompt += (
+        "\nReturn only complete valid JSON. "
+        "No Markdown. Keep every field concise."
+    )
+    errors = []
+
+    attempts = [
+        (call_gemini, 3),
+        (call_ollama, 2),
+        (call_together, 1),
+    ]
+
+    for provider, total in attempts:
+        for attempt in range(total):
+            try:
+                result = provider(prompt, json_mode=True)
+                return _decode_ai_json(result.text)
+            except Exception as error:
+                errors.append(
+                    f"{provider.__name__} #{attempt + 1}: {error}"
+                )
+
+    raise ValueError("All JSON attempts failed: " + " | ".join(errors))
 
 def split_script_into_scenes(script: str, duration_minutes: int) -> list[dict]:
     words = script.split()
@@ -164,7 +171,7 @@ def split_script_into_scenes(script: str, duration_minutes: int) -> list[dict]:
 
     return scenes
 
-def enrich_scene_batch(title, video_style, scenes):
+def _enrich_scene_batch_once(title, video_style, scenes):
     prompt = (
         f"Video title: {title}\n"
         f"Style: {video_style}\n"
@@ -227,6 +234,21 @@ def detect_video_style(title, requested_style):
     return result if result in allowed else "documentary"
 
 
+
+def enrich_scene_batch(title, video_style, scenes):
+    enriched = []
+
+    for start in range(0, len(scenes), 6):
+        batch = scenes[start:start + 6]
+        enriched.extend(
+            _enrich_scene_batch_once(
+                title, video_style, batch
+            )
+        )
+
+    return enriched
+
+
 def assign_scene_durations(scenes, total_seconds):
     weights = [
         max(1, len(scene["narration"].split()))
@@ -270,6 +292,24 @@ def generate_video_package(title, duration_minutes, video_style):
         detected_style,
     )
 
+    validation = validate_script(
+        script_result["script"], duration_minutes
+    )
+    if not validation["valid"]:
+        script_result = repair_script(
+            title, duration_minutes, video_style,
+            script_result["script"], validation,
+        )
+        validation = validate_script(
+            script_result["script"], duration_minutes
+        )
+
+        if not validation["valid"]:
+            raise ValueError(
+                "Script failed validation after repair: "
+                + "; ".join(validation["issues"])
+            )
+
     scenes = split_script_into_scenes(
         script_result["script"],
         duration_minutes,
@@ -293,6 +333,34 @@ def generate_video_package(title, duration_minutes, video_style):
         "duration_minutes": duration_minutes,
         "script": script_result["script"],
         "word_count": script_result["word_count"],
+        "script_validation": validation,
         "sections": script_result["sections"],
         "scenes": scenes,
+    }
+
+
+def repair_script(title, minutes, style, original, report):
+    target = minutes * 145
+    prompt = (
+        f"Rewrite this YouTube narration about: {title}\n"
+        f"Style: {style}. Target exactly about {target} words.\n"
+        "Remove all repeated sentences, paragraphs and ideas. "
+        "Use a clear intro, progressive body and strong conclusion.\n"
+        "Return narration only, without headings or notes.\n"
+        f"Validation issues: {report['issues']}\n"
+        f"Original script:\n{original}"
+    )
+    result = call_ai(prompt)
+    text = result.text.strip()
+
+    return {
+        "script": text,
+        "sections": [{
+            "name": "Repaired Script",
+            "narration": text,
+            "word_count": count_words(text),
+        }],
+        "word_count": count_words(text),
+        "target_words": target,
+        "ai_provider": result.provider,
     }

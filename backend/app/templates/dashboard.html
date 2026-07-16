@@ -85,16 +85,18 @@
             <td>{{ job.status }}</td>
             <td>{{ job.progress }}%</td>
             <td>
-              {% if job.status == "completed" %}
-<a class="download-button" href="/jobs/{{ job.id }}/download">
-Download
-</a>
-{% endif %}
-<form method="post" action="/jobs/{{ job.id }}/delete"
-                    onsubmit="return confirm('Permanently delete this job and all generated files?');">
-                <button type="submit" class="danger-button">Delete</button>
-              </form>
-            </td>
+  <div class="job-actions">
+    {% if job.status == "completed" %}
+    <a class="download-button" href="/jobs/{{ job.id }}/download">Video</a>
+    <a class="download-button" href="/jobs/{{ job.id }}/download/narration">Narration</a>
+    <a class="download-button" href="/jobs/{{ job.id }}/download/script">Script</a>
+    {% endif %}
+    <form method="post" action="/jobs/{{ job.id }}/delete"
+      onsubmit="return confirm('Permanently delete this job and all generated files?');">
+      <button type="submit" class="danger-button">Delete</button>
+    </form>
+  </div>
+</td>
           </tr>
           {% else %}
           <tr>

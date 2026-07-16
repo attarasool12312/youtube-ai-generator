@@ -305,3 +305,24 @@ tbody td:last-child form,
 @media(max-width:767px){
   .settings-grid{grid-template-columns:1fr!important}
 }
+
+.job-actions{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  min-width:260px;
+}
+.job-actions form{
+  display:inline-flex;
+  margin:0!important;
+}
+.job-actions .download-button,
+.job-actions .danger-button{
+  margin:0!important;
+  white-space:nowrap;
+}
+
+.job-actions form{
+  margin-top:8px!important;
+}

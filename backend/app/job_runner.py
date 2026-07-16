@@ -12,6 +12,8 @@ from app.video_renderer import render_video
 
 OUTPUT_ROOT = Path("/workspace/youtube-ai-generator/outputs/jobs")
 
+from app.audio_export import create_narration_mp3
+
 def run_job(job_id: int) -> None:
     output_dir = OUTPUT_ROOT / str(job_id)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -73,6 +75,11 @@ def run_job(job_id: int) -> None:
             narrator_voice,
             voice_speed,
             output_dir / "narration.wav",
+        )
+
+        create_narration_mp3(
+            output_dir / "narration.wav",
+            output_dir / "narration.mp3",
         )
 
         package["audio_duration_seconds"] = sync_scenes_to_audio(
