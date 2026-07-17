@@ -94,7 +94,7 @@ def run_job(job_id: int) -> None:
                 job.progress = 80
                 db.commit()
 
-        download_scene_images(
+        package["scenes"] = download_scene_images(
             package["scenes"], output_dir, orientation
         )
 

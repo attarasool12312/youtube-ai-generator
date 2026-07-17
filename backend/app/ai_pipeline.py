@@ -1,5 +1,6 @@
 import json
 import math
+import re
 
 import httpx
 
@@ -7,7 +8,9 @@ from app.config import settings
 from app.ai_provider import (
     call_ai, call_gemini, call_ollama, call_together,
 )
+from app.scene_ai import call_scene_json
 from app.script_validator import validate_script
+from app.script_workflow import create_validated_script
 
 
 def call_qwen(prompt: str) -> str:
@@ -147,27 +150,32 @@ def call_qwen_json(prompt: str) -> dict:
 
     raise ValueError("All JSON attempts failed: " + " | ".join(errors))
 
-def split_script_into_scenes(script: str, duration_minutes: int) -> list[dict]:
-    words = script.split()
-    scene_count = max(8, duration_minutes * 8)
+def split_script_into_scenes(script, duration_minutes):
+    words = script.strip().split()
+    count = min(max(1, duration_minutes * 8), len(words))
+    scenes, start = [], 0
 
-    base_size = len(words) // scene_count
-    remainder = len(words) % scene_count
+    for number in range(1, count):
+        target = round(number * len(words) / count)
+        choices = range(max(start + 4, target - 6),
+                        min(len(words), target + 7))
+        ends = [
+            i for i in choices
+            if words[i - 1].endswith((".", "!", "?", ";", ":"))
+        ]
 
-    scenes = []
-    position = 0
-
-    for index in range(scene_count):
-        size = base_size + (1 if index < remainder else 0)
-        narration = " ".join(words[position:position + size])
-        position += size
+        end = min(ends, key=lambda i: abs(i-target)) \
+            if ends else target
 
         scenes.append({
-            "scene_number": index + 1,
-            "narration": narration,
+            "scene_number": len(scenes) + 1,
+            "narration": " ".join(words[start:end]),
         })
-
-
+        start = end
+    scenes.append({
+        "scene_number": len(scenes) + 1,
+        "narration": " ".join(words[start:]),
+    })
 
     return scenes
 
@@ -183,7 +191,7 @@ def _enrich_scene_batch_once(title, video_style, scenes):
         f"Scenes: {json.dumps(scenes)}"
     )
 
-    result = call_qwen_json(prompt)
+    result = call_scene_json(prompt)
 
     metadata = {
         int(item["scene_number"]): item
@@ -286,29 +294,10 @@ def assign_scene_durations(scenes, total_seconds):
 def generate_video_package(title, duration_minutes, video_style):
     detected_style = detect_video_style(title, video_style)
 
-    script_result = generate_script(
-        title,
-        duration_minutes,
-        detected_style,
+    script_result = create_validated_script(
+        title, duration_minutes, detected_style
     )
-
-    validation = validate_script(
-        script_result["script"], duration_minutes
-    )
-    if not validation["valid"]:
-        script_result = repair_script(
-            title, duration_minutes, video_style,
-            script_result["script"], validation,
-        )
-        validation = validate_script(
-            script_result["script"], duration_minutes
-        )
-
-        if not validation["valid"]:
-            raise ValueError(
-                "Script failed validation after repair: "
-                + "; ".join(validation["issues"])
-            )
+    validation = script_result["validation"]
 
     scenes = split_script_into_scenes(
         script_result["script"],
@@ -332,9 +321,9 @@ def generate_video_package(title, duration_minutes, video_style):
         "detected_style": detected_style,
         "duration_minutes": duration_minutes,
         "script": script_result["script"],
-        "word_count": script_result["word_count"],
+        "word_count": script_result["actual_words"],
         "script_validation": validation,
-        "sections": script_result["sections"],
+        "sections": [],
         "scenes": scenes,
     }
 

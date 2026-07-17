@@ -17,3 +17,4 @@ cache/
 .venv/
 backend/data/
 *.bak
+logs/*.pid

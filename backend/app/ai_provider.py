@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 import time
+import os
 import httpx
 
 from app.api_settings import get_api_key
 from app.config import settings
+from app.gemini_router import generate
 
 GEMINI_MODEL = "gemini-2.5-flash"
 TOGETHER_MODEL = "openai/gpt-oss-120b"
@@ -18,57 +20,20 @@ class AIResult:
 
 
 def call_gemini(prompt, json_mode=False):
-    key = get_api_key("gemini_api_key")
-    if not key:
-        raise RuntimeError("Gemini key is not configured.")
-
-    config = {
-        "temperature": 0.7,
-        "maxOutputTokens": 12000,
-    }
-    if json_mode:
-        config["responseMimeType"] = "application/json"
-
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{GEMINI_MODEL}:generateContent"
+    data = generate(prompt, json_mode)
+    return AIResult(
+        text=data["text"],
+        provider="gemini:" + data["model"],
+        input_tokens=data["input_tokens"],
+        output_tokens=data["output_tokens"],
     )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": config,
-    }
-
-    last_error = "Gemini request failed."
-    for delay in (0, 3, 8):
-        time.sleep(delay)
-        response = httpx.post(
-            url,
-            headers={"x-goog-api-key": key},
-            json=payload,
-            timeout=180,
-        )
-        if response.status_code == 200:
-            data = response.json()
-            parts = data["candidates"][0]["content"]["parts"]
-            text = "".join(x.get("text", "") for x in parts)
-            usage = data.get("usageMetadata", {})
-            return AIResult(
-                text=text.strip(),
-                provider="gemini",
-                input_tokens=usage.get("promptTokenCount", 0),
-                output_tokens=usage.get(
-                    "candidatesTokenCount", 0
-                ),
-            )
-
-        last_error = response.text[:500]
-        if response.status_code not in (429, 500, 502, 503, 504):
-            break
-
-    raise RuntimeError(last_error)
-
 
 def call_together(prompt, json_mode=False):
+    enabled = os.getenv(
+        "ENABLE_TOGETHER_FALLBACK", "true"
+    ).lower() in ("1", "true", "yes")
+    if not enabled:
+        raise RuntimeError("Together fallback disabled.")
     key = get_api_key("together_api_key")
     if not key:
         raise RuntimeError("Together key is not configured.")

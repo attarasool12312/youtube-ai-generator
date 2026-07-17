@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.media_selector import select_media
+from app.ai_media import flux_image
 
 
 def download_scene_images(
@@ -44,6 +45,7 @@ def download_scene_images(
 
             result["scene_number"] = number
             result["query"] = query
+            scene.update(result)
             attributions.append(result)
 
             source = result.get("source")
@@ -51,7 +53,13 @@ def download_scene_images(
                 used_sources.add(source)
                 new_sources.append(source)
         except Exception as error:
-            scene["media_error"] = str(error)
+            print(f"Scene {number} stock failed: {error}")
+            result = flux_image(
+                scene.get("image_prompt") or query,
+                media_dir, number, orientation,
+            )
+            scene.update(result)
+            attributions.append(result)
 
     history_path.parent.mkdir(parents=True, exist_ok=True)
     combined = (history + new_sources)[-1000:]
@@ -67,4 +75,4 @@ def download_scene_images(
 
     report = Path(output_dir) / "attributions.json"
     report.write_text(json.dumps(attributions, indent=2))
-    return attributions
+    return scenes
