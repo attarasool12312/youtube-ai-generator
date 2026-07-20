@@ -59,7 +59,7 @@ def call_together(prompt, json_mode=False):
 
     return AIResult(
         text=data["choices"][0]["message"]["content"].strip(),
-        provider="together",
+        provider=f"together:{TOGETHER_MODEL}",
         input_tokens=usage.get("prompt_tokens", 0),
         output_tokens=usage.get("completion_tokens", 0),
     )
@@ -84,7 +84,7 @@ def call_ollama(prompt, json_mode=False):
 
     return AIResult(
         text=data.get("response", "").strip(),
-        provider="ollama",
+        provider=f"ollama:{settings.ollama_model}",
         input_tokens=data.get("prompt_eval_count", 0),
         output_tokens=data.get("eval_count", 0),
     )

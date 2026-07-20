@@ -1,8 +1,9 @@
 import os
+from app.paths import HF_HOME
 from pathlib import Path
 
-os.environ.setdefault("HF_HOME", "/workspace/models/huggingface")
-os.environ.setdefault("XDG_CACHE_HOME", "/workspace/cache/kokoro")
+os.environ.setdefault("HF_HOME", str(HF_HOME))
+os.environ.setdefault("XDG_CACHE_HOME", "/home/ubuntu/cache/kokoro")
 
 import numpy as np
 import soundfile as sf

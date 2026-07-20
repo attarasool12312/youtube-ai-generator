@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.media_selector import select_media
 from app.ai_media import flux_image
+from app.paths import DATA_ROOT
 
 
 def download_scene_images(
@@ -11,10 +12,7 @@ def download_scene_images(
     media_dir = Path(output_dir) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     attributions = []
-    history_path = Path(
-        "/workspace/youtube-ai-generator/"
-        "backend/data/media_history.json"
-    )
+    history_path = DATA_ROOT / "media_history.json"
 
     try:
         history = json.loads(history_path.read_text())
@@ -67,11 +65,6 @@ def download_scene_images(
         json.dumps(combined, indent=2)
     )
 
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-    combined = (history + new_sources)[-1000:]
-    history_path.write_text(
-        json.dumps(combined, indent=2)
-    )
 
     report = Path(output_dir) / "attributions.json"
     report.write_text(json.dumps(attributions, indent=2))

@@ -46,6 +46,8 @@ def try_providers(
                 used_sources=used_sources,
                 offset=(number * 3) + index,
             )
+            if not result:
+                continue
             result["media_file"] = str(path)
 
             source = result.get("source")
@@ -53,7 +55,8 @@ def try_providers(
                 used_sources.add(source)
 
             return result
-        except Exception:
+        except Exception as error:
+            print(f"{provider.__name__} failed: {error}")
             continue
 
     return None
@@ -112,3 +115,5 @@ def select_media(
     )
     if result:
         return result
+
+    raise RuntimeError("All stock media providers failed.")

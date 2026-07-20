@@ -3,11 +3,9 @@ import shutil
 import signal
 import time
 from pathlib import Path
+from app.paths import OUTPUT_ROOT
 
-OUTPUT_ROOT = Path(
-    "/workspace/youtube-ai-generator/outputs/jobs"
-).resolve()
-
+OUTPUT_ROOT = OUTPUT_ROOT.resolve()
 
 def cleanup_job_files(worker_pid=None, output_directory=None):
     if worker_pid and worker_pid > 1:

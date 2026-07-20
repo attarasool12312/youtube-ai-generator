@@ -1,9 +1,10 @@
 from pathlib import Path
+from app.paths import FLUX_MODEL_PATH
 import gc
 import torch
 from diffusers import FluxPipeline
 
-MODEL_PATH = Path("/workspace/models/flux1-schnell")
+MODEL_PATH = FLUX_MODEL_PATH
 _PIPELINE = None
 
 SIZES = {

@@ -239,6 +239,9 @@ def openverse_image(query, output_path, orientation, used_sources=None, offset=0
             continue
         width = item.get("width") or 0
         height = item.get("height") or 0
+        license_slug = str(item.get("license") or "").strip().lower()
+        if license_slug not in {"cc0", "pdm", "by"}:
+            continue
         if not item.get("url"):
             continue
         if not orientation_ok(width, height, orientation):

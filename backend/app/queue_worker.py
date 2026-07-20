@@ -6,7 +6,10 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import VideoJob
 
-PROJECT_ROOT = Path("/workspace/youtube-ai-generator")
+PROJECT_ROOT = Path(os.getenv(
+    "YOUTUBE_AI_PROJECT_ROOT",
+    str(Path(__file__).resolve().parents[2]),
+)).resolve()
 PID_FILE = PROJECT_ROOT / "backend/data/queue_worker.pid"
 LOG_DIR = PROJECT_ROOT / "logs"
 
@@ -48,10 +51,12 @@ def process_job(job_id):
 
     with SessionLocal() as db:
         job = db.get(VideoJob, job_id)
-        if job and return_code != 0:
-            job.status = "failed"
-            job.error_message = f"Worker exited: {return_code}"
+        if job:
             job.worker_pid = None
+            if return_code != 0:
+                job.status = "failed"
+                if not job.error_message:
+                    job.error_message = f"Worker exited: {return_code}"
             db.commit()
 
 

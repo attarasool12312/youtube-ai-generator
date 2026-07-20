@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.paths import OUTPUT_ROOT
 from app.config import settings
 from app.database import get_db
 from app.models import User, VideoJob
@@ -17,12 +19,17 @@ from app.api_settings import has_api_key, save_api_key
 from app.audio_export import create_narration_mp3
 from app.security import verify_password
 
-app = FastAPI(title=settings.app_name)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_queue_worker()
+    yield
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     max_age=settings.session_days * 86400,
-    https_only=True,
+    https_only=settings.app_url.lower().startswith("https://"),
     same_site="lax",
 )
 
@@ -185,7 +192,7 @@ def download_job_video(
     if not job or not job.output_directory:
         return RedirectResponse("/?success=Video not found.", status_code=303)
 
-    root = Path("/workspace/youtube-ai-generator/outputs/jobs").resolve()
+    root = OUTPUT_ROOT.resolve()
     video = (Path(job.output_directory) / "final-video.mp4").resolve()
 
     if not video.is_file() or root not in video.parents:
@@ -251,7 +258,7 @@ def save_api_settings(
 def _safe_job_file(job, filename):
     if not job or not job.output_directory:
         return None
-    root = Path("/workspace/youtube-ai-generator/outputs/jobs").resolve()
+    root = OUTPUT_ROOT.resolve()
     path = (Path(job.output_directory) / filename).resolve()
     if root not in path.parents or not path.is_file():
         return None

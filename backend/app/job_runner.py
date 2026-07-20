@@ -9,8 +9,7 @@ from app.models import VideoJob
 from app.kokoro_service import generate_narration
 from app.scene_media import download_scene_images
 from app.video_renderer import render_video
-
-OUTPUT_ROOT = Path("/workspace/youtube-ai-generator/outputs/jobs")
+from app.paths import OUTPUT_ROOT
 
 from app.audio_export import create_narration_mp3
 
@@ -32,7 +31,6 @@ def run_job(job_id: int) -> None:
         duration_minutes = job.duration_minutes
         video_style = job.video_style
         orientation = job.orientation or 'landscape'
-        orientation = job.orientation or 'landscape'
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         db.commit()
@@ -48,14 +46,6 @@ def run_job(job_id: int) -> None:
         (output_dir / "script.txt").write_text(
             package["script"], encoding="utf-8"
         )
-        (output_dir / "scenes.json").write_text(
-            json.dumps(package["scenes"], indent=2), encoding="utf-8"
-        )
-
-        (output_dir / "package.json").write_text(
-            json.dumps(package, indent=2), encoding="utf-8"
-        )
-
         (output_dir / "scenes.json").write_text(
             json.dumps(package["scenes"], indent=2), encoding="utf-8"
         )
@@ -113,20 +103,13 @@ def run_job(job_id: int) -> None:
         )
 
         (output_dir / "scenes.json").write_text(
-            json.dumps(package["scenes"], indent=2), encoding="utf-8"
+            json.dumps(package["scenes"], indent=2),
+            encoding="utf-8",
         )
         (output_dir / "package.json").write_text(
-            json.dumps(package, indent=2), encoding="utf-8"
+            json.dumps(package, indent=2),
+            encoding="utf-8",
         )
-        # final-package-saved
-
-        (output_dir / "scenes.json").write_text(
-            json.dumps(package["scenes"], indent=2), encoding="utf-8"
-        )
-        (output_dir / "package.json").write_text(
-            json.dumps(package, indent=2), encoding="utf-8"
-        )
-        # timing-files-saved
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)

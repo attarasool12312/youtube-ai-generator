@@ -32,7 +32,7 @@ def first_success(prompt, providers):
             result = provider(prompt, json_mode=False)
             text = clean_script(result.text)
             if text:
-                return text, name
+                return text, result.provider
         except Exception as error:
             errors.append(f"{name}: {error}")
 

@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
 aiosmtplib==5.1.2
 annotated-doc==0.0.4
 annotated-types==0.7.0
@@ -40,3 +41,11 @@ uvicorn==0.51.0
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.1
+
+torch==2.7.1+cu128
+kokoro==0.9.4
+soundfile==0.14.0
+diffusers==0.39.0
+accelerate==1.14.0
+sentencepiece==0.2.2
+protobuf==7.35.1

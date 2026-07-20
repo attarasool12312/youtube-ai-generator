@@ -298,6 +298,8 @@ def generate_video_package(title, duration_minutes, video_style):
         title, duration_minutes, detected_style
     )
     validation = script_result["validation"]
+    print("SCRIPT_INITIAL_PROVIDER:", script_result["initial_provider"], flush=True)
+    print("SCRIPT_REPAIR_PROVIDERS:", script_result["repair_providers"] or ["none"], flush=True)
 
     scenes = split_script_into_scenes(
         script_result["script"],
@@ -322,6 +324,8 @@ def generate_video_package(title, duration_minutes, video_style):
         "duration_minutes": duration_minutes,
         "script": script_result["script"],
         "word_count": script_result["actual_words"],
+        "script_initial_provider": script_result["initial_provider"],
+        "script_repair_providers": script_result["repair_providers"],
         "script_validation": validation,
         "sections": [],
         "scenes": scenes,

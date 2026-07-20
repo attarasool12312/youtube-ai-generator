@@ -2,7 +2,10 @@ import os
 import subprocess
 from pathlib import Path
 
-PROJECT_ROOT = Path("/workspace/youtube-ai-generator")
+PROJECT_ROOT = Path(os.getenv(
+    "YOUTUBE_AI_PROJECT_ROOT",
+    str(Path(__file__).resolve().parents[2]),
+)).resolve()
 PID_FILE = PROJECT_ROOT / "backend/data/queue_worker.pid"
 LOG_FILE = PROJECT_ROOT / "logs/queue_worker.log"
 
