@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-trap 'echo "Installation failed near line $LINENO."' ERR
+trap 'echo "Installation failed near line $LINENO." >&2' ERR
 
 log() {
     echo
@@ -13,59 +13,177 @@ fail() {
     exit 1
 }
 
+if [[ "$EUID" -ne 0 ]]; then
+    exec sudo -E bash "$0" "$@"
+fi
+
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CURRENT_USER="${SUDO_USER:-$USER}"
-CURRENT_HOME="$(getent passwd "$CURRENT_USER" | cut -d: -f6)"
+PROJECT_OWNER="$(stat -c '%U' "$PROJECT_ROOT")"
+
+if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    APP_USER="$SUDO_USER"
+elif [[ "$PROJECT_OWNER" != "root" ]]; then
+    APP_USER="$PROJECT_OWNER"
+elif id ubuntu >/dev/null 2>&1; then
+    APP_USER="ubuntu"
+else
+    APP_USER="root"
+fi
+
+APP_GROUP="$(id -gn "$APP_USER")"
+APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+
 MODEL_ROOT="${YOUTUBE_AI_MODEL_ROOT:-$(dirname "$PROJECT_ROOT")/models}"
 VENV="$PROJECT_ROOT/.venv"
 PYTHON="$VENV/bin/python"
 PIP="$VENV/bin/pip"
+
+SERVICE_NAME="youtube-ai-generator"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 OLLAMA_MODEL="qwen3:14b"
 
-log "Checking sudo -n access"
-sudo -n true || fail "Passwordless sudo -n is required."
+RECOVERY_ARCHIVE="$PROJECT_ROOT/recovery/runtime-state.tar.gz"
+RECOVERY_CHECKSUM="$PROJECT_ROOT/recovery/runtime-state.sha256"
+
+GENERATED_ADMIN_PASSWORD=""
+RECOVERY_RESTORED="false"
+
+run_as_user() {
+    if [[ "$APP_USER" == "root" ]]; then
+        "$@"
+    else
+        sudo -u "$APP_USER" -H "$@"
+    fi
+}
+
+restore_recovery_state() {
+    if [[ ! -f "$RECOVERY_ARCHIVE" ]]; then
+        log "Recovery archive not found; using fresh-install mode"
+        return
+    fi
+
+    [[ -f "$RECOVERY_CHECKSUM" ]] || \
+        fail "Recovery checksum file is missing."
+
+    log "Verifying disaster-recovery archive"
+
+    (
+        cd "$PROJECT_ROOT"
+        sha256sum -c recovery/runtime-state.sha256
+    )
+
+    local recovery_tmp
+    recovery_tmp="$(mktemp -d)"
+
+    tar -xzf "$RECOVERY_ARCHIVE" -C "$recovery_tmp"
+
+    [[ -f "$recovery_tmp/.env" ]] || \
+        fail "Recovery archive does not contain .env."
+
+    [[ -f "$recovery_tmp/backend/data/app.db" ]] || \
+        fail "Recovery archive does not contain the database."
+
+    mkdir -p "$PROJECT_ROOT/backend/data"
+
+    install -o "$APP_USER" -g "$APP_GROUP" -m 600 \
+        "$recovery_tmp/.env" \
+        "$PROJECT_ROOT/.env"
+
+    install -o "$APP_USER" -g "$APP_GROUP" -m 600 \
+        "$recovery_tmp/backend/data/app.db" \
+        "$PROJECT_ROOT/backend/data/app.db"
+
+    if [[ -s "$recovery_tmp/huggingface/token" ]]; then
+        mkdir -p "$APP_HOME/.cache/huggingface"
+
+        install -o "$APP_USER" -g "$APP_GROUP" -m 600 \
+            "$recovery_tmp/huggingface/token" \
+            "$APP_HOME/.cache/huggingface/token"
+    fi
+
+    rm -rf "$recovery_tmp"
+
+    RECOVERY_RESTORED="true"
+    log "Environment, database and saved credentials restored"
+}
+
+restore_recovery_state
 
 log "Installing Ubuntu system dependencies"
-sudo -n apt-get update
-sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ca-certificates curl git ffmpeg espeak-ng redis-server \
-    python3 python3-venv python3-pip python3-dev build-essential \
-    libsndfile1 libffi-dev libssl-dev pkg-config sqlite3 unzip
 
-command -v nvidia-smi >/dev/null || \
-    fail "NVIDIA driver/GPU was not detected."
+apt-get update
+
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ca-certificates \
+    curl \
+    git \
+    ffmpeg \
+    espeak-ng \
+    redis-server \
+    python3 \
+    python3-venv \
+    python3-pip \
+    python3-dev \
+    build-essential \
+    libsndfile1 \
+    libffi-dev \
+    libssl-dev \
+    pkg-config \
+    sqlite3 \
+    unzip
+
+command -v nvidia-smi >/dev/null 2>&1 || \
+    fail "NVIDIA driver or GPU was not detected."
 
 log "GPU detected"
-nvidia-smi --query-gpu=name,memory.total \
+
+nvidia-smi \
+    --query-gpu=name,memory.total,driver_version \
     --format=csv,noheader
 
 log "Creating project directories"
+
 mkdir -p \
     "$MODEL_ROOT/huggingface" \
     "$PROJECT_ROOT/backend/data" \
     "$PROJECT_ROOT/outputs/jobs" \
     "$PROJECT_ROOT/logs"
 
-log "Creating Python virtual environment"
-/usr/bin/python3 -m venv "$VENV"
-"$PIP" install --upgrade pip setuptools wheel
-"$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
-"$PIP" check
+chown -R "$APP_USER:$APP_GROUP" \
+    "$PROJECT_ROOT" \
+    "$MODEL_ROOT"
+
+log "Preparing Python virtual environment"
+
+if [[ ! -x "$PYTHON" ]]; then
+    run_as_user /usr/bin/python3 -m venv "$VENV"
+fi
+
+run_as_user "$PIP" install --upgrade pip setuptools wheel
+run_as_user "$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
+run_as_user "$PIP" check
 
 log "Starting Redis"
-sudo -n systemctl enable --now redis-server
-redis-cli ping | grep -q PONG || fail "Redis did not start."
 
-if ! command -v ollama >/dev/null; then
+systemctl enable --now redis-server
+
+redis-cli ping | grep -q PONG || \
+    fail "Redis did not start."
+
+if ! command -v ollama >/dev/null 2>&1; then
     log "Installing Ollama"
     curl -fsSL https://ollama.com/install.sh | sh
 fi
 
 log "Starting Ollama"
-sudo -n systemctl enable --now ollama
 
-for _ in $(seq 1 30); do
-    curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
+systemctl enable --now ollama
+
+for _ in $(seq 1 60); do
+    if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+        break
+    fi
+
     sleep 2
 done
 
@@ -73,45 +191,48 @@ curl -fsS http://127.0.0.1:11434/api/tags >/dev/null || \
     fail "Ollama did not start."
 
 log "Downloading Ollama model: $OLLAMA_MODEL"
-ollama pull "$OLLAMA_MODEL"
 
-log "Preparing application environment"
+run_as_user ollama pull "$OLLAMA_MODEL"
+
 ENV_FILE="$PROJECT_ROOT/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-    read -rp "Admin username [admin]: " ADMIN_USERNAME
-    ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+    log "Creating secure fresh-install environment"
 
-    read -rp "Admin email: " ADMIN_EMAIL
-    [[ -n "$ADMIN_EMAIL" ]] || fail "Admin email is required."
+    GENERATED_ADMIN_PASSWORD="$(
+        "$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(18))'
+    )"
 
-    read -rsp "Admin password (minimum 8 characters): " ADMIN_PASSWORD
-    echo
-    [[ ${#ADMIN_PASSWORD} -ge 8 ]] || fail "Password is too short."
+    SECRET_KEY="$(
+        "$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(48))'
+    )"
 
-    read -rp "App URL [http://127.0.0.1:8000]: " APP_URL
-    APP_URL="${APP_URL:-http://127.0.0.1:8000}"
+    FERNET_KEY="$(
+        "$PYTHON" -c \
+        'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+    )"
 
-    SECRET_KEY="$("$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(48))')"
-    FERNET_KEY="$("$PYTHON" -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+    export PROJECT_ROOT
+    export GENERATED_ADMIN_PASSWORD
+    export SECRET_KEY
+    export FERNET_KEY
+    export OLLAMA_MODEL
 
-    export PROJECT_ROOT ADMIN_USERNAME ADMIN_EMAIL ADMIN_PASSWORD
-    export APP_URL SECRET_KEY FERNET_KEY OLLAMA_MODEL
-
-    "$PYTHON" - <<'PY'
+    "$PYTHON" - <<'PYENV'
 import json
 import os
 from pathlib import Path
 
 root = Path(os.environ["PROJECT_ROOT"])
+
 values = {
     "APP_NAME": "YouTube AI Video Generator",
-    "APP_URL": os.environ["APP_URL"],
+    "APP_URL": "http://127.0.0.1:8000",
     "SECRET_KEY": os.environ["SECRET_KEY"],
     "SETTINGS_ENCRYPTION_KEY": os.environ["FERNET_KEY"],
-    "ADMIN_USERNAME": os.environ["ADMIN_USERNAME"],
-    "ADMIN_EMAIL": os.environ["ADMIN_EMAIL"],
-    "INITIAL_ADMIN_PASSWORD": os.environ["ADMIN_PASSWORD"],
+    "ADMIN_USERNAME": "admin",
+    "ADMIN_EMAIL": "admin@localhost.local",
+    "INITIAL_ADMIN_PASSWORD": os.environ["GENERATED_ADMIN_PASSWORD"],
     "SMTP_HOST": "",
     "SMTP_PORT": "587",
     "SMTP_USERNAME": "",
@@ -134,60 +255,116 @@ content = "\n".join(
     f"{key}={json.dumps(value)}"
     for key, value in values.items()
 )
-(root / ".env").write_text(content + "\n")
-PY
 
+(root / ".env").write_text(content + "\n")
+PYENV
+
+    chown "$APP_USER:$APP_GROUP" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
-    unset ADMIN_PASSWORD
 else
-    log "Existing .env preserved"
+    log "Existing or recovered .env preserved"
 fi
 
-log "Initializing database and administrator"
-YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
-YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
-PYTHONPATH="$PROJECT_ROOT/backend" \
-"$PYTHON" -m app.init_db
+log "Updating portable database path"
 
-ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PY'
+PROJECT_ROOT="$PROJECT_ROOT" \
+ENV_FILE="$ENV_FILE" \
+"$PYTHON" - <<'PYDB'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["ENV_FILE"])
+root = Path(os.environ["PROJECT_ROOT"])
+database_url = f"sqlite:///{root}/backend/data/app.db"
+
+lines = path.read_text().splitlines()
+updated = []
+found = False
+
+for line in lines:
+    if line.startswith("DATABASE_URL="):
+        updated.append(f"DATABASE_URL={json.dumps(database_url)}")
+        found = True
+    else:
+        updated.append(line)
+
+if not found:
+    updated.append(f"DATABASE_URL={json.dumps(database_url)}")
+
+path.write_text("\n".join(updated) + "\n")
+PYDB
+
+chown "$APP_USER:$APP_GROUP" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+log "Initializing database and administrator"
+
+run_as_user env \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    "$PYTHON" -m app.init_db
+
+chown "$APP_USER:$APP_GROUP" \
+    "$PROJECT_ROOT/backend/data/app.db"
+
+ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PYCLEAR'
 import os
 from pathlib import Path
 
 path = Path(os.environ["ENV_FILE"])
 lines = path.read_text().splitlines()
+
 lines = [
     'INITIAL_ADMIN_PASSWORD=""'
     if line.startswith("INITIAL_ADMIN_PASSWORD=")
     else line
     for line in lines
 ]
-path.write_text("\n".join(lines) + "\n")
-PY
 
-log "Preparing FLUX.1-schnell"
+path.write_text("\n".join(lines) + "\n")
+PYCLEAR
+
+chown "$APP_USER:$APP_GROUP" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
 FLUX_DIR="$MODEL_ROOT/flux1-schnell"
+HF_TOKEN_FILE="$APP_HOME/.cache/huggingface/token"
 
 if [[ ! -f "$FLUX_DIR/model_index.json" ]]; then
-    echo "Accept model access in your browser when requested."
-    echo "Model page: https://huggingface.co/black-forest-labs/FLUX.1-schnell"
+    [[ -s "$HF_TOKEN_FILE" ]] || \
+        fail "Hugging Face token is missing from the recovery backup."
 
-    "$VENV/bin/hf" auth login --force
+    log "Downloading FLUX.1-schnell"
 
-    MODEL_ROOT="$MODEL_ROOT" "$PYTHON" - <<'PY'
+    run_as_user env \
+        MODEL_ROOT="$MODEL_ROOT" \
+        HF_TOKEN_FILE="$HF_TOKEN_FILE" \
+        HF_HOME="$MODEL_ROOT/huggingface" \
+        "$PYTHON" - <<'PYFLUX'
 import os
 from pathlib import Path
 from huggingface_hub import snapshot_download
 
-target = Path(os.environ["MODEL_ROOT"]) / "flux1-schnell"
+model_root = Path(os.environ["MODEL_ROOT"])
+token_file = Path(os.environ["HF_TOKEN_FILE"])
+target = model_root / "flux1-schnell"
+
+token = token_file.read_text().strip()
+
+if not token:
+    raise SystemExit("Hugging Face token file is empty.")
+
 target.mkdir(parents=True, exist_ok=True)
 
 snapshot_download(
     repo_id="black-forest-labs/FLUX.1-schnell",
     local_dir=str(target),
-    token=True,
+    token=token,
     max_workers=4,
 )
-PY
+PYFLUX
 else
     log "Existing FLUX model preserved"
 fi
@@ -196,11 +373,8 @@ fi
     fail "FLUX model download is incomplete."
 
 log "Installing permanent dashboard service"
-SERVICE_NAME="youtube-ai-generator"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-CURRENT_GROUP="$(id -gn "$CURRENT_USER")"
 
-sudo -n tee "$SERVICE_FILE" >/dev/null <<SERVICE
+cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=YouTube AI Video Generator
 After=network-online.target redis-server.service ollama.service
@@ -208,8 +382,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$CURRENT_USER
-Group=$CURRENT_GROUP
+User=$APP_USER
+Group=$APP_GROUP
 WorkingDirectory=$PROJECT_ROOT
 Environment=PYTHONPATH=$PROJECT_ROOT/backend
 Environment=YOUTUBE_AI_PROJECT_ROOT=$PROJECT_ROOT
@@ -222,90 +396,71 @@ RestartSec=5
 WantedBy=multi-user.target
 SERVICE
 
-sudo -n systemctl daemon-reload
-sudo -n systemctl enable --now "$SERVICE_NAME"
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+systemctl restart "$SERVICE_NAME"
 
 log "Checking dashboard"
-for _ in $(seq 1 60); do
-    curl -fsS http://127.0.0.1:8000/health >/dev/null && break
+
+for _ in $(seq 1 90); do
+    if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+        break
+    fi
+
     sleep 2
 done
 
 curl -fsS http://127.0.0.1:8000/health >/dev/null || {
-    sudo -n journalctl -u "$SERVICE_NAME" -n 60 --no-pager
+    journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true
     fail "Dashboard service failed."
 }
 
-echo "Dashboard service is ready."
+log "Running final checks"
 
-read -rp "Configure a permanent Cloudflare Tunnel? [y/N]: " SETUP_TUNNEL
-if [[ "${SETUP_TUNNEL,,}" == "y" ]]; then
-    if ! command -v cloudflared >/dev/null; then
-        log "Installing cloudflared"
-        ARCH="$(dpkg --print-architecture)"
-        [[ "$ARCH" == "i386" ]] && ARCH="386"
-        curl -fL \
-          "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}.deb" \
-          -o /tmp/cloudflared.deb
-        sudo -n dpkg -i /tmp/cloudflared.deb || sudo -n apt-get -f install -y
-    fi
+curl -fsS http://127.0.0.1:8000/health
+echo
 
-    echo
-    echo "In Cloudflare: Networking > Tunnels > Create tunnel."
-    echo "Add a Published Application using: http://localhost:8000"
-    echo "Then copy only the generated tunnel token."
+redis-cli ping
 
-    if systemctl list-unit-files cloudflared.service \
-        --no-legend 2>/dev/null | grep -q cloudflared; then
-        log "Existing cloudflared service preserved"
-    else
-        read -rsp "Cloudflare tunnel token: " TUNNEL_TOKEN
-        echo
-        [[ -n "$TUNNEL_TOKEN" ]] || fail "Tunnel token is required."
-        sudo -n cloudflared service install "$TUNNEL_TOKEN"
-        unset TUNNEL_TOKEN
-    fi
+ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
+    fail "Ollama model is missing."
 
-    read -rp "Public URL, for example https://video.example.com: " PUBLIC_URL
-    [[ "$PUBLIC_URL" == https://* ]] || \
-        fail "Public URL must start with https://"
-
-    PUBLIC_URL="$PUBLIC_URL" ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PYURL'
+APP_URL_DISPLAY="$(
+    ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PYURL'
 import json
 import os
 from pathlib import Path
 
 path = Path(os.environ["ENV_FILE"])
-url = os.environ["PUBLIC_URL"]
-lines = path.read_text().splitlines()
-updated = []
-found = False
 
-for line in lines:
+for line in path.read_text().splitlines():
     if line.startswith("APP_URL="):
-        updated.append(f"APP_URL={json.dumps(url)}")
-        found = True
-    else:
-        updated.append(line)
+        raw = line.split("=", 1)[1]
 
-if not found:
-    updated.append(f"APP_URL={json.dumps(url)}")
+        try:
+            print(json.loads(raw))
+        except Exception:
+            print(raw.strip().strip('"'))
 
-path.write_text("\n".join(updated) + "\n")
+        break
+else:
+    print("http://127.0.0.1:8000")
 PYURL
-
-    sudo -n systemctl enable --now cloudflared
-    sudo -n systemctl restart "$SERVICE_NAME"
-    echo "Live dashboard: $PUBLIC_URL"
-fi
-
-log "Running final checks"
-curl -fsS http://127.0.0.1:8000/health
-redis-cli ping
-ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
-    fail "Ollama model is missing."
+)"
 
 echo
-echo "Installation completed successfully."
-echo "Local dashboard: http://127.0.0.1:8000"
-echo "API keys can now be entered from the dashboard Settings page."
+echo "INSTALLATION_COMPLETE"
+echo "Dashboard: $APP_URL_DISPLAY"
+echo "Service: $SERVICE_NAME"
+echo "Application user: $APP_USER"
+
+if [[ "$RECOVERY_RESTORED" == "true" ]]; then
+    echo "Environment and database restored from GitHub recovery backup."
+fi
+
+if [[ -n "$GENERATED_ADMIN_PASSWORD" ]]; then
+    echo
+    echo "Fresh administrator username: admin"
+    echo "Fresh administrator password: $GENERATED_ADMIN_PASSWORD"
+    echo "Save this password now. It will not be shown again."
+fi
