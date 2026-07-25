@@ -49,3 +49,4 @@ diffusers==0.39.0
 accelerate==1.14.0
 sentencepiece==0.2.2
 protobuf==7.35.1
+cryptography
