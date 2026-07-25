@@ -10,7 +10,7 @@ from app.kokoro_service import generate_narration
 from app.scene_media import download_scene_images
 from app.video_renderer import render_video
 from app.paths import OUTPUT_ROOT
-
+from app.captions import generate_captions
 from app.audio_export import create_narration_mp3
 
 def run_job(job_id: int) -> None:
@@ -75,6 +75,11 @@ def run_job(job_id: int) -> None:
         package["audio_duration_seconds"] = sync_scenes_to_audio(
             package["scenes"],
             output_dir / "narration.wav",
+        )
+
+        package["captions"] = generate_captions(
+           package["scenes"],
+           output_dir,
         )
 
         with SessionLocal() as db:
