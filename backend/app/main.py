@@ -2,7 +2,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -198,10 +198,18 @@ def download_job_video(
     if not video.is_file() or root not in video.parents:
         return RedirectResponse("/?success=Video not found.", status_code=303)
 
-    return FileResponse(
-        str(video),
+    def iterfile():
+        with open(video, "rb") as file:
+            while chunk := file.read(1024 * 1024):
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
         media_type="video/mp4",
-        filename=f"video-job-{job.id}.mp4",
+        headers={
+            "Content-Disposition": f'attachment; filename="video-job-{job.id}.mp4"',
+            "Content-Length": str(video.stat().st_size),
+        },
     )
 
 
