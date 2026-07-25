@@ -14,8 +14,12 @@ def run(command):
 
 
 def render_video(
-    scenes, narration, output_path,
+    scenes,
+    narration,
+    output_path,
     orientation="landscape",
+    captions_file=None,
+    burn_captions=False,
 ):
     sizes = {
         "landscape": (1920, 1080),
@@ -75,15 +79,35 @@ def render_video(
     timeline_file = output_path.parent / "timeline.txt"
     timeline_file.write_text("\n".join(timeline))
 
+    video_filter = []
+
+    if burn_captions and captions_file:
+        video_filter = [
+            "-vf",
+            (
+                f"subtitles={captions_file}:"
+                "force_style='FontSize=18,"
+                "Outline=2,"
+                "MarginV=60,"
+                "Alignment=2'"
+            ),
+        ]
+
     run([
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(timeline_file),
         "-i", str(narration),
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        *video_filter,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "22",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
         str(output_path),
     ])
 

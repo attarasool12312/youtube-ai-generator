@@ -105,6 +105,8 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.wav",
             output_dir / "final-video.mp4",
             orientation,
+            captions_file=package["captions"]["srt"],
+            burn_captions=False,
         )
 
         (output_dir / "scenes.json").write_text(
