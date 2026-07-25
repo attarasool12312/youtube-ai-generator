@@ -91,8 +91,8 @@ def render_video(
                 f"force_style='FontSize={caption_font_size},"
                 "Outline=2,"
                 "BackColour=&H80000000,"
-                "MarginV=60,"
-                "Alignment=2'"
+                f"MarginV={'60' if caption_position == 'bottom' else '400' if caption_position == 'middle' else '700'},"
+                f"Alignment={'2' if caption_position == 'bottom' else '5' if caption_position == 'middle' else '8'}'"
             ),
         ]
 
