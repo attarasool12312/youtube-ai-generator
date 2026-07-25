@@ -22,9 +22,27 @@ FFmpeg Video Rendering
 ↓  
 Final MP4 Output
 
+## Private GitHub Repository Access
+
+This repository is private.
+
+Before installing on a new VM, GitHub access is required to clone the repository.
+
+Use a GitHub Personal Access Token (PAT):
+
+git clone -b openrelay-setup https://YOUR_GITHUB_USERNAME:YOUR_GITHUB_TOKEN@github.com/attarasool12312/youtube-ai-generator.git
+
+cd youtube-ai-generator
+
+GitHub credentials are only required for the initial repository download.
+
+They are not stored in:
+
+- Recovery backups
+- Database
+- Environment files
 
 ## Fresh VM Setup
-
 ### Requirements
 
 - Ubuntu 24.04
