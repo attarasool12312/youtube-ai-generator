@@ -20,6 +20,8 @@ def render_video(
     orientation="landscape",
     captions_file=None,
     burn_captions=False,
+    caption_font_size=18,
+    caption_position="bottom",
 ):
     sizes = {
         "landscape": (1920, 1080),
@@ -86,8 +88,9 @@ def render_video(
             "-vf",
             (
                 f"subtitles={captions_file}:"
-                "force_style='FontSize=18,"
+                f"force_style='FontSize={caption_font_size},"
                 "Outline=2,"
+                "BackColour=&H80000000,"
                 "MarginV=60,"
                 "Alignment=2'"
             ),

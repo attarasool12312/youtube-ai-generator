@@ -33,6 +33,9 @@ def run_job(job_id: int) -> None:
         orientation = job.orientation or 'landscape'
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
+        burn_captions = job.burn_captions
+        caption_font_size = job.caption_font_size
+        caption_position = job.caption_position
         db.commit()
 
     try:
@@ -106,7 +109,9 @@ def run_job(job_id: int) -> None:
             output_dir / "final-video.mp4",
             orientation,
             captions_file=package["captions"]["srt"],
-            burn_captions=False,
+            burn_captions=burn_captions,
+            caption_font_size=caption_font_size,
+            caption_position=caption_position,
         )
 
         (output_dir / "scenes.json").write_text(
