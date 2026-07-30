@@ -47,6 +47,8 @@ def validate_script(text, duration_minutes):
     word_count = len(get_words(text))
     duplicates = find_duplicate_sentences(text)
     phrase_ratio = repeated_phrase_ratio(text)
+    ending = " ".join(text.strip().split()[-140:])
+    ending_lower = ending.lower()
     issues = []
 
     if not target * 0.90 <= word_count <= target * 1.10:
@@ -61,6 +63,23 @@ def validate_script(text, duration_minutes):
         issues.append(
             f"Repeated phrase ratio is {phrase_ratio:.1%}."
         )
+
+    if "?" not in ending:
+        issues.append(
+            "Ending is missing a topic-related viewer question."
+        )
+    if not any(phrase in ending_lower for phrase in (
+        "comment", "comments", "let us know", "let me know",
+        "tell us", "share your thoughts", "leave your thoughts",
+        "drop your answer",
+    )):
+        issues.append(
+            "Ending is missing a natural invitation to comment."
+        )
+    if not re.search(r"\b(?:like|liked)\b", ending_lower):
+        issues.append("Ending is missing a natural like CTA.")
+    if not re.search(r"\bsubscrib(?:e|es|ed|ing)\b", ending_lower):
+        issues.append("Ending is missing a natural subscribe CTA.")
 
     return {
         "valid": not issues,

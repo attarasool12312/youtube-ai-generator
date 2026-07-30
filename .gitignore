@@ -18,3 +18,4 @@ cache/
 backend/data/
 *.bak
 logs/*.pid
+backend/app/static/voice-previews/*.mp3

@@ -10,7 +10,7 @@ from app.kokoro_service import generate_narration
 from app.scene_media import download_scene_images
 from app.video_renderer import render_video
 from app.paths import OUTPUT_ROOT
-from app.captions import generate_captions
+
 from app.audio_export import create_narration_mp3
 
 def run_job(job_id: int) -> None:
@@ -33,9 +33,6 @@ def run_job(job_id: int) -> None:
         orientation = job.orientation or 'landscape'
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
-        burn_captions = job.burn_captions
-        caption_font_size = job.caption_font_size
-        caption_position = job.caption_position
         db.commit()
 
     try:
@@ -80,11 +77,6 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.wav",
         )
 
-        package["captions"] = generate_captions(
-           package["scenes"],
-           output_dir,
-        )
-
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
@@ -108,10 +100,6 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.wav",
             output_dir / "final-video.mp4",
             orientation,
-            captions_file=package["captions"]["srt"],
-            burn_captions=burn_captions,
-            caption_font_size=caption_font_size,
-            caption_position=caption_position,
         )
 
         (output_dir / "scenes.json").write_text(

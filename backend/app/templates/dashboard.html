@@ -34,7 +34,24 @@
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select></div>
           <div><label>Language</label><input value="English" disabled></div>
           <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
-          <div><label>Main Narrator</label><select name="narrator_voice" required><option value="am_michael" selected>Michael - Male</option><option value="am_fenrir">Fenrir - Male</option><option value="am_puck">Puck - Male</option><option value="af_heart">Heart - Female</option><option value="af_bella">Bella - Female</option><option value="af_nicole">Nicole - Female</option></select></div>
+          <div>
+            <label>Main Narrator</label>
+            <div class="voice-select-row">
+              <select name="narrator_voice" required>
+                <option value="am_michael" selected>Michael - Male</option>
+                <option value="am_fenrir">Fenrir - Male</option>
+                <option value="am_puck">Puck - Male</option>
+                <option value="af_heart">Heart - Female</option>
+                <option value="af_bella">Bella - Female</option>
+                <option value="af_nicole">Nicole - Female</option>
+              </select>
+              <button
+                type="button"
+                class="voice-preview-button"
+                data-voice-select="narrator_voice"
+              >▶ Preview</button>
+            </div>
+          </div>
         <div>
   <label>Voice Speed</label>
   <select name="voice_speed">
@@ -51,37 +68,25 @@
     <option value="square">Square — 1:1</option>
   </select>
 </div>
-
-<div>
-  <label>Burn-in Captions</label>
-  <select name="burn_captions">
-    <option value="false" selected>No</option>
-    <option value="true">Yes</option>
-  </select>
-</div>
-
-<div>
-  <label>Caption Font Size</label>
-  <input type="number" name="caption_font_size" value="18" min="10" max="60">
-</div>
-
-<div>
-  <label>Caption Position</label>
-  <select name="caption_position">
-    <option value="bottom" selected>Bottom</option>
-    <option value="middle">Middle</option>
-    <option value="top">Top</option>
-  </select>
-</div>
 </div>
         <div class="voice-pool">
           <label>Additional Voices</label>
           <div class="voice-checkboxes">
-            <label><input type="checkbox" name="voice_pool" value="am_fenrir" checked> Fenrir</label>
-            <label><input type="checkbox" name="voice_pool" value="am_puck" checked> Puck</label>
-            <label><input type="checkbox" name="voice_pool" value="af_heart" checked> Heart</label>
-            <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
-            <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="am_fenrir" checked> Fenrir</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="am_puck" checked> Puck</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_heart" checked> Heart</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
+            </div>
           </div>
         </div>
         <button type="submit">Add Titles to Queue</button>
@@ -132,6 +137,7 @@
 
 
 
+  <script src="/static/voice-preview.js" defer></script>
 </body>
 </html>
 

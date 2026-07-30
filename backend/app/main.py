@@ -108,9 +108,6 @@ def add_jobs(
     narrator_voice: str = Form("am_michael"),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
-    burn_captions: str = Form("false"),
-    caption_font_size: int = Form(18),
-    caption_position: str = Form("bottom"),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
@@ -138,9 +135,6 @@ def add_jobs(
             narrator_voice=narrator_voice,
             voice_pool=",".join(selected_voices),
             voice_speed=voice_speed,
-            burn_captions=(burn_captions.lower() == "true"),
-            caption_font_size=caption_font_size,
-            caption_position=caption_position,
             status="waiting",
             progress=0,
             queue_position=next_position + index,

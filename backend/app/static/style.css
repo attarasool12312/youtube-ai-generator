@@ -326,3 +326,77 @@ tbody td:last-child form,
 .job-actions form{
   margin-top:8px!important;
 }
+
+
+/* Voice preview controls */
+.voice-select-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.voice-select-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-preview-button {
+  width: auto;
+  min-width: 96px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #334155;
+  color: #ffffff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.voice-preview-button:hover {
+  background: #1e293b;
+}
+
+.voice-preview-button.is-playing {
+  background: #dc2626;
+}
+
+.voice-checkboxes {
+  align-items: stretch;
+}
+
+.voice-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.voice-option label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 80px;
+}
+
+.voice-option .voice-preview-button {
+  min-width: 88px;
+  padding: 7px 10px;
+}
+
+@media (max-width: 700px) {
+  .voice-select-row {
+    flex-direction: column;
+  }
+
+  .voice-select-row .voice-preview-button {
+    width: 100%;
+  }
+
+  .voice-option {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

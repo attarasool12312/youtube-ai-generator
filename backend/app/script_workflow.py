@@ -53,6 +53,11 @@ Requirements:
 - Strong opening hook
 - Clear beginning, middle and ending
 - Natural spoken English
+- Keep the narration engaging and conversational without forcing questions throughout
+- End with a clear, topic-specific final takeaway
+- End with one natural, topic-related question inviting viewers to comment
+- Follow it with a brief, natural request to like the video and subscribe
+- Keep the ending unique to the topic, not a generic repeated CTA
 - No headings, labels or bullet points
 - No repeated sentences or ideas
 - No visual directions
@@ -85,6 +90,11 @@ Rules:
 - Condense naturally when it is too long
 - Remove repeated sentences, phrases and ideas
 - Keep a strong hook and complete ending
+- Keep the narration engaging and conversational without forcing questions throughout
+- End with a clear, topic-specific final takeaway
+- End with one natural, topic-related question inviting viewers to comment
+- Follow it with a brief, natural request to like the video and subscribe
+- Keep the ending unique to the topic, not a generic repeated CTA
 - No headings, labels or bullet points
 - Return only the complete revised narration
 

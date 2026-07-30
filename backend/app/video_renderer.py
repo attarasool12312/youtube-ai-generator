@@ -14,14 +14,8 @@ def run(command):
 
 
 def render_video(
-    scenes,
-    narration,
-    output_path,
+    scenes, narration, output_path,
     orientation="landscape",
-    captions_file=None,
-    burn_captions=False,
-    caption_font_size=18,
-    caption_position="bottom",
 ):
     sizes = {
         "landscape": (1920, 1080),
@@ -81,36 +75,15 @@ def render_video(
     timeline_file = output_path.parent / "timeline.txt"
     timeline_file.write_text("\n".join(timeline))
 
-    video_filter = []
-
-    if burn_captions and captions_file:
-        video_filter = [
-            "-vf",
-            (
-                f"subtitles={captions_file}:"
-                f"force_style='FontSize={caption_font_size},"
-                "Outline=2,"
-                "BackColour=&H80000000,"
-                f"MarginV={'60' if caption_position == 'bottom' else '400' if caption_position == 'middle' else '700'},"
-                f"Alignment={'2' if caption_position == 'bottom' else '5' if caption_position == 'middle' else '8'}'"
-            ),
-        ]
-
     run([
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(timeline_file),
         "-i", str(narration),
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        *video_filter,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "22",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-shortest",
-        "-movflags", "+faststart",
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest", "-movflags", "+faststart",
         str(output_path),
     ])
 

@@ -141,6 +141,36 @@ nvidia-smi \
     --query-gpu=name,memory.total,driver_version \
     --format=csv,noheader
 
+SWAP_MIN_KB=24000000
+SWAP_TOTAL_KB="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
+
+if (( SWAP_TOTAL_KB >= SWAP_MIN_KB )); then
+    log "Existing swap is sufficient; preserving it"
+else
+    log "Configuring 24 GB swap"
+
+    if [[ -e /swapfile ]]; then
+        fail "Existing /swapfile found but active swap is below 24 GB. Inspect it manually."
+    fi
+
+    if ! fallocate -l 24G /swapfile; then
+        rm -f /swapfile
+        dd if=/dev/zero of=/swapfile \
+            bs=1M count=24576 status=progress
+    fi
+
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+
+    grep -qE '^/swapfile[[:space:]]' /etc/fstab || \
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+log "Swap status"
+swapon --show
+free -h
+
 log "Creating project directories"
 
 mkdir -p \
@@ -162,6 +192,14 @@ fi
 run_as_user "$PIP" install --upgrade pip setuptools wheel
 run_as_user "$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
 run_as_user "$PIP" check
+
+log "Generating voice previews"
+
+run_as_user env \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
+    "$PYTHON" "$PROJECT_ROOT/scripts/generate_voice_previews.py"
 
 log "Starting Redis"
 
