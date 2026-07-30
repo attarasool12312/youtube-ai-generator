@@ -191,6 +191,16 @@ fi
 
 run_as_user "$PIP" install --upgrade pip setuptools wheel
 run_as_user "$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
+
+log "Installing isolated Whisper runtime"
+
+run_as_user "$PIP" install --no-deps \
+    faster-whisper==1.2.1 \
+    ctranslate2==4.8.1 \
+    onnxruntime==1.28.0 \
+    av==18.0.0 \
+    flatbuffers==25.12.19
+
 run_as_user "$PIP" check
 
 log "Generating voice previews"
@@ -426,6 +436,8 @@ WorkingDirectory=$PROJECT_ROOT
 Environment=PYTHONPATH=$PROJECT_ROOT/backend
 Environment=YOUTUBE_AI_PROJECT_ROOT=$PROJECT_ROOT
 Environment=YOUTUBE_AI_MODEL_ROOT=$MODEL_ROOT
+Environment=HF_TOKEN_PATH=$APP_HOME/.cache/huggingface/token
+Environment=LD_LIBRARY_PATH=$VENV/lib/python3.12/site-packages/nvidia/cublas/lib:$VENV/lib/python3.12/site-packages/nvidia/cudnn/lib
 ExecStart=$VENV/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
