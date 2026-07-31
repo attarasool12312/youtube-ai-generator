@@ -1,5 +1,6 @@
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy import select
 
@@ -42,8 +43,11 @@ def process_job(job_id):
         job = db.get(VideoJob, job_id)
         if job:
             job.worker_pid = process.pid
-            job.status = "processing"
-            job.progress = 5
+            job.status = "script_generation"
+            job.progress = 2
+            job.started_at = datetime.now(timezone.utc)
+            job.completed_at = None
+            job.error_message = None
             db.commit()
 
     return_code = process.wait()
@@ -53,10 +57,17 @@ def process_job(job_id):
         job = db.get(VideoJob, job_id)
         if job:
             job.worker_pid = None
-            if return_code != 0:
+
+            if return_code != 0 and job.status != "cancelled":
                 job.status = "failed"
+                job.completed_at = datetime.now(timezone.utc)
+
                 if not job.error_message:
-                    job.error_message = f"Worker exited: {return_code}"
+                    job.error_message = (
+                        f"Job worker stopped with exit code "
+                        f"{return_code}."
+                    )
+
             db.commit()
 
 

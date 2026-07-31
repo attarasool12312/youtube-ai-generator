@@ -57,20 +57,39 @@ def render_video(
             0.5, float(scene["duration_seconds"])
         )
 
-        vf = (
+        base_vf = (
             f"scale={width}:{height}:"
             "force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},fps=30,"
-            "format=yuv420p"
+            f"crop={width}:{height}"
+        )
+
+        fade_duration = min(0.18, duration / 4)
+        fade_out_start = max(
+            0.0, duration - fade_duration
+        )
+        fade_vf = (
+            f"fade=t=in:st=0:d={fade_duration:.3f},"
+            f"fade=t=out:st={fade_out_start:.3f}:"
+            f"d={fade_duration:.3f}"
         )
 
         if media.suffix.lower() in video_types:
+            vf = (
+                f"{base_vf},fps=30,"
+                f"{fade_vf},"
+                "format=yuv420p"
+            )
             command = [
                 "ffmpeg", "-y", "-stream_loop", "-1",
                 "-i", str(media), "-t", str(duration),
                 "-an", "-vf", vf,
             ]
         else:
+            vf = (
+                f"{base_vf},fps=30,"
+                f"{fade_vf},"
+                "format=yuv420p"
+            )
             command = [
                 "ffmpeg", "-y", "-loop", "1",
                 "-i", str(media), "-t", str(duration),
@@ -115,6 +134,10 @@ def render_video(
         str(output_path),
     ]
 
-    run(final_command)
+    try:
+        run(final_command)
+    finally:
+        shutil.rmtree(clips, ignore_errors=True)
+        timeline_file.unlink(missing_ok=True)
 
     return str(output_path)

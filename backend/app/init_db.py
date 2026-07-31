@@ -8,11 +8,14 @@ from app.security import hash_password
 
 
 VIDEO_JOB_COLUMN_MIGRATIONS = {
-    "captions_enabled": "BOOLEAN NOT NULL DEFAULT 0",
-    "caption_font_size": "INTEGER NOT NULL DEFAULT 48",
+    "media_source": "VARCHAR(20) NOT NULL DEFAULT 'mixed'",
+    "captions_enabled": "BOOLEAN NOT NULL DEFAULT 1",
+    "caption_font_size": "INTEGER NOT NULL DEFAULT 36",
     "caption_position": "VARCHAR(20) NOT NULL DEFAULT 'bottom'",
     "caption_background": "BOOLEAN NOT NULL DEFAULT 1",
     "caption_outline": "INTEGER NOT NULL DEFAULT 2",
+    "started_at": "DATETIME",
+    "completed_at": "DATETIME",
 }
 
 

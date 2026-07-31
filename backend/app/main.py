@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
@@ -15,7 +16,11 @@ from app.database import get_db
 from app.models import User, VideoJob
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
-from app.api_settings import has_api_key, save_api_key
+from app.api_settings import (
+    has_api_key,
+    remove_api_key,
+    save_api_key,
+)
 from app.audio_export import create_narration_mp3
 from app.security import verify_password
 
@@ -79,6 +84,75 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
 
+JOB_STATUS_LABELS = {
+    "waiting": "Waiting",
+    "processing": "Starting",
+    "script_generation": "Script Generation",
+    "generating_script": "Script Generation",
+    "narration": "Narration",
+    "generating_audio": "Narration",
+    "media": "Media",
+    "generating_media": "Media",
+    "captions": "Captions",
+    "generating_captions": "Captions",
+    "rendering": "Rendering",
+    "rendering_video": "Rendering",
+    "uploading": "Uploading",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+}
+
+
+def prepare_job_display(job):
+    job.display_status = JOB_STATUS_LABELS.get(
+        job.status,
+        job.status.replace("_", " ").title(),
+    )
+
+    if job.status == "waiting":
+        job.eta_text = "Waiting for previous jobs"
+        return job
+
+    if job.status == "completed":
+        job.eta_text = "Finished"
+        return job
+
+    if job.status in {"failed", "cancelled"}:
+        job.eta_text = "Stopped"
+        return job
+
+    if not job.started_at or job.progress < 10:
+        job.eta_text = "Calculating..."
+        return job
+
+    started_at = job.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+
+    elapsed = max(
+        1,
+        (datetime.now(timezone.utc) - started_at).total_seconds(),
+    )
+    remaining = elapsed * (
+        (100 - max(1, job.progress)) / max(1, job.progress)
+    )
+
+    if remaining < 60:
+        job.eta_text = "Less than 1 minute"
+    elif remaining < 3600:
+        minutes = max(1, round(remaining / 60))
+        job.eta_text = f"About {minutes} min remaining"
+    else:
+        hours = int(remaining // 3600)
+        minutes = round((remaining % 3600) / 60)
+        job.eta_text = (
+            f"About {hours}h {minutes}m remaining"
+        )
+
+    return job
+
+
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     if not request.session.get("user_id"):
@@ -86,6 +160,7 @@ def home(request: Request, db: Session = Depends(get_db)):
     jobs = db.scalars(
         select(VideoJob).order_by(VideoJob.queue_position)
     ).all()
+    jobs = [prepare_job_display(job) for job in jobs]
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -105,11 +180,12 @@ def add_jobs(
     duration_minutes: int = Form(10),
     video_style: str = Form("auto"),
     orientation: str = Form("landscape"),
+    media_source: str = Form("mixed"),
     narrator_voice: str = Form("am_michael"),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
-    captions_enabled: str = Form("disabled"),
-    caption_font_size: int = Form(48),
+    captions_enabled: str = Form("enabled"),
+    caption_font_size: int = Form(36),
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
@@ -123,6 +199,9 @@ def add_jobs(
 
     captions_enabled_value = captions_enabled == "enabled"
     caption_background_value = caption_background == "on"
+
+    if media_source not in {"stock_only", "ai_only", "mixed"}:
+        media_source = "mixed"
 
     if caption_font_size not in {36, 48, 60}:
         caption_font_size = 48
@@ -148,6 +227,7 @@ def add_jobs(
             duration_minutes=duration_minutes,
             video_style=video_style,
             orientation=orientation,
+            media_source=media_source,
             voice_mode="multi",
             narrator_voice=narrator_voice,
             voice_pool=",".join(selected_voices),
@@ -166,6 +246,108 @@ def add_jobs(
     start_queue_worker()
     return RedirectResponse(
         f"/?success={len(title_list)} title(s) added to queue.",
+        status_code=303,
+    )
+
+
+@app.post("/jobs/{job_id}/cancel")
+def cancel_job(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if not job:
+        return RedirectResponse(
+            "/?success=Job not found.",
+            status_code=303,
+        )
+
+    if job.status in {"completed", "failed", "cancelled"}:
+        return RedirectResponse(
+            "/?success=This job cannot be cancelled.",
+            status_code=303,
+        )
+
+    worker_pid = job.worker_pid
+    output_directory = job.output_directory
+
+    job.status = "cancelled"
+    job.progress = 0
+    job.worker_pid = None
+    job.completed_at = datetime.now(timezone.utc)
+    job.error_message = "Job cancelled by user."
+    db.commit()
+
+    cleanup_job_files(
+        worker_pid=worker_pid,
+        output_directory=output_directory,
+    )
+
+    return RedirectResponse(
+        "/?success=Job cancelled.",
+        status_code=303,
+    )
+
+
+@app.post("/jobs/{job_id}/retry")
+def retry_job(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if not job:
+        return RedirectResponse(
+            "/?success=Job not found.",
+            status_code=303,
+        )
+
+    if job.status not in {"failed", "cancelled"}:
+        return RedirectResponse(
+            "/?success=Only failed or cancelled jobs can be retried.",
+            status_code=303,
+        )
+
+    cleanup_job_files(
+        worker_pid=job.worker_pid,
+        output_directory=job.output_directory,
+    )
+
+    last_job = db.scalar(
+        select(VideoJob)
+        .order_by(VideoJob.queue_position.desc())
+        .limit(1)
+    )
+
+    job.queue_position = (
+        last_job.queue_position + 1
+        if last_job and last_job.id != job.id
+        else job.queue_position
+    )
+    job.status = "waiting"
+    job.progress = 0
+    job.error_message = None
+    job.worker_pid = None
+    job.started_at = None
+    job.completed_at = None
+    job.output_directory = None
+    job.script = None
+    job.scene_plan = None
+    db.commit()
+
+    start_queue_worker()
+
+    return RedirectResponse(
+        "/?success=Job added back to the queue.",
         status_code=303,
     )
 
@@ -283,6 +465,45 @@ def save_api_settings(
     save_api_key("together_api_key", together_api_key.strip())
 
     return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+ALLOWED_API_SETTINGS = {
+    "pexels_api_key",
+    "pixabay_api_key",
+    "coverr_api_key",
+    "openverse_client_id",
+    "openverse_client_secret",
+    "gemini_api_key",
+    "together_api_key",
+}
+
+
+@app.post("/settings/remove")
+def remove_api_setting(
+    request: Request,
+    key_name: str = Form(...),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    if key_name not in ALLOWED_API_SETTINGS:
+        return RedirectResponse(
+            "/settings?message=Invalid API setting.",
+            status_code=303,
+        )
+
+    removed = remove_api_key(key_name)
+
+    message = (
+        "API setting removed."
+        if removed
+        else "API setting was not configured."
+    )
+
+    return RedirectResponse(
+        f"/settings?message={message}",
+        status_code=303,
+    )
 
 
 def _safe_job_file(job, filename):

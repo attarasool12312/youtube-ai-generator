@@ -29,6 +29,19 @@ def save_api_key(name, value):
         db.commit()
 
 
+def remove_api_key(name):
+    with SessionLocal() as db:
+        item = db.scalar(
+            select(ApiSetting).where(ApiSetting.name == name)
+        )
+        if not item:
+            return False
+
+        db.delete(item)
+        db.commit()
+        return True
+
+
 def get_api_key(name):
     with SessionLocal() as db:
         item = db.scalar(

@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.ai_pipeline import generate_video_package
@@ -24,14 +25,15 @@ def run_job(job_id: int) -> None:
             return
 
         job.output_directory = str(output_dir)
-        job.status = "generating_script"
-        job.progress = 10
+        job.status = "script_generation"
+        job.progress = 5
         job.error_message = None
 
         title = job.title
         duration_minutes = job.duration_minutes
         video_style = job.video_style
         orientation = job.orientation or 'landscape'
+        media_source = job.media_source or "mixed"
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         captions_enabled = bool(job.captions_enabled)
@@ -62,8 +64,8 @@ def run_job(job_id: int) -> None:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.status = "generating_audio"
-                job.progress = 70
+                job.status = "narration"
+                job.progress = 30
                 db.commit()
 
         generate_narration(
@@ -78,6 +80,12 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.mp3",
         )
 
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
+            if job:
+                job.progress = 50
+                db.commit()
+
         package["audio_duration_seconds"] = sync_scenes_to_audio(
             package["scenes"],
             output_dir / "narration.wav",
@@ -89,8 +97,8 @@ def run_job(job_id: int) -> None:
             with SessionLocal() as db:
                 job = db.get(VideoJob, job_id)
                 if job:
-                    job.status = "generating_captions"
-                    job.progress = 76
+                    job.status = "captions"
+                    job.progress = 55
                     db.commit()
 
             captions = generate_caption_files(
@@ -107,20 +115,35 @@ def run_job(job_id: int) -> None:
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
+            if job and captions_enabled:
+                job.progress = 65
+                db.commit()
+
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
             if job:
-                job.status = "generating_media"
-                job.progress = 82
+                job.status = "media"
+                job.progress = 68
                 db.commit()
 
         package["scenes"] = download_scene_images(
-            package["scenes"], output_dir, orientation
+            package["scenes"],
+            output_dir,
+            orientation,
+            media_source,
         )
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.status = "rendering_video"
-                job.progress = 92
+                job.progress = 86
+                db.commit()
+
+        with SessionLocal() as db:
+            job = db.get(VideoJob, job_id)
+            if job:
+                job.status = "rendering"
+                job.progress = 90
                 db.commit()
 
         package["video_file"] = render_video(
@@ -152,6 +175,7 @@ def run_job(job_id: int) -> None:
             job.scene_plan = json.dumps(package["scenes"])
             job.status = "completed"
             job.progress = 100
+            job.completed_at = datetime.now(timezone.utc)
             job.worker_pid = None
             db.commit()
 
@@ -161,6 +185,7 @@ def run_job(job_id: int) -> None:
             if job:
                 job.status = "failed"
                 job.error_message = str(error)
+                job.completed_at = datetime.now(timezone.utc)
                 job.worker_pid = None
                 db.commit()
         raise

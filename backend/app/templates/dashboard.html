@@ -12,10 +12,41 @@
       <h1>YouTube AI Video Generator</h1>
       <p>by Atta Rasool</p>
     </div>
+    <div class="notification-controls">
+      <button
+        type="button"
+        id="notification-permission-button"
+        class="notification-button"
+      >
+        Enable Notifications
+      </button>
+
+      <label class="notification-sound-toggle">
+        <input
+          type="checkbox"
+          id="notification-sound-toggle"
+        >
+        <span>Sound</span>
+      </label>
+
+      <span
+        id="notification-status"
+        class="notification-status"
+        aria-live="polite"
+      ></span>
+    </div>
+
     <form method="post" action="/logout">
       <button class="logout-button" type="submit">Logout</button>
     </form>
   </header>
+
+  <div
+    id="dashboard-toast-container"
+    class="dashboard-toast-container"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
 
   <main class="dashboard">
     <section class="panel">
@@ -68,6 +99,14 @@
     <option value="square">Square — 1:1</option>
   </select>
 </div>
+<div>
+  <label>Media Source</label>
+  <select name="media_source">
+    <option value="mixed" selected>Mixed — Stock + AI Fallback</option>
+    <option value="stock_only">Stock Only</option>
+    <option value="ai_only">AI Only — FLUX</option>
+  </select>
+</div>
 </div>
         <div class="voice-pool">
           <label>Additional Voices</label>
@@ -108,8 +147,8 @@
                 id="captions_enabled"
                 name="captions_enabled"
               >
-                <option value="disabled" selected>Disabled</option>
-                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+                <option value="enabled" selected>Enabled</option>
               </select>
             </div>
 
@@ -119,8 +158,8 @@
                 id="caption_font_size"
                 name="caption_font_size"
               >
-                <option value="36">Small</option>
-                <option value="48" selected>Medium</option>
+                <option value="36" selected>Small</option>
+                <option value="48">Medium</option>
                 <option value="60">Large</option>
               </select>
             </div>
@@ -169,7 +208,7 @@
         <button type="submit">Add Titles to Queue</button>
       </form>
     </section>
-    <section class="panel">
+    <section class="panel" id="video-queue-panel">
       <h2>Video Queue</h2>
       <table>
         <thead>
@@ -183,28 +222,119 @@
         </thead>
         <tbody>
           {% for job in jobs %}
-          <tr>
+          <tr
+            class="queue-job-row"
+            data-job-id="{{ job.id }}"
+            data-job-title="{{ job.title }}"
+            data-job-status="{{ job.status }}"
+            data-job-progress="{{ job.progress }}"
+          >
             <td>{{ job.queue_position }}</td>
-            <td>{{ job.title }}</td>
-            <td>{{ job.status }}</td>
-            <td>{{ job.progress }}%</td>
+
             <td>
-  <div class="job-actions">
-    {% if job.status == "completed" %}
-    <a class="download-button" href="/jobs/{{ job.id }}/download">Video</a>
-    <a class="download-button" href="/jobs/{{ job.id }}/download/narration">Narration</a>
-    <a class="download-button" href="/jobs/{{ job.id }}/download/script">Script</a>
-    {% if job.captions_enabled %}
-    <a class="download-button" href="/jobs/{{ job.id }}/download/captions.srt">SRT</a>
-    <a class="download-button" href="/jobs/{{ job.id }}/download/captions.vtt">VTT</a>
-    {% endif %}
-    {% endif %}
-    <form method="post" action="/jobs/{{ job.id }}/delete"
-      onsubmit="return confirm('Permanently delete this job and all generated files?');">
-      <button type="submit" class="danger-button">Delete</button>
-    </form>
-  </div>
-</td>
+              <strong>{{ job.title }}</strong>
+
+              {% if job.error_message and job.status == "failed" %}
+              <details class="job-error-details">
+                <summary>View error details</summary>
+                <pre>{{ job.error_message }}</pre>
+              </details>
+              {% endif %}
+            </td>
+
+            <td>
+              <span class="job-status job-status-{{ job.status }}">
+                {{ job.display_status }}
+              </span>
+            </td>
+
+            <td>
+              <div class="job-progress">
+                <div class="job-progress-header">
+                  <span>{{ job.progress }}%</span>
+                  <small>{{ job.eta_text }}</small>
+                </div>
+
+                <div
+                  class="job-progress-track"
+                  role="progressbar"
+                  aria-valuenow="{{ job.progress }}"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                >
+                  <div
+                    class="job-progress-fill"
+                    style="width: {{ job.progress }}%;"
+                  ></div>
+                </div>
+              </div>
+            </td>
+
+            <td>
+              <div class="job-actions">
+                {% if job.status == "completed" %}
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download"
+                >Video</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/narration"
+                >Narration</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/script"
+                >Script</a>
+
+                {% if job.captions_enabled %}
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/captions.srt"
+                >SRT</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/captions.vtt"
+                >VTT</a>
+                {% endif %}
+                {% endif %}
+
+                {% if job.status in ["failed", "cancelled"] %}
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/retry"
+                >
+                  <button type="submit" class="retry-button">
+                    Retry
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if job.status not in ["completed", "failed", "cancelled"] %}
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/cancel"
+                  onsubmit="return confirm('Cancel this job?');"
+                >
+                  <button type="submit" class="cancel-button">
+                    Cancel
+                  </button>
+                </form>
+                {% endif %}
+
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/delete"
+                  onsubmit="return confirm('Permanently delete this job and all generated files?');"
+                >
+                  <button type="submit" class="danger-button">
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </td>
           </tr>
           {% else %}
           <tr>
@@ -217,6 +347,379 @@
   </main>
 
 
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const activeStatuses = new Set([
+        "waiting",
+        "processing",
+        "script_generation",
+        "generating_script",
+        "narration",
+        "generating_audio",
+        "captions",
+        "generating_captions",
+        "media",
+        "generating_media",
+        "rendering",
+        "rendering_video",
+        "uploading"
+      ]);
+
+      const panelSelector = "#video-queue-panel";
+      const soundStorageKey =
+        "youtube-ai-notification-sound";
+
+      const permissionButton = document.getElementById(
+        "notification-permission-button"
+      );
+      const soundToggle = document.getElementById(
+        "notification-sound-toggle"
+      );
+      const notificationStatus = document.getElementById(
+        "notification-status"
+      );
+
+      let audioContext = null;
+
+      function getRows(root) {
+        return [...root.querySelectorAll(".queue-job-row")];
+      }
+
+      function getJobStates(root) {
+        return new Map(
+          getRows(root).map(row => [
+            row.dataset.jobId,
+            {
+              title: row.dataset.jobTitle || "Video",
+              status: row.dataset.jobStatus || ""
+            }
+          ])
+        );
+      }
+
+      let previousJobStates = getJobStates(document);
+
+      function hasActiveJob(root) {
+        return getRows(root).some(row =>
+          activeStatuses.has(row.dataset.jobStatus)
+        );
+      }
+
+      function queueSignature(root) {
+        return getRows(root).map(row => [
+          row.dataset.jobId,
+          row.dataset.jobStatus,
+          row.dataset.jobProgress
+        ].join(":")).join("|");
+      }
+
+      function ensureAudioContext() {
+        if (!audioContext) {
+          const AudioContextClass =
+            window.AudioContext || window.webkitAudioContext;
+
+          if (AudioContextClass) {
+            audioContext = new AudioContextClass();
+          }
+        }
+
+        if (
+          audioContext &&
+          audioContext.state === "suspended"
+        ) {
+          audioContext.resume().catch(() => {});
+        }
+      }
+
+      function playNotificationSound(status) {
+        if (!soundToggle.checked) return;
+
+        try {
+          ensureAudioContext();
+          if (!audioContext) return;
+
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          const now = audioContext.currentTime;
+
+          oscillator.frequency.value =
+            status === "failed" ? 330 : 660;
+
+          gain.gain.setValueAtTime(0.0001, now);
+          gain.gain.exponentialRampToValueAtTime(
+            0.18,
+            now + 0.02
+          );
+          gain.gain.exponentialRampToValueAtTime(
+            0.0001,
+            now + 0.35
+          );
+
+          oscillator.connect(gain);
+          gain.connect(audioContext.destination);
+          oscillator.start(now);
+          oscillator.stop(now + 0.36);
+        } catch (error) {
+          console.debug("Notification sound unavailable.");
+        }
+      }
+
+      function showDashboardToast(jobId, job) {
+        const messages = {
+          started: {
+            title: "Video Job Started",
+            body: `${job.title} is now being generated.`,
+            type: "started"
+          },
+          completed: {
+            title: "Video Completed",
+            body: `${job.title} is ready.`,
+            type: "completed"
+          },
+          failed: {
+            title: "Video Job Failed",
+            body: `${job.title} could not be completed.`,
+            type: "failed"
+          }
+        };
+
+        const type = [
+          "processing",
+          "script_generation",
+          "generating_script"
+        ].includes(job.status)
+          ? "started"
+          : job.status;
+
+        const message = messages[type];
+        const container = document.getElementById(
+          "dashboard-toast-container"
+        );
+
+        if (!message || !container) return;
+
+        const toast = document.createElement("div");
+        toast.className =
+          `dashboard-toast dashboard-toast-${message.type}`;
+        toast.dataset.toastId =
+          `video-job-${jobId}-${type}`;
+
+        toast.innerHTML = `
+          <button
+            type="button"
+            class="dashboard-toast-close"
+            aria-label="Close notification"
+          >×</button>
+          <strong>${message.title}</strong>
+          <span>${message.body}</span>
+        `;
+
+        toast.querySelector(
+          ".dashboard-toast-close"
+        ).addEventListener("click", function () {
+          toast.remove();
+        });
+
+        container.appendChild(toast);
+
+        window.setTimeout(() => {
+          toast.classList.add("dashboard-toast-hiding");
+
+          window.setTimeout(() => {
+            toast.remove();
+          }, 300);
+        }, 6000);
+      }
+
+
+      function showDesktopNotification(jobId, job) {
+        if (
+          !("Notification" in window) ||
+          Notification.permission !== "granted"
+        ) {
+          return;
+        }
+
+        const messages = {
+          started: {
+            title: "Video Job Started",
+            body: `${job.title} is now being generated.`
+          },
+          completed: {
+            title: "Video Completed",
+            body: `${job.title} is ready.`
+          },
+          failed: {
+            title: "Video Job Failed",
+            body: `${job.title} could not be completed.`
+          }
+        };
+
+        const type = [
+          "processing",
+          "script_generation",
+          "generating_script"
+        ].includes(job.status)
+          ? "started"
+          : job.status;
+
+        const message = messages[type];
+        if (!message) return;
+
+        const notification = new Notification(
+          message.title,
+          {
+            body: message.body,
+            tag: `video-job-${jobId}-${type}`
+          }
+        );
+
+        notification.onclick = function () {
+          window.focus();
+          notification.close();
+        };
+
+      }
+
+      function announceStatusChanges(nextStates) {
+        nextStates.forEach((job, jobId) => {
+          const previous = previousJobStates.get(jobId);
+
+          const started = (
+            previous &&
+            previous.status === "waiting" &&
+            [
+              "processing",
+              "script_generation",
+              "generating_script"
+            ].includes(job.status)
+          );
+
+          const finished = (
+            previous &&
+            previous.status !== job.status &&
+            ["completed", "failed"].includes(job.status)
+          );
+
+          if (started || finished) {
+            showDashboardToast(jobId, job);
+            playNotificationSound(job.status);
+            showDesktopNotification(jobId, job);
+          }
+        });
+
+        previousJobStates = nextStates;
+      }
+
+      function updatePermissionInterface() {
+        if (!("Notification" in window)) {
+          permissionButton.hidden = true;
+          notificationStatus.textContent =
+            "Notifications unsupported";
+          return;
+        }
+
+        if (Notification.permission === "granted") {
+          permissionButton.hidden = true;
+          notificationStatus.textContent =
+            "Notifications enabled";
+          return;
+        }
+
+        if (Notification.permission === "denied") {
+          permissionButton.hidden = true;
+          notificationStatus.textContent =
+            "Notifications blocked";
+          return;
+        }
+
+        permissionButton.hidden = false;
+        notificationStatus.textContent = "";
+      }
+
+      soundToggle.checked =
+        localStorage.getItem(soundStorageKey) !== "off";
+
+      soundToggle.addEventListener("change", function () {
+        localStorage.setItem(
+          soundStorageKey,
+          soundToggle.checked ? "on" : "off"
+        );
+
+        if (soundToggle.checked) {
+          ensureAudioContext();
+        }
+      });
+
+      permissionButton.addEventListener(
+        "click",
+        async function () {
+          if (!("Notification" in window)) return;
+
+          ensureAudioContext();
+          await Notification.requestPermission();
+          updatePermissionInterface();
+        }
+      );
+
+      updatePermissionInterface();
+
+      async function updateQueue() {
+        const currentPanel = document.querySelector(
+          panelSelector
+        );
+
+        if (!currentPanel || !hasActiveJob(document)) {
+          return;
+        }
+
+        try {
+          const response = await fetch("/", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: {
+              "X-Queue-Poll": "1"
+            }
+          });
+
+          if (response.ok) {
+            const html = await response.text();
+            const parsed = new DOMParser().parseFromString(
+              html,
+              "text/html"
+            );
+            const updatedPanel = parsed.querySelector(
+              panelSelector
+            );
+
+            if (
+              updatedPanel &&
+              queueSignature(parsed) !==
+                queueSignature(document)
+            ) {
+              announceStatusChanges(getJobStates(parsed));
+              currentPanel.innerHTML =
+                updatedPanel.innerHTML;
+            }
+          }
+        } catch (error) {
+          console.debug(
+            "Queue update temporarily unavailable."
+          );
+        }
+
+        if (hasActiveJob(document)) {
+          window.setTimeout(updateQueue, 4000);
+        }
+      }
+
+      if (hasActiveJob(document)) {
+        window.setTimeout(updateQueue, 2000);
+      }
+    });
+  </script>
 
   <script src="/static/voice-preview.js" defer></script>
 </body>

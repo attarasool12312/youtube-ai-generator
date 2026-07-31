@@ -63,24 +63,30 @@ def try_providers(
 
 
 def select_media(
-    query, folder, number, requested,
-    orientation, used_sources=None, ai_prompt=None,
+    query,
+    folder,
+    number,
+    requested,
+    orientation,
+    used_sources=None,
+    ai_prompt=None,
+    media_source="mixed",
 ):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     if used_sources is None:
         used_sources = set()
 
-    if number % 5 == 0:
-        try:
-            return flux_image(
-                ai_prompt or query,
-                folder,
-                number,
-                orientation,
-            )
-        except Exception:
-            pass
+    if media_source not in {"stock_only", "ai_only", "mixed"}:
+        media_source = "mixed"
+
+    if media_source == "ai_only":
+        return flux_image(
+            ai_prompt or query,
+            folder,
+            number,
+            orientation,
+        )
 
     use_video = requested == "video" and number % 4 != 0
     if use_video:
@@ -115,5 +121,13 @@ def select_media(
     )
     if result:
         return result
+
+    if media_source == "mixed":
+        return flux_image(
+            ai_prompt or query,
+            folder,
+            number,
+            orientation,
+        )
 
     raise RuntimeError("All stock media providers failed.")

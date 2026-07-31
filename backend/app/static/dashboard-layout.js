@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
     form.appendChild(box); o = box.querySelector("select");
   }
   const names=["duration_minutes","language","video_style",
-    "narrator_voice","voice_speed","orientation"];
+    "narrator_voice","voice_speed","orientation","media_source"];
   const grid=document.createElement("div");
   grid.className="controls-six-grid";
   names.forEach(n=>{

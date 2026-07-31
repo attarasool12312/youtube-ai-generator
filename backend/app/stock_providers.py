@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+
 import httpx
 
 from app.api_settings import get_api_key
@@ -8,11 +10,16 @@ CLIENT = httpx.Client(timeout=60, follow_redirects=True)
 
 
 def orientation_ok(width, height, orientation):
+    if width <= 0 or height <= 0:
+        return False
+
+    ratio = width / height
+
     if orientation == "portrait":
-        return height > width
+        return ratio <= 0.80
     if orientation == "square":
-        return 0.8 <= width / max(height, 1) <= 1.25
-    return width >= height
+        return 0.85 <= ratio <= 1.18
+    return ratio >= 1.25
 
 
 def rotate_items(items, offset):
@@ -21,6 +28,80 @@ def rotate_items(items, offset):
         return []
     offset %= len(items)
     return items[offset:] + items[:offset]
+
+
+def normalized_query(query):
+    cleaned = re.sub(r"[^a-zA-Z0-9\s-]", " ", query)
+    words = []
+
+    for word in cleaned.lower().split():
+        if word not in words:
+            words.append(word)
+
+    return " ".join(words)[:100].strip()
+
+
+def rank_pixabay_items(items, query, offset):
+    terms = {
+        word
+        for word in normalized_query(query).split()
+        if len(word) > 2
+    }
+
+    def score(item):
+        tags = {
+            word
+            for word in re.findall(
+                r"[a-zA-Z0-9]+",
+                str(item.get("tags") or "").lower(),
+            )
+            if len(word) > 2
+        }
+
+        return (
+            len(terms.intersection(tags)),
+            int(bool(terms) and terms.issubset(tags)),
+            int(item.get("likes") or 0),
+            int(item.get("downloads") or 0),
+            int(item.get("views") or 0),
+        )
+
+    ranked = sorted(items, key=score, reverse=True)
+    preferred = rotate_items(ranked[:20], offset)
+    return preferred + ranked[20:]
+
+
+def pixabay_minimum_dimensions(orientation):
+    if orientation == "portrait":
+        return 720, 1280
+    if orientation == "square":
+        return 900, 900
+    return 1280, 720
+
+
+def pixabay_image_orientation(orientation):
+    if orientation == "portrait":
+        return "vertical"
+    if orientation == "landscape":
+        return "horizontal"
+    return "all"
+
+
+def pixabay_query_candidates(query):
+    normalized = normalized_query(query)
+    words = normalized.split()
+
+    candidates = [
+        normalized,
+        " ".join(words[:4]),
+        " ".join(words[:2]),
+    ]
+
+    return [
+        candidate
+        for index, candidate in enumerate(candidates)
+        if candidate and candidate not in candidates[:index]
+    ]
 
 
 def save_media(url, output_path, headers=None):
@@ -80,44 +161,61 @@ def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
 
 
 def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
-    response = CLIENT.get(
-        "https://pixabay.com/api/videos/",
-        params={
-            "key": get_api_key("pixabay_api_key"),
-            "q": query,
-            "per_page": 20,
-            "safesearch": "true",
-        },
-    )
-    response.raise_for_status()
-    items = rotate_items(
-        response.json().get("hits", []), offset
-    )
-    for item in items:
-        source = item.get("pageURL", "")
-        if source in (used_sources or set()):
-            continue
-        if item.get("isLowQuality") or item.get("isGRated"):
-            continue
+    for candidate in pixabay_query_candidates(query):
+        response = CLIENT.get(
+            "https://pixabay.com/api/videos/",
+            params={
+                "key": get_api_key("pixabay_api_key"),
+                "q": candidate,
+                "per_page": 50,
+                "order": "popular",
+                "safesearch": "true",
+            },
+        )
+        response.raise_for_status()
 
-        for quality in ("large", "medium", "small"):
-            file = item.get("videos", {}).get(quality) or {}
-            width = file.get("width") or 0
-            height = file.get("height") or 0
+        items = rank_pixabay_items(
+            response.json().get("hits", []),
+            candidate,
+            offset,
+        )
 
-            if not file.get("url"):
+        for item in items:
+            source = item.get("pageURL", "")
+            if not source or source in (used_sources or set()):
                 continue
-            if not orientation_ok(width, height, orientation):
+            if item.get("isLowQuality"):
                 continue
-            save_media(file["url"], output_path)
-            return {
-                "provider": "pixabay",
-                "media_type": "video",
-                "source": source,
-                "author": item.get("user", ""),
-                "width": width,
-                "height": height,
-            }
+
+            files = sorted(
+                item.get("videos", {}).values(),
+                key=lambda file: (
+                    (file.get("width") or 0)
+                    * (file.get("height") or 0)
+                ),
+                reverse=True,
+            )
+
+            for file in files:
+                width = file.get("width") or 0
+                height = file.get("height") or 0
+                url = file.get("url")
+
+                if not url:
+                    continue
+                if not orientation_ok(width, height, orientation):
+                    continue
+
+                save_media(url, output_path)
+                return {
+                    "provider": "pixabay",
+                    "media_type": "video",
+                    "source": source,
+                    "author": item.get("user", ""),
+                    "width": width,
+                    "height": height,
+                    "matched_query": candidate,
+                }
 
     raise RuntimeError("No suitable Pixabay video found.")
 
@@ -190,31 +288,64 @@ def pexels_image(query, output_path, orientation, used_sources=None, offset=0):
 
 
 def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
-    response = CLIENT.get(
-        "https://pixabay.com/api/",
-        params={"key": get_api_key("pixabay_api_key"),
-                "q": query, "per_page": 20, "safesearch": "true"},
+    minimum_width, minimum_height = pixabay_minimum_dimensions(
+        orientation
     )
-    response.raise_for_status()
 
-    items = rotate_items(
-        response.json().get("hits", []), offset
-    )
-    for item in items:
-        source = item.get("pageURL", "")
-        if source in (used_sources or set()):
-            continue
-        if item.get("isLowQuality") or item.get("isGRated"):
-            continue
-        width, height = item["imageWidth"], item["imageHeight"]
-        if not orientation_ok(width, height, orientation):
-            continue
-        save_media(item["largeImageURL"], output_path)
-        return {
-            "provider": "pixabay", "media_type": "image",
-            "source": source, "author": item["user"],
-            "width": width, "height": height,
-        }
+    for candidate in pixabay_query_candidates(query):
+        response = CLIENT.get(
+            "https://pixabay.com/api/",
+            params={
+                "key": get_api_key("pixabay_api_key"),
+                "q": candidate,
+                "image_type": "photo",
+                "orientation": pixabay_image_orientation(
+                    orientation
+                ),
+                "min_width": minimum_width,
+                "min_height": minimum_height,
+                "per_page": 50,
+                "order": "popular",
+                "safesearch": "true",
+            },
+        )
+        response.raise_for_status()
+
+        items = rank_pixabay_items(
+            response.json().get("hits", []),
+            candidate,
+            offset,
+        )
+
+        for item in items:
+            source = item.get("pageURL", "")
+            if not source or source in (used_sources or set()):
+                continue
+            if item.get("isLowQuality"):
+                continue
+
+            width = item.get("imageWidth") or 0
+            height = item.get("imageHeight") or 0
+            url = (
+                item.get("largeImageURL")
+                or item.get("webformatURL")
+            )
+
+            if not url:
+                continue
+            if not orientation_ok(width, height, orientation):
+                continue
+
+            save_media(url, output_path)
+            return {
+                "provider": "pixabay",
+                "media_type": "image",
+                "source": source,
+                "author": item.get("user", ""),
+                "width": width,
+                "height": height,
+                "matched_query": candidate,
+            }
 
     raise RuntimeError("No suitable Pixabay image found.")
 

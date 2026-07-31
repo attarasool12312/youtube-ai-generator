@@ -2,12 +2,14 @@ import json
 from pathlib import Path
 
 from app.media_selector import select_media
-from app.ai_media import flux_image
 from app.paths import DATA_ROOT
 
 
 def download_scene_images(
-    scenes, output_dir, orientation="landscape"
+    scenes,
+    output_dir,
+    orientation="landscape",
+    media_source="mixed",
 ):
     media_dir = Path(output_dir) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +37,7 @@ def download_scene_images(
                 orientation,
                 used_sources,
                 scene.get("image_prompt") or query,
+                media_source,
             )
             scene["media_file"] = result["media_file"]
             scene["media_provider"] = result["provider"]
@@ -51,13 +54,9 @@ def download_scene_images(
                 used_sources.add(source)
                 new_sources.append(source)
         except Exception as error:
-            print(f"Scene {number} stock failed: {error}")
-            result = flux_image(
-                scene.get("image_prompt") or query,
-                media_dir, number, orientation,
-            )
-            scene.update(result)
-            attributions.append(result)
+            raise RuntimeError(
+                f"Scene {number} media generation failed: {error}"
+            ) from error
 
     history_path.parent.mkdir(parents=True, exist_ok=True)
     combined = (history + new_sources)[-1000:]

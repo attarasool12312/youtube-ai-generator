@@ -391,3 +391,34 @@ Keep this repository private.
 YouTube AI Video Generator by Atta Rasool
 
 https://attarasool.com
+
+## Tested Production Checkpoint — 2026-08-01
+
+The following features were completed on the OpenRelay RTX 4090 deployment. The final full workflow test used Mixed media:
+
+- Mixed, Stock Only, and AI Only media-source modes
+- Improved Pixabay and stock-media selection
+- Duplicate-media prevention
+- Static image fades without unwanted zoom
+- Gemini free-model rotation with Ollama and Together fallbacks
+- Encrypted API-key add, replace, and remove controls
+- Queue progress stages, readable statuses, ETA, retry, and cancel
+- Single sequential GPU-heavy job processing
+- Detailed failure messages
+- Automatic render temporary-file cleanup
+- Captions enabled by default with small font size
+- Quiet dashboard polling without full-page reloads
+- Browser desktop notifications for job started, completed, and failed
+- Bottom-left dashboard popup notifications with optional sound
+
+A complete 3-minute landscape video using Mixed media and captions was generated and verified successfully.
+
+The active deployment and recovery branch is:
+
+```text
+openrelay-setup
+```
+
+The recovery archive is stored in:
+
+`recovery/runtime-state.tar.gz`

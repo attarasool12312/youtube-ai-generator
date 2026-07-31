@@ -29,12 +29,13 @@ class VideoJob(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=10)
     video_style: Mapped[str] = mapped_column(String(30), default="auto")
     orientation: Mapped[str] = mapped_column(String(20), default="landscape")
+    media_source: Mapped[str] = mapped_column(String(20), default="mixed")
     voice_mode: Mapped[str] = mapped_column(String(20), default="multi")
     narrator_voice: Mapped[str] = mapped_column(String(50), default="am_michael")
     voice_pool: Mapped[str] = mapped_column(Text, default="am_michael,am_fenrir,am_puck,af_heart,af_bella,af_nicole")
     voice_speed: Mapped[float] = mapped_column(Float, default=1.0)
-    captions_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    caption_font_size: Mapped[int] = mapped_column(Integer, default=48)
+    captions_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    caption_font_size: Mapped[int] = mapped_column(Integer, default=36)
     caption_position: Mapped[str] = mapped_column(
         String(20), default="bottom"
     )
@@ -50,6 +51,12 @@ class VideoJob(Base):
     scene_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_directory: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 

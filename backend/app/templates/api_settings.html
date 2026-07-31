@@ -9,6 +9,16 @@
   <h1>API Settings</h1>
   <p>Leave a field empty to keep the existing key.</p>
 
+  {% if request.query_params.get("saved") %}
+  <div class="success">API settings saved securely.</div>
+  {% endif %}
+
+  {% if request.query_params.get("message") %}
+  <div class="success">
+    {{ request.query_params.get("message") }}
+  </div>
+  {% endif %}
+
   <form method="post" action="/settings">
     <label>Pexels API Key</label>
     <input type="password" name="pexels_api_key"
@@ -39,9 +49,66 @@
       <input type="password" name="together_api_key"
         placeholder="{{ 'Saved securely' if together_ready else 'Not configured' }}">
 
-<button type="submit">Save API Keys</button>
+    <button type="submit">Save API Keys</button>
     <a href="/" class="settings-back">Back to Dashboard</a>
   </form>
+
+  <div class="api-remove-section">
+    <h2>Remove Saved API Key</h2>
+    <p>
+      Select a saved credential to permanently remove it.
+    </p>
+
+    <form
+      method="post"
+      action="/settings/remove"
+      onsubmit="return confirm('Permanently remove this saved API credential?');"
+    >
+      <label for="key_name">Saved API Credential</label>
+
+      <select id="key_name" name="key_name" required>
+        <option value="">Select API credential</option>
+
+        {% if pexels_ready %}
+        <option value="pexels_api_key">Pexels API Key</option>
+        {% endif %}
+
+        {% if pixabay_ready %}
+        <option value="pixabay_api_key">Pixabay API Key</option>
+        {% endif %}
+
+        {% if coverr_ready %}
+        <option value="coverr_api_key">Coverr API Key</option>
+        {% endif %}
+
+        {% if openverse_id_ready %}
+        <option value="openverse_client_id">
+          Openverse Client ID
+        </option>
+        {% endif %}
+
+        {% if openverse_secret_ready %}
+        <option value="openverse_client_secret">
+          Openverse Client Secret
+        </option>
+        {% endif %}
+
+        {% if gemini_ready %}
+        <option value="gemini_api_key">Gemini API Key</option>
+        {% endif %}
+
+        {% if together_ready %}
+        <option value="together_api_key">
+          Together AI API Key
+        </option>
+        {% endif %}
+      </select>
+
+      <button type="submit" class="danger-button">
+        Remove Selected API Key
+      </button>
+    </form>
+  </div>
 </div>
 </body>
 </html>

@@ -8,8 +8,13 @@ from app.api_settings import get_api_key
 
 STATE = Path("backend/data/gemini_router_state.json")
 CACHE = {"until": 0, "models": []}
-EXCLUDE = ("tts", "image", "audio", "live",
-           "embedding", "veo", "imagen")
+
+FREE_MODEL_POOL = (
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+)
 
 def load_state():
     try:
@@ -30,17 +35,6 @@ def daily_reset():
     )
     return reset.timestamp() + 60
 
-def priority(name):
-    low = name.lower()
-    preview = int(any(x in low for x in (
-        "preview", "exp", "latest"
-    )))
-    version = 0 if "3.5" in low else (
-        1 if "3.1" in low else
-        2 if "2.5" in low else 9
-    )
-    return preview, version, int("lite" in low), name
-
 def list_models():
     now = time.time()
     if CACHE["models"] and CACHE["until"] > now:
@@ -53,26 +47,32 @@ def list_models():
     response = httpx.get(
         "https://generativelanguage.googleapis.com/v1beta/models",
         headers={"x-goog-api-key": key},
-        params={"pageSize": 1000}, timeout=60,
+        params={"pageSize": 1000},
+        timeout=60,
     )
     response.raise_for_status()
-    models = []
-    for item in response.json().get("models", []):
-        name = item.get("name", "").removeprefix("models/")
-        methods = item.get("supportedGenerationMethods", [])
-        low = name.lower()
 
-        if "generateContent" not in methods:
-            continue
-        if "gemini" not in low or "flash" not in low:
-            continue
-        if any(word in low for word in EXCLUDE):
-            continue
-        models.append(name)
+    available = {
+        item.get("name", "").removeprefix("models/")
+        for item in response.json().get("models", [])
+        if "generateContent"
+        in item.get("supportedGenerationMethods", [])
+    }
 
-    CACHE["models"] = sorted(set(models), key=priority)
+    models = [
+        model
+        for model in FREE_MODEL_POOL
+        if model in available
+    ]
+
+    if not models:
+        raise RuntimeError(
+            "No approved Gemini free-tier models are available."
+        )
+
+    CACHE["models"] = models
     CACHE["until"] = now + 3600
-    return CACHE["models"]
+    return models
 
 def cooldown(status, message):
     low = message.lower()
