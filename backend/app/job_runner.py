@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.ai_pipeline import generate_video_package
 from app.audio_timing import sync_scenes_to_audio
+from app.caption_service import generate_caption_files
 from app.database import SessionLocal
 from app.models import VideoJob
 from app.kokoro_service import generate_narration
@@ -33,6 +34,11 @@ def run_job(job_id: int) -> None:
         orientation = job.orientation or 'landscape'
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
+        captions_enabled = bool(job.captions_enabled)
+        caption_font_size = job.caption_font_size or 48
+        caption_position = job.caption_position or "bottom"
+        caption_background = bool(job.caption_background)
+        caption_outline = job.caption_outline
         db.commit()
 
     try:
@@ -77,11 +83,33 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.wav",
         )
 
+        captions = None
+
+        if captions_enabled:
+            with SessionLocal() as db:
+                job = db.get(VideoJob, job_id)
+                if job:
+                    job.status = "generating_captions"
+                    job.progress = 76
+                    db.commit()
+
+            captions = generate_caption_files(
+                audio_path=output_dir / "narration.wav",
+                output_directory=output_dir,
+                orientation=orientation,
+                font_size=caption_font_size,
+                position=caption_position,
+                background=caption_background,
+                outline=caption_outline,
+            )
+
+        package["captions"] = captions
+
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
                 job.status = "generating_media"
-                job.progress = 80
+                job.progress = 82
                 db.commit()
 
         package["scenes"] = download_scene_images(
@@ -92,7 +120,7 @@ def run_job(job_id: int) -> None:
             job = db.get(VideoJob, job_id)
             if job:
                 job.status = "rendering_video"
-                job.progress = 90
+                job.progress = 92
                 db.commit()
 
         package["video_file"] = render_video(
@@ -100,6 +128,11 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.wav",
             output_dir / "final-video.mp4",
             orientation,
+            captions_ass=(
+                Path(captions["ass"])
+                if captions
+                else None
+            ),
         )
 
         (output_dir / "scenes.json").write_text(

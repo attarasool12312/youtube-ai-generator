@@ -108,6 +108,11 @@ def add_jobs(
     narrator_voice: str = Form("am_michael"),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
+    captions_enabled: str = Form("disabled"),
+    caption_font_size: int = Form(48),
+    caption_position: str = Form("bottom"),
+    caption_background: str = Form("on"),
+    caption_outline: int = Form(2),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
@@ -115,6 +120,18 @@ def add_jobs(
 
     title_list = [title.strip() for title in titles.splitlines() if title.strip()]
     selected_voices = list(dict.fromkeys([narrator_voice, *voice_pool]))
+
+    captions_enabled_value = captions_enabled == "enabled"
+    caption_background_value = caption_background == "on"
+
+    if caption_font_size not in {36, 48, 60}:
+        caption_font_size = 48
+
+    if caption_position not in {"top", "middle", "bottom"}:
+        caption_position = "bottom"
+
+    if caption_outline not in {0, 1, 2, 4}:
+        caption_outline = 2
     if not title_list:
         return RedirectResponse("/?success=No valid titles entered.", status_code=303)
     if len(title_list) > 20:
@@ -135,6 +152,11 @@ def add_jobs(
             narrator_voice=narrator_voice,
             voice_pool=",".join(selected_voices),
             voice_speed=voice_speed,
+            captions_enabled=captions_enabled_value,
+            caption_font_size=caption_font_size,
+            caption_position=caption_position,
+            caption_background=caption_background_value,
+            caption_outline=caption_outline,
             status="waiting",
             progress=0,
             queue_position=next_position + index,
@@ -317,4 +339,57 @@ def download_job_script(
     return FileResponse(
         str(script), media_type="text/plain",
         filename=f"script-job-{job_id}.txt",
+    )
+
+
+
+@app.get("/jobs/{job_id}/download/captions.srt")
+def download_job_captions_srt(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    subtitle = _safe_job_file(
+        db.get(VideoJob, job_id), "captions.srt"
+    )
+
+    if not subtitle:
+        return RedirectResponse(
+            "/?success=Caption file not found.",
+            status_code=303,
+        )
+
+    return FileResponse(
+        str(subtitle),
+        media_type="application/x-subrip",
+        filename=f"captions-job-{job_id}.srt",
+    )
+
+
+@app.get("/jobs/{job_id}/download/captions.vtt")
+def download_job_captions_vtt(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    subtitle = _safe_job_file(
+        db.get(VideoJob, job_id), "captions.vtt"
+    )
+
+    if not subtitle:
+        return RedirectResponse(
+            "/?success=Caption file not found.",
+            status_code=303,
+        )
+
+    return FileResponse(
+        str(subtitle),
+        media_type="text/vtt",
+        filename=f"captions-job-{job_id}.vtt",
     )

@@ -13,9 +13,22 @@ def run(command):
     )
 
 
+def _subtitle_filter(subtitle_path):
+    path = str(Path(subtitle_path).resolve())
+    path = path.replace("\\", "\\\\")
+    path = path.replace(":", "\\:")
+    path = path.replace("'", "\\'")
+
+    return (
+        f"subtitles=filename='{path}':"
+        "fontsdir=/usr/share/fonts/truetype/dejavu"
+    )
+
+
 def render_video(
     scenes, narration, output_path,
     orientation="landscape",
+    captions_ass=None,
 ):
     sizes = {
         "landscape": (1920, 1080),
@@ -75,16 +88,33 @@ def render_video(
     timeline_file = output_path.parent / "timeline.txt"
     timeline_file.write_text("\n".join(timeline))
 
-    run([
+    final_command = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(timeline_file),
         "-i", str(narration),
         "-map", "0:v:0", "-map", "1:a:0",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart",
+    ]
+
+    if captions_ass:
+        final_command += [
+            "-vf", _subtitle_filter(captions_ass),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            "-pix_fmt", "yuv420p",
+        ]
+    else:
+        final_command += ["-c:v", "copy"]
+
+    final_command += [
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        "-movflags", "+faststart",
         str(output_path),
-    ])
+    ]
+
+    run(final_command)
 
     return str(output_path)

@@ -89,6 +89,83 @@
             </div>
           </div>
         </div>
+
+        <section class="caption-settings">
+          <div class="caption-settings-heading">
+            <div>
+              <h3>Video Captions</h3>
+              <p>
+                Generate timed captions with Whisper and burn them
+                into the final video.
+              </p>
+            </div>
+          </div>
+
+          <div class="caption-controls-grid">
+            <div>
+              <label for="captions_enabled">Captions</label>
+              <select
+                id="captions_enabled"
+                name="captions_enabled"
+              >
+                <option value="disabled" selected>Disabled</option>
+                <option value="enabled">Enabled</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_font_size">Font Size</label>
+              <select
+                id="caption_font_size"
+                name="caption_font_size"
+              >
+                <option value="36">Small</option>
+                <option value="48" selected>Medium</option>
+                <option value="60">Large</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_position">Position</label>
+              <select
+                id="caption_position"
+                name="caption_position"
+              >
+                <option value="top">Top</option>
+                <option value="middle">Middle</option>
+                <option value="bottom" selected>
+                  Bottom — Safe Margin
+                </option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_background">
+                Background Box
+              </label>
+              <select
+                id="caption_background"
+                name="caption_background"
+              >
+                <option value="on" selected>On</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_outline">Outline</label>
+              <select
+                id="caption_outline"
+                name="caption_outline"
+              >
+                <option value="0">None</option>
+                <option value="1">Thin</option>
+                <option value="2" selected>Medium</option>
+                <option value="4">Thick</option>
+              </select>
+            </div>
+          </div>
+        </section>
         <button type="submit">Add Titles to Queue</button>
       </form>
     </section>
@@ -117,6 +194,10 @@
     <a class="download-button" href="/jobs/{{ job.id }}/download">Video</a>
     <a class="download-button" href="/jobs/{{ job.id }}/download/narration">Narration</a>
     <a class="download-button" href="/jobs/{{ job.id }}/download/script">Script</a>
+    {% if job.captions_enabled %}
+    <a class="download-button" href="/jobs/{{ job.id }}/download/captions.srt">SRT</a>
+    <a class="download-button" href="/jobs/{{ job.id }}/download/captions.vtt">VTT</a>
+    {% endif %}
     {% endif %}
     <form method="post" action="/jobs/{{ job.id }}/delete"
       onsubmit="return confirm('Permanently delete this job and all generated files?');">

@@ -201,6 +201,53 @@ run_as_user "$PIP" install --no-deps \
     av==18.0.0 \
     flatbuffers==25.12.19
 
+log "Preparing Whisper caption model"
+
+WHISPER_MODEL_DIR="$MODEL_ROOT/whisper/small.en"
+
+mkdir -p "$WHISPER_MODEL_DIR"
+chown -R "$APP_USER:$APP_GROUP" "$MODEL_ROOT/whisper"
+
+if [[ -d "$APP_HOME/.cache/huggingface" ]]; then
+    chown -R "$APP_USER:$APP_GROUP" "$APP_HOME/.cache/huggingface"
+    chmod 700 "$APP_HOME/.cache/huggingface"
+fi
+
+if [[ -f "$APP_HOME/.cache/huggingface/token" ]]; then
+    chmod 600 "$APP_HOME/.cache/huggingface/token"
+fi
+
+WHISPER_MODEL_FILE="$WHISPER_MODEL_DIR/model.bin"
+WHISPER_MODEL_MIN_BYTES=100000000
+WHISPER_MODEL_BYTES="$(
+    stat -c%s "$WHISPER_MODEL_FILE" 2>/dev/null || echo 0
+)"
+
+if (( WHISPER_MODEL_BYTES < WHISPER_MODEL_MIN_BYTES )); then
+    run_as_user env \
+        HF_TOKEN_PATH="$APP_HOME/.cache/huggingface/token" \
+        HF_HUB_DISABLE_XET=1 \
+        WHISPER_MODEL_DIR="$WHISPER_MODEL_DIR" \
+        "$PYTHON" - <<'PYWHISPER'
+import os
+
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="Systran/faster-whisper-small.en",
+    local_dir=os.environ["WHISPER_MODEL_DIR"],
+)
+PYWHISPER
+else
+    log "Existing Whisper model preserved"
+fi
+
+WHISPER_MODEL_BYTES="$(
+    stat -c%s "$WHISPER_MODEL_FILE" 2>/dev/null || echo 0
+)"
+
+(( WHISPER_MODEL_BYTES >= WHISPER_MODEL_MIN_BYTES )) ||     fail "Whisper model download is incomplete."
+
 run_as_user "$PIP" check
 
 log "Generating voice previews"

@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
@@ -6,8 +6,40 @@ from app.models import User
 from app.security import hash_password
 
 
+
+VIDEO_JOB_COLUMN_MIGRATIONS = {
+    "captions_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "caption_font_size": "INTEGER NOT NULL DEFAULT 48",
+    "caption_position": "VARCHAR(20) NOT NULL DEFAULT 'bottom'",
+    "caption_background": "BOOLEAN NOT NULL DEFAULT 1",
+    "caption_outline": "INTEGER NOT NULL DEFAULT 2",
+}
+
+
+def migrate_video_jobs():
+    with engine.begin() as connection:
+        columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("video_jobs")
+        }
+
+        for column_name, definition in VIDEO_JOB_COLUMN_MIGRATIONS.items():
+            if column_name in columns:
+                continue
+
+            connection.execute(
+                text(
+                    f"ALTER TABLE video_jobs "
+                    f"ADD COLUMN {column_name} {definition}"
+                )
+            )
+            print(f"Added video_jobs.{column_name}")
+
+
 def initialize_database():
     Base.metadata.create_all(bind=engine)
+    migrate_video_jobs()
+
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.username == settings.admin_username))
         if admin:

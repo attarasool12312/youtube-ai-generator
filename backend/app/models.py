@@ -33,6 +33,15 @@ class VideoJob(Base):
     narrator_voice: Mapped[str] = mapped_column(String(50), default="am_michael")
     voice_pool: Mapped[str] = mapped_column(Text, default="am_michael,am_fenrir,am_puck,af_heart,af_bella,af_nicole")
     voice_speed: Mapped[float] = mapped_column(Float, default=1.0)
+    captions_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    caption_font_size: Mapped[int] = mapped_column(Integer, default=48)
+    caption_position: Mapped[str] = mapped_column(
+        String(20), default="bottom"
+    )
+    caption_background: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )
+    caption_outline: Mapped[int] = mapped_column(Integer, default=2)
     status: Mapped[str] = mapped_column(String(50), default="waiting")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     queue_position: Mapped[int] = mapped_column(Integer, default=0)
