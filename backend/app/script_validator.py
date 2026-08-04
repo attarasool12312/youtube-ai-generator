@@ -1,6 +1,25 @@
+import math
 import re
 from collections import Counter
 from difflib import SequenceMatcher
+
+
+WORD_COUNT_OVERFLOW_TOLERANCE = 20
+
+
+def get_word_count_limits(duration_minutes):
+    target = int(duration_minutes * 145)
+
+    minimum_words = math.ceil(
+        target * 0.90
+    )
+
+    maximum_words = (
+        math.floor(target * 1.10)
+        + WORD_COUNT_OVERFLOW_TOLERANCE
+    )
+
+    return target, minimum_words, maximum_words
 
 
 def get_words(text):
@@ -43,7 +62,12 @@ def repeated_phrase_ratio(text, size=8):
 
 
 def validate_script(text, duration_minutes):
-    target = int(duration_minutes * 145)
+    (
+        target,
+        minimum_words,
+        maximum_words,
+    ) = get_word_count_limits(duration_minutes)
+
     word_count = len(get_words(text))
     duplicates = find_duplicate_sentences(text)
     phrase_ratio = repeated_phrase_ratio(text)
@@ -51,9 +75,11 @@ def validate_script(text, duration_minutes):
     ending_lower = ending.lower()
     issues = []
 
-    if not target * 0.90 <= word_count <= target * 1.10:
+    if not minimum_words <= word_count <= maximum_words:
         issues.append(
-            f"Word count {word_count}; target approximately {target}."
+            f"Word count {word_count}; accepted range "
+            f"{minimum_words}-{maximum_words} around "
+            f"target {target}."
         )
     if duplicates:
         issues.append(
@@ -86,6 +112,8 @@ def validate_script(text, duration_minutes):
         "issues": issues,
         "word_count": word_count,
         "target_words": target,
+        "minimum_words": minimum_words,
+        "maximum_words": maximum_words,
         "duplicate_sentences": duplicates,
         "repeated_phrase_ratio": round(phrase_ratio, 4),
     }

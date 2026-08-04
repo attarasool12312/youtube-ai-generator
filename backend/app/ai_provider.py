@@ -90,10 +90,52 @@ def call_ollama(prompt, json_mode=False):
     )
 
 
+def call_ollama_length_repair(prompt, maximum_words):
+    num_predict = max(
+        300,
+        min(2400, int(maximum_words * 2.2)),
+    )
+
+    payload = {
+        "model": settings.ollama_model,
+        "prompt": prompt,
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "repeat_penalty": 1.1,
+            "num_predict": num_predict,
+        },
+    }
+
+    response = httpx.post(
+        f"{settings.ollama_url}/api/generate",
+        json=payload,
+        timeout=300,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    return AIResult(
+        text=data.get("response", "").strip(),
+        provider=(
+            f"ollama-length-repair:"
+            f"{settings.ollama_model}"
+        ),
+        input_tokens=data.get("prompt_eval_count", 0),
+        output_tokens=data.get("eval_count", 0),
+    )
+
+
 def call_ai(prompt, json_mode=False):
     errors = []
 
-    for provider in (call_gemini, call_ollama, call_together):
+    for provider in (
+        call_gemini,
+        call_ollama,
+        call_together,
+    ):
         try:
             result = provider(prompt, json_mode=json_mode)
             if not result.text:

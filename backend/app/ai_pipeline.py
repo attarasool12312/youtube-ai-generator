@@ -152,32 +152,94 @@ def call_qwen_json(prompt: str) -> dict:
 
 def split_script_into_scenes(script, duration_minutes):
     words = script.strip().split()
-    count = min(max(1, duration_minutes * 8), len(words))
-    scenes, start = [], 0
 
-    for number in range(1, count):
-        target = round(number * len(words) / count)
-        choices = range(max(start + 4, target - 6),
-                        min(len(words), target + 7))
-        ends = [
-            i for i in choices
-            if words[i - 1].endswith((".", "!", "?", ";", ":"))
-        ]
+    if not words:
+        raise ValueError("Cannot create scenes from an empty script.")
 
-        end = min(ends, key=lambda i: abs(i-target)) \
-            if ends else target
+    desired_count = max(1, duration_minutes * 8)
+    minimum_words_per_scene = 12
+
+    safe_count = max(
+        1,
+        len(words) // minimum_words_per_scene,
+    )
+
+    count = min(desired_count, safe_count)
+    scenes = []
+    start = 0
+
+    for index in range(count):
+        remaining_scenes = count - index
+
+        if remaining_scenes == 1:
+            end = len(words)
+        else:
+            remaining_words = len(words) - start
+            ideal = start + round(
+                remaining_words / remaining_scenes
+            )
+
+            minimum_end = start + minimum_words_per_scene
+            maximum_end = (
+                len(words)
+                - minimum_words_per_scene
+                * (remaining_scenes - 1)
+            )
+
+            target = min(
+                max(ideal, minimum_end),
+                maximum_end,
+            )
+
+            search_start = max(
+                minimum_end,
+                target - 6,
+            )
+            search_end = min(
+                maximum_end,
+                target + 6,
+            )
+
+            choices = range(
+                search_start,
+                search_end + 1,
+            )
+
+            endings = [
+                position
+                for position in choices
+                if words[position - 1].endswith(
+                    (".", "!", "?", ";", ":")
+                )
+            ]
+
+            end = (
+                min(
+                    endings,
+                    key=lambda position: abs(
+                        position - target
+                    ),
+                )
+                if endings
+                else target
+            )
+
+        narration = " ".join(words[start:end]).strip()
+
+        if not narration:
+            raise ValueError(
+                f"Scene {index + 1} has empty narration."
+            )
 
         scenes.append({
-            "scene_number": len(scenes) + 1,
-            "narration": " ".join(words[start:end]),
+            "scene_number": index + 1,
+            "narration": narration,
         })
+
         start = end
-    scenes.append({
-        "scene_number": len(scenes) + 1,
-        "narration": " ".join(words[start:]),
-    })
 
     return scenes
+
 
 def _enrich_scene_batch_once(title, video_style, scenes):
     prompt = (

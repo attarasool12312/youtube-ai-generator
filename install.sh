@@ -56,6 +56,123 @@ run_as_user() {
     fi
 }
 
+
+install_matching_nvenc_runtime() {
+    if ldconfig -p 2>/dev/null |
+        grep -F "libnvidia-encode.so.1" >/dev/null
+    then
+        log "NVENC runtime already available"
+        return
+    fi
+
+    local package_line=""
+    local package_name=""
+    local driver_version=""
+    local driver_series=""
+    local encode_package=""
+    local decode_package=""
+    local package=""
+
+    package_line="$(
+        dpkg-query -W \
+            -f='${Package}|${Version}|${Status}\n' \
+            'nvidia-utils-*' \
+            2>/dev/null |
+        awk -F'|' \
+            '$3 == "install ok installed" {
+                print $1 "|" $2
+            }' |
+        sort -V |
+        tail -n 1 ||
+        true
+    )"
+
+    if [[ -z "$package_line" ]]; then
+        package_line="$(
+            dpkg-query -W \
+                -f='${Package}|${Version}|${Status}\n' \
+                'libnvidia-compute-*' \
+                2>/dev/null |
+            awk -F'|' \
+                '$3 == "install ok installed" {
+                    print $1 "|" $2
+                }' |
+            sort -V |
+            tail -n 1 ||
+            true
+        )"
+    fi
+
+    if [[ -z "$package_line" ]]; then
+        echo \
+            "WARNING: NVIDIA package branch could not be detected. CPU rendering fallback will remain available." \
+            >&2
+        return
+    fi
+
+    package_name="${package_line%%|*}"
+    driver_version="${package_line#*|}"
+
+    case "$package_name" in
+        nvidia-utils-*)
+            driver_series="${package_name#nvidia-utils-}"
+            ;;
+        libnvidia-compute-*)
+            driver_series="${package_name#libnvidia-compute-}"
+            ;;
+        *)
+            echo \
+                "WARNING: Unsupported NVIDIA package identity: $package_name. CPU rendering fallback will remain available." \
+                >&2
+            return
+            ;;
+    esac
+
+    encode_package="libnvidia-encode-${driver_series}"
+    decode_package="libnvidia-decode-${driver_series}"
+
+    for package in \
+        "$encode_package" \
+        "$decode_package"
+    do
+        if ! apt-cache madison "$package" |
+            awk '{print $3}' |
+            grep -Fx "$driver_version" >/dev/null
+        then
+            echo \
+                "WARNING: Exact package $package=$driver_version is unavailable. Skipping NVENC installation to avoid a driver mismatch." \
+                >&2
+            return
+        fi
+    done
+
+    log \
+        "Installing NVENC runtime matching NVIDIA ${driver_series} driver"
+
+    if ! DEBIAN_FRONTEND=noninteractive \
+        apt-get install -y \
+        "$decode_package=$driver_version" \
+        "$encode_package=$driver_version"
+    then
+        echo \
+            "WARNING: NVENC runtime installation failed. CPU rendering fallback will remain available." \
+            >&2
+        return
+    fi
+
+    ldconfig
+
+    if ldconfig -p 2>/dev/null |
+        grep -F "libnvidia-encode.so.1" >/dev/null
+    then
+        log "Matching NVENC runtime installed successfully"
+    else
+        echo \
+            "WARNING: NVENC library is unavailable after installation. CPU rendering fallback will remain available." \
+            >&2
+    fi
+}
+
 restore_recovery_state() {
     if [[ ! -f "$RECOVERY_ARCHIVE" ]]; then
         log "Recovery archive not found; using fresh-install mode"
@@ -140,6 +257,8 @@ log "GPU detected"
 nvidia-smi \
     --query-gpu=name,memory.total,driver_version \
     --format=csv,noheader
+
+install_matching_nvenc_runtime
 
 SWAP_MIN_KB=24000000
 SWAP_TOTAL_KB="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
@@ -521,6 +640,26 @@ redis-cli ping
 
 ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
     fail "Ollama model is missing."
+
+log "Checking video encoder availability"
+
+if ffmpeg \
+    -hide_banner \
+    -loglevel error \
+    -nostdin \
+    -f lavfi \
+    -i "color=c=black:s=320x180:r=1" \
+    -frames:v 1 \
+    -an \
+    -c:v h264_nvenc \
+    -pix_fmt yuv420p \
+    -f null - \
+    >/dev/null 2>&1
+then
+    echo         "Video encoder: NVIDIA NVENC with automatic CPU fallback"
+else
+    echo         "Video encoder: CPU fallback (NVENC unavailable)"
+fi
 
 APP_URL_DISPLAY="$(
     ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PYURL'
