@@ -11,7 +11,7 @@ def get_word_count_limits(duration_minutes):
     target = int(duration_minutes * 145)
 
     minimum_words = math.ceil(
-        target * 0.90
+        target * 0.93
     )
 
     maximum_words = (
@@ -81,7 +81,12 @@ def validate_script(text, duration_minutes):
             f"{minimum_words}-{maximum_words} around "
             f"target {target}."
         )
-    if duplicates:
+    if re.search(r"(?i)\bword\s*count\s*:", text):
+        issues.append(
+            "Script contains word-count metadata."
+        )
+
+    if len(duplicates) >= 2:
         issues.append(
             f"Found {len(duplicates)} repeated sentences."
         )

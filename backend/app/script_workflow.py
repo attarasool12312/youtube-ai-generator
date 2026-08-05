@@ -7,18 +7,27 @@ from app.ai_provider import (
     call_ollama_length_repair,
     call_together,
 )
-from app.script_validator import validate_script
+from app.script_validator import (
+    find_duplicate_sentences,
+    repeated_phrase_ratio,
+    validate_script,
+)
 
 WORDS_PER_MINUTE = 145
-MAX_EXPANSION_ATTEMPTS = 5
-MAX_SHORTEN_ATTEMPTS = 3
+MAX_EXPANSION_ATTEMPTS = 1
+MAX_SHORTEN_ATTEMPTS = 1
 MAX_CHUNK_WORDS = 800
-SECTION_MIN_RATIO = 0.95
-SECTION_MAX_RATIO = 1.05
+SECTION_MIN_RATIO = 0.93
+SECTION_MAX_RATIO = 1.10
 
 
 def word_count(text):
     return len(re.findall(r"\b[\w'-]+\b", text))
+
+
+def emit_progress(callback, status, progress):
+    if callback:
+        callback(status, progress)
 
 
 def clean_script(text):
@@ -28,7 +37,47 @@ def clean_script(text):
         text = text.split("\n", 1)[-1]
         text = text.rsplit("```", 1)[0]
 
+    text = re.sub(
+        r"(?i)\s*\(\s*word\s*count\s*:\s*[\d,]+"
+        r"\s*(?:words?)?\s*\)\s*",
+        " ",
+        text,
+    )
+    text = re.sub(
+        r"(?im)^\s*word\s*count\s*:\s*[\d,]+"
+        r"\s*(?:words?)?\s*$",
+        "",
+        text,
+    )
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
     return text.strip()
+
+
+def has_broken_opening(text):
+    stripped = text.lstrip(" \t\r\n\"'([{")
+    return bool(
+        stripped
+        and stripped[0].isalpha()
+        and stripped[0].islower()
+    )
+
+
+def quality_rank(text):
+    return (
+        1 if has_broken_opening(text) else 0,
+        len(find_duplicate_sentences(text)),
+        repeated_phrase_ratio(text),
+    )
+
+
+def needs_chunk_retry(text):
+    broken, duplicates, phrase_ratio = quality_rank(text)
+    return (
+        broken
+        or duplicates >= 2
+        or phrase_ratio > 0.025
+    )
 
 
 def provider_chain():
@@ -39,7 +88,7 @@ def provider_chain():
     ]
 
 
-def first_success(prompt, providers=None):
+def first_success(prompt, providers=None, require_complete_start=False):
     errors = []
 
     for name, provider in providers or provider_chain():
@@ -47,8 +96,17 @@ def first_success(prompt, providers=None):
             result = provider(prompt, json_mode=False)
             text = clean_script(result.text)
 
-            if text:
+            if text and (
+                not require_complete_start
+                or not has_broken_opening(text)
+            ):
                 return text, result.provider
+
+            if text:
+                errors.append(
+                    f"{name}: output began with a broken "
+                    "lowercase sentence fragment"
+                )
         except Exception as error:
             errors.append(f"{name}: {error}")
 
@@ -93,7 +151,7 @@ Rules:
 - Return the outline only
 """
 
-    return first_success(prompt)
+    return first_success(prompt, require_complete_start=True)
 
 
 def generate_section(
@@ -153,7 +211,9 @@ Rules:
 - Write only section {section_number}
 - Stay within the required word range
 - Never exceed {maximum_words} words
-- Follow the matching part of the outline
+- Focus only on outline item {section_number}
+- Do not cover later outline items early
+- Start with a complete sentence beginning with a capital letter
 - Keep the narration natural, detailed and conversational
 - Do not repeat information from earlier sections
 - Do not use headings, labels, bullet points or visual directions
@@ -161,7 +221,7 @@ Rules:
 {ending_rules}
 """
 
-    return first_success(prompt)
+    return first_success(prompt, require_complete_start=True)
 
 
 def shorten_section(
@@ -263,6 +323,9 @@ Rules:
     )
     repaired = clean_script(result.text)
 
+    if has_broken_opening(repaired):
+        repaired = clean_script(source_text)
+
     if not repaired:
         raise RuntimeError(
             "Ollama length repair returned empty output."
@@ -278,6 +341,7 @@ def generate_expansion(
     target_words,
     previous_tail,
     next_opening,
+    existing_narration,
 ):
     prompt = f"""
 Write one additional middle section for this long-form YouTube
@@ -296,9 +360,13 @@ Previous section ending:
 Following section opening:
 {next_opening}
 
+Existing narration already written:
+{existing_narration}
+
 Rules:
+- Add only genuinely new material missing from the existing narration
+- Do not repeat, summarize or rephrase ideas, examples or events already covered
 - Add useful depth, examples, consequences or explanation
-- Cover material not already repeated in the existing narration
 - Connect naturally between the supplied surrounding sections
 - Do not restart the introduction
 - Do not conclude the full video
@@ -307,7 +375,7 @@ Rules:
 - Return narration only
 """
 
-    return first_success(prompt)
+    return first_success(prompt, require_complete_start=True)
 
 
 def balance_expansion(
@@ -451,7 +519,7 @@ def ensure_ending_requirements(script, duration):
 
     if missing_question:
         additions.append(
-            "What will you do first?"
+            "Which step will you try first?"
         )
 
     if missing_comment:
@@ -461,15 +529,15 @@ def ensure_ending_requirements(script, duration):
 
     if missing_like and missing_subscribe:
         additions.append(
-            "Like this video and subscribe for more."
+            "If this helped, like the video and subscribe for more practical guides."
         )
     elif missing_like:
         additions.append(
-            "Like this video."
+            "If this helped, give the video a like."
         )
     elif missing_subscribe:
         additions.append(
-            "Subscribe for more."
+            "Subscribe for more practical guides like this."
         )
 
     if not additions:
@@ -550,9 +618,15 @@ def ensure_ending_requirements(script, duration):
 
     return candidate
 
-def generate_initial_script(title, duration, style):
+def generate_initial_script(title, duration, style, progress_callback=None):
     target = int(duration * WORDS_PER_MINUTE)
     section_count = calculate_section_count(target)
+
+    emit_progress(
+        progress_callback,
+        "outline_generation",
+        5,
+    )
 
     outline, outline_provider = generate_outline(
         title,
@@ -569,6 +643,12 @@ def generate_initial_script(title, duration, style):
     section_providers = []
     previous_tail = ""
 
+    emit_progress(
+        progress_callback,
+        "script_sections",
+        8,
+    )
+
     for index, target_words in enumerate(targets, start=1):
         section, provider = generate_section(
             title=title,
@@ -579,6 +659,27 @@ def generate_initial_script(title, duration, style):
             target_words=target_words,
             previous_tail=previous_tail,
         )
+
+        combined = "\n\n".join(sections + [section])
+
+        if needs_chunk_retry(combined):
+            retry_section, retry_provider = generate_section(
+                title=title,
+                style=style,
+                outline=outline,
+                section_number=index,
+                section_count=section_count,
+                target_words=target_words,
+                previous_tail=previous_tail,
+            )
+
+            retry_combined = "\n\n".join(
+                sections + [retry_section]
+            )
+
+            if quality_rank(retry_combined) < quality_rank(combined):
+                section = retry_section
+                provider = retry_provider
 
         maximum_words = math.ceil(
             target_words * 1.10
@@ -631,6 +732,12 @@ def generate_initial_script(title, duration, style):
         section_providers.append(provider)
         previous_tail = tail_words(section)
 
+        emit_progress(
+            progress_callback,
+            "script_sections",
+            8 + round((index / section_count) * 12),
+        )
+
     return {
         "sections": sections,
         "target_words": target,
@@ -640,11 +747,18 @@ def generate_initial_script(title, duration, style):
     }
 
 
-def create_validated_script(title, duration, style):
+def create_validated_script(title, duration, style, progress_callback=None):
     generated = generate_initial_script(
         title,
         duration,
         style,
+        progress_callback=progress_callback,
+    )
+
+    emit_progress(
+        progress_callback,
+        "script_validation",
+        22,
     )
 
     sections = generated["sections"]
@@ -675,6 +789,12 @@ def create_validated_script(title, duration, style):
         )
 
         if current < minimum:
+            emit_progress(
+                progress_callback,
+                "script_refinement",
+                25,
+            )
+
             missing = max(1, target - current)
             expansion_target = min(
                 MAX_CHUNK_WORDS,
@@ -699,6 +819,7 @@ def create_validated_script(title, duration, style):
                 target_words=expansion_target,
                 previous_tail=tail_words(previous_section),
                 next_opening=head_words(next_section),
+                existing_narration=script,
             )
 
             expansion, provider = balance_expansion(
@@ -708,6 +829,50 @@ def create_validated_script(title, duration, style):
                 provider=provider,
                 target_words=expansion_target,
             )
+
+            candidate_sections = (
+                sections[:insert_at]
+                + [expansion]
+                + sections[insert_at:]
+            )
+            candidate_script = "\n\n".join(candidate_sections)
+
+            if needs_chunk_retry(candidate_script):
+                retry_expansion, retry_provider = generate_expansion(
+                    title=title,
+                    style=style,
+                    outline=outline,
+                    target_words=expansion_target,
+                    previous_tail=tail_words(previous_section),
+                    next_opening=head_words(next_section),
+                    existing_narration=script,
+                )
+
+                retry_expansion, retry_provider = balance_expansion(
+                    title=title,
+                    style=style,
+                    expansion=retry_expansion,
+                    provider=retry_provider,
+                    target_words=expansion_target,
+                )
+
+                retry_sections = (
+                    sections[:insert_at]
+                    + [retry_expansion]
+                    + sections[insert_at:]
+                )
+                retry_script = "\n\n".join(retry_sections)
+
+                if quality_rank(retry_script) < quality_rank(candidate_script):
+                    expansion = retry_expansion
+                    provider = retry_provider
+                    candidate_script = retry_script
+
+            if needs_chunk_retry(candidate_script):
+                raise RuntimeError(
+                    "Expansion rejected because it repeats "
+                    "existing narration."
+                )
 
             sections.insert(insert_at, expansion)
             expansion_providers.append(provider)
@@ -720,6 +885,12 @@ def create_validated_script(title, duration, style):
         ]
 
         if current <= maximum and ending_issues:
+            emit_progress(
+                progress_callback,
+                "script_refinement",
+                25,
+            )
+
             final_index = len(sections) - 1
             final_section = sections[final_index]
             final_target = max(
@@ -758,6 +929,12 @@ def create_validated_script(title, duration, style):
     ]
 
     if ending_issues:
+        emit_progress(
+            progress_callback,
+            "script_refinement",
+            27,
+        )
+
         script = ensure_ending_requirements(
             script,
             duration,

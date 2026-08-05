@@ -49,7 +49,9 @@
   ></div>
 
   <main class="dashboard">
-    <section class="panel">
+    {% include "partials/system_overview.html" %}
+
+    <section class="panel video-creation-panel">
       <h2>Add Video Titles</h2>
       <p>Enter up to 20 titles, one title per line.</p>
       {% if error %}
@@ -353,11 +355,19 @@
       const activeStatuses = new Set([
         "waiting",
         "processing",
+        "outline_generation",
+        "script_sections",
+        "script_validation",
+        "script_refinement",
+        "scene_planning",
+        "narration_tts",
+        "media_collection",
+        "captions",
+        "final_rendering",
         "script_generation",
         "generating_script",
         "narration",
         "generating_audio",
-        "captions",
         "generating_captions",
         "media",
         "generating_media",
@@ -675,7 +685,7 @@
         }
 
         try {
-          const response = await fetch("/", {
+          const response = await fetch("/videos", {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
@@ -722,6 +732,127 @@
   </script>
 
   <script src="/static/voice-preview.js" defer></script>
+
+<script>
+(function () {
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+
+  const setBar = (id, value) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    const percent = Math.max(
+      0,
+      Math.min(100, Number(value) || 0)
+    );
+
+    element.style.width = `${percent}%`;
+  };
+
+  const setConnection = (id, service) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    element.textContent = service.label;
+    element.classList.toggle("is-online", service.online);
+    element.classList.toggle("is-offline", !service.online);
+  };
+
+  async function refreshSystemMetrics() {
+    try {
+      const response = await fetch(
+        "/dashboard/metrics",
+        {
+          credentials: "same-origin",
+          cache: "no-store"
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.authenticated) return;
+
+      const cpuValue = data.cpu.usage_percent === null
+        ? "Sampling…"
+        : `${data.cpu.usage_percent}%`;
+
+      setText("metric-cpu-value", cpuValue);
+      setText(
+        "metric-cpu-detail",
+        `${data.cpu.cores} cores · Load ${data.cpu.load_1}`
+      );
+      setBar("metric-cpu-bar", data.cpu.usage_percent);
+
+      setText(
+        "metric-memory-value",
+        `${data.memory.usage_percent}%`
+      );
+      setText(
+        "metric-memory-detail",
+        `${data.memory.used} of ${data.memory.total}`
+      );
+      setBar(
+        "metric-memory-bar",
+        data.memory.usage_percent
+      );
+
+      setText(
+        "metric-gpu-value",
+        `${data.gpu.usage_percent}%`
+      );
+      setText(
+        "metric-gpu-detail",
+        `${data.gpu.name} · ${data.gpu.temperature}`
+      );
+      setText(
+        "metric-gpu-memory",
+        `VRAM ${data.gpu.memory_used} / ${data.gpu.memory_total}`
+      );
+      setBar("metric-gpu-bar", data.gpu.usage_percent);
+
+      setText(
+        "metric-storage-value",
+        `${data.storage.usage_percent}%`
+      );
+      setText(
+        "metric-storage-detail",
+        `${data.storage.used} of ${data.storage.total}`
+      );
+      setBar(
+        "metric-storage-bar",
+        data.storage.usage_percent
+      );
+
+      setConnection("redis-status", data.redis);
+      setText("redis-detail", data.redis.detail);
+
+      setConnection("ollama-status", data.ollama);
+      setText("ollama-detail", data.ollama.detail);
+
+      setText(
+        "api-connected-count",
+        data.apis.connected
+      );
+    } catch (error) {
+      console.warn(
+        "Dashboard metrics refresh failed:",
+        error
+      );
+    }
+  }
+
+  refreshSystemMetrics();
+  window.setInterval(refreshSystemMetrics, 10000);
+})();
+</script>
+
 </body>
 </html>
 

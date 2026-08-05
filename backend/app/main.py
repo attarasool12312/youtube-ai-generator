@@ -13,6 +13,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.paths import OUTPUT_ROOT
 from app.config import settings
 from app.database import get_db
+from app.dashboard_metrics import collect_dashboard_metrics
+from app.project_info import get_project_info
+from app.publishing_status import collect_publishing_status
+from app.scene_library import prepare_scene_items, resolve_scene_media
 from app.models import User, VideoJob
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
@@ -45,6 +49,17 @@ templates = Jinja2Templates(directory="backend/app/templates")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/dashboard/metrics")
+def dashboard_metrics(request: Request):
+    if not request.session.get("user_id"):
+        return {"authenticated": False}
+
+    return {
+        "authenticated": True,
+        **collect_dashboard_metrics(),
+    }
 
 
 @app.get("/login")
@@ -87,16 +102,24 @@ def logout(request: Request):
 JOB_STATUS_LABELS = {
     "waiting": "Waiting",
     "processing": "Starting",
+    "outline_generation": "Outline Generation",
+    "script_sections": "Script Section Generation",
+    "script_validation": "Script Validation",
+    "script_refinement": "Script Repair / Refinement",
+    "scene_planning": "Scene Planning",
+    "narration_tts": "Narration / TTS",
+    "media_collection": "Media Collection",
+    "captions": "Captions",
+    "final_rendering": "Final Rendering",
     "script_generation": "Script Generation",
     "generating_script": "Script Generation",
-    "narration": "Narration",
-    "generating_audio": "Narration",
-    "media": "Media",
-    "generating_media": "Media",
-    "captions": "Captions",
+    "narration": "Narration / TTS",
+    "generating_audio": "Narration / TTS",
+    "media": "Media Collection",
+    "generating_media": "Media Collection",
     "generating_captions": "Captions",
-    "rendering": "Rendering",
-    "rendering_video": "Rendering",
+    "rendering": "Final Rendering",
+    "rendering_video": "Final Rendering",
     "uploading": "Uploading",
     "completed": "Completed",
     "failed": "Failed",
@@ -153,23 +176,112 @@ def prepare_job_display(job):
     return job
 
 
+def load_dashboard_jobs(db):
+    jobs = db.scalars(
+        select(VideoJob).order_by(VideoJob.queue_position)
+    ).all()
+    return [prepare_job_display(job) for job in jobs]
+
+
+def dashboard_context(request, jobs, active_page):
+    return {
+        "app_name": settings.app_name,
+        "jobs": jobs,
+        "active_page": active_page,
+        "project_info": get_project_info(),
+        "system_metrics": collect_dashboard_metrics(),
+        "error": None,
+        "success": request.query_params.get("success"),
+    }
+
+
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
-    jobs = db.scalars(
-        select(VideoJob).order_by(VideoJob.queue_position)
-    ).all()
-    jobs = [prepare_job_display(job) for job in jobs]
+
+    jobs = load_dashboard_jobs(db)
+
+    overview_stats = {
+        "total": len(jobs),
+        "active": sum(
+            job.status not in {
+                "waiting",
+                "completed",
+                "failed",
+                "cancelled",
+            }
+            for job in jobs
+        ),
+        "completed": sum(
+            job.status == "completed"
+            for job in jobs
+        ),
+        "failed": sum(
+            job.status == "failed"
+            for job in jobs
+        ),
+    }
+
+    recent_jobs = sorted(
+        jobs,
+        key=lambda job: job.id,
+        reverse=True,
+    )[:5]
+
     return templates.TemplateResponse(
         request=request,
-        name="dashboard.html",
+        name="overview.html",
         context={
             "app_name": settings.app_name,
-            "jobs": jobs,
-            "error": None,
-            "success": request.query_params.get("success"),
+            "active_page": "overview",
+            "project_info": get_project_info(),
+            "overview_stats": overview_stats,
+            "recent_jobs": recent_jobs,
+            "system_metrics": collect_dashboard_metrics(),
         },
+    )
+
+
+@app.get("/videos/create")
+def create_video_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    jobs = load_dashboard_jobs(db)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="create_video.html",
+        context=dashboard_context(
+            request,
+            jobs,
+            "create",
+        ),
+    )
+
+
+@app.get("/videos")
+def videos_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    jobs = load_dashboard_jobs(db)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="videos.html",
+        context=dashboard_context(
+            request,
+            jobs,
+            "videos",
+        ),
     )
 
 
@@ -212,9 +324,9 @@ def add_jobs(
     if caption_outline not in {0, 1, 2, 4}:
         caption_outline = 2
     if not title_list:
-        return RedirectResponse("/?success=No valid titles entered.", status_code=303)
+        return RedirectResponse("/videos/create?success=No valid titles entered.", status_code=303)
     if len(title_list) > 20:
-        return RedirectResponse("/?success=Maximum 20 titles allowed.", status_code=303)
+        return RedirectResponse("/videos/create?success=Maximum 20 titles allowed.", status_code=303)
 
     last_job = db.scalar(
         select(VideoJob).order_by(VideoJob.queue_position.desc()).limit(1)
@@ -245,7 +357,7 @@ def add_jobs(
     db.commit()
     start_queue_worker()
     return RedirectResponse(
-        f"/?success={len(title_list)} title(s) added to queue.",
+        f"/videos?success={len(title_list)} title(s) added to queue.",
         status_code=303,
     )
 
@@ -263,13 +375,13 @@ def cancel_job(
 
     if not job:
         return RedirectResponse(
-            "/?success=Job not found.",
+            "/videos?success=Job not found.",
             status_code=303,
         )
 
     if job.status in {"completed", "failed", "cancelled"}:
         return RedirectResponse(
-            "/?success=This job cannot be cancelled.",
+            "/videos?success=This job cannot be cancelled.",
             status_code=303,
         )
 
@@ -289,7 +401,7 @@ def cancel_job(
     )
 
     return RedirectResponse(
-        "/?success=Job cancelled.",
+        "/videos?success=Job cancelled.",
         status_code=303,
     )
 
@@ -307,13 +419,13 @@ def retry_job(
 
     if not job:
         return RedirectResponse(
-            "/?success=Job not found.",
+            "/videos?success=Job not found.",
             status_code=303,
         )
 
     if job.status not in {"failed", "cancelled"}:
         return RedirectResponse(
-            "/?success=Only failed or cancelled jobs can be retried.",
+            "/videos?success=Only failed or cancelled jobs can be retried.",
             status_code=303,
         )
 
@@ -347,7 +459,7 @@ def retry_job(
     start_queue_worker()
 
     return RedirectResponse(
-        "/?success=Job added back to the queue.",
+        "/videos?success=Job added back to the queue.",
         status_code=303,
     )
 
@@ -365,7 +477,7 @@ def delete_job(
 
     if not job:
         return RedirectResponse(
-            "/?success=Job not found.",
+            "/videos?success=Job not found.",
             status_code=303,
         )
 
@@ -378,7 +490,7 @@ def delete_job(
     db.commit()
 
     return RedirectResponse(
-        "/?success=Job and all related files deleted.",
+        "/videos?success=Job and all related files deleted.",
         status_code=303,
     )
 
@@ -394,13 +506,13 @@ def download_job_video(
 
     job = db.get(VideoJob, job_id)
     if not job or not job.output_directory:
-        return RedirectResponse("/?success=Video not found.", status_code=303)
+        return RedirectResponse("/videos?success=Video not found.", status_code=303)
 
     root = OUTPUT_ROOT.resolve()
     video = (Path(job.output_directory) / "final-video.mp4").resolve()
 
     if not video.is_file() or root not in video.parents:
-        return RedirectResponse("/?success=Video not found.", status_code=303)
+        return RedirectResponse("/videos?success=Video not found.", status_code=303)
 
     def iterfile():
         with open(video, "rb") as file:
@@ -417,23 +529,280 @@ def download_job_video(
     )
 
 
+@app.get("/scenes")
+def scenes_page(
+    request: Request,
+    job_id: int | None = None,
+    page: int = 1,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    jobs_with_scenes = db.scalars(
+        select(VideoJob)
+        .where(VideoJob.scene_plan.is_not(None))
+        .order_by(VideoJob.id.desc())
+    ).all()
+
+    selected_job = None
+
+    if job_id is not None:
+        selected_job = next(
+            (
+                job
+                for job in jobs_with_scenes
+                if job.id == job_id
+            ),
+            None,
+        )
+
+    if selected_job is None and jobs_with_scenes:
+        selected_job = jobs_with_scenes[0]
+
+    all_scenes = (
+        prepare_scene_items(selected_job)
+        if selected_job
+        else []
+    )
+
+    per_page = 12
+    total_scenes = len(all_scenes)
+    total_pages = max(
+        1,
+        (total_scenes + per_page - 1) // per_page,
+    )
+    page = max(1, min(page, total_pages))
+
+    start = (page - 1) * per_page
+    scenes = all_scenes[start:start + per_page]
+
+    providers = sorted({
+        scene["provider"]
+        for scene in all_scenes
+        if scene["provider"]
+    })
+
+    scene_stats = {
+        "total": total_scenes,
+        "videos": sum(
+            scene["media_extension"]
+            in {".mp4", ".webm", ".mov"}
+            for scene in all_scenes
+        ),
+        "images": sum(
+            scene["media_extension"]
+            in {".jpg", ".jpeg", ".png", ".webp"}
+            for scene in all_scenes
+        ),
+        "missing": sum(
+            not scene["media_available"]
+            for scene in all_scenes
+        ),
+        "duration": round(sum(
+            scene["duration_seconds"]
+            for scene in all_scenes
+        ), 1),
+    }
+
+    return templates.TemplateResponse(
+        request=request,
+        name="scenes.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "scenes",
+            "project_info": get_project_info(),
+            "jobs_with_scenes": jobs_with_scenes,
+            "selected_job": selected_job,
+            "scenes": scenes,
+            "scene_stats": scene_stats,
+            "providers": providers,
+            "page": page,
+            "total_pages": total_pages,
+        },
+    )
+
+
+@app.get("/jobs/{job_id}/scenes/{scene_number}/media")
+def scene_media_preview(
+    job_id: int,
+    scene_number: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+    media_path = (
+        resolve_scene_media(job, scene_number)
+        if job
+        else None
+    )
+
+    if not media_path:
+        return RedirectResponse(
+            f"/scenes?job_id={job_id}&message=Scene media not found.",
+            status_code=303,
+        )
+
+    media_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mov": "video/quicktime",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+
+    return FileResponse(
+        path=media_path,
+        media_type=media_types.get(
+            media_path.suffix.lower(),
+            "application/octet-stream",
+        ),
+    )
+
+
+@app.get("/publishing")
+def publishing_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    jobs = load_dashboard_jobs(db)
+
+    completed_jobs = sorted(
+        [
+            job
+            for job in jobs
+            if job.status == "completed"
+        ],
+        key=lambda job: job.id,
+        reverse=True,
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="publishing.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "publishing",
+            "project_info": get_project_info(),
+            "publishing_status": collect_publishing_status(),
+            "completed_jobs": completed_jobs,
+        },
+    )
+
+
+@app.get("/system-health")
+def system_health_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="system_health.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "health",
+            "project_info": get_project_info(),
+            "system_metrics": collect_dashboard_metrics(),
+        },
+    )
+
+
+@app.get("/privacy-policy")
+def privacy_policy_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="privacy_policy.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "",
+            "project_info": get_project_info(),
+        },
+    )
+
+
+@app.get("/terms")
+def terms_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="terms.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "",
+            "project_info": get_project_info(),
+        },
+    )
+
+
+@app.get("/about-developer")
+def about_developer_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="about_developer.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "about",
+            "project_info": get_project_info(),
+        },
+    )
+
+
 @app.get("/settings")
 def api_settings_page(request: Request):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
 
+    pexels_ready = has_api_key("pexels_api_key")
+    pixabay_ready = has_api_key("pixabay_api_key")
+    coverr_ready = has_api_key("coverr_api_key")
+    openverse_id_ready = has_api_key("openverse_client_id")
+    openverse_secret_ready = has_api_key(
+        "openverse_client_secret"
+    )
+    gemini_ready = has_api_key("gemini_api_key")
+    together_ready = has_api_key("together_api_key")
+
+    configured_count = sum([
+        pexels_ready,
+        pixabay_ready,
+        coverr_ready,
+        openverse_id_ready and openverse_secret_ready,
+        gemini_ready,
+        together_ready,
+    ])
+
     return templates.TemplateResponse(
-        request,
-        "api_settings.html",
-        {
-            "request": request,
-            "pexels_ready": has_api_key("pexels_api_key"),
-            "pixabay_ready": has_api_key("pixabay_api_key"),
-            "coverr_ready": has_api_key("coverr_api_key"),
-            "openverse_id_ready": has_api_key("openverse_client_id"),
-            "openverse_secret_ready": has_api_key("openverse_client_secret"),
-            "gemini_ready": has_api_key("gemini_api_key"),
-            "together_ready": has_api_key("together_api_key"),
+        request=request,
+        name="api_settings.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "settings",
+            "project_info": get_project_info(),
+            "pexels_ready": pexels_ready,
+            "pixabay_ready": pixabay_ready,
+            "coverr_ready": coverr_ready,
+            "openverse_id_ready": openverse_id_ready,
+            "openverse_secret_ready": openverse_secret_ready,
+            "gemini_ready": gemini_ready,
+            "together_ready": together_ready,
+            "configured_count": configured_count,
+            "total_integrations": 6,
         },
     )
 
@@ -535,7 +904,7 @@ def download_job_narration(
             mp3 = None
     if not mp3:
         return RedirectResponse(
-            "/?success=Narration not found.", status_code=303
+            "/videos?success=Narration not found.", status_code=303
         )
     return FileResponse(
         str(mp3), media_type="audio/mpeg",
@@ -555,7 +924,7 @@ def download_job_script(
     )
     if not script:
         return RedirectResponse(
-            "/?success=Script not found.", status_code=303
+            "/videos?success=Script not found.", status_code=303
         )
     return FileResponse(
         str(script), media_type="text/plain",
@@ -579,7 +948,7 @@ def download_job_captions_srt(
 
     if not subtitle:
         return RedirectResponse(
-            "/?success=Caption file not found.",
+            "/videos?success=Caption file not found.",
             status_code=303,
         )
 
@@ -605,7 +974,7 @@ def download_job_captions_vtt(
 
     if not subtitle:
         return RedirectResponse(
-            "/?success=Caption file not found.",
+            "/videos?success=Caption file not found.",
             status_code=303,
         )
 

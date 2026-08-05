@@ -15,6 +15,18 @@ from app.paths import OUTPUT_ROOT
 
 from app.audio_export import create_narration_mp3
 
+
+def update_job_progress(job_id, status, progress):
+    with SessionLocal() as db:
+        job = db.get(VideoJob, job_id)
+        if not job:
+            return
+
+        job.status = status
+        job.progress = progress
+        db.commit()
+
+
 def run_job(job_id: int) -> None:
     output_dir = OUTPUT_ROOT / str(job_id)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -25,8 +37,8 @@ def run_job(job_id: int) -> None:
             return
 
         job.output_directory = str(output_dir)
-        job.status = "script_generation"
-        job.progress = 5
+        job.status = "outline_generation"
+        job.progress = 3
         job.error_message = None
 
         title = job.title
@@ -48,6 +60,13 @@ def run_job(job_id: int) -> None:
             title=title,
             duration_minutes=duration_minutes,
             video_style=video_style,
+            progress_callback=lambda status, progress: (
+                update_job_progress(
+                    job_id,
+                    status,
+                    progress,
+                )
+            ),
         )
 
 
@@ -64,8 +83,8 @@ def run_job(job_id: int) -> None:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.status = "narration"
-                job.progress = 30
+                job.status = "narration_tts"
+                job.progress = 40
                 db.commit()
 
         generate_narration(
@@ -83,7 +102,8 @@ def run_job(job_id: int) -> None:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.progress = 50
+                job.status = "narration_tts"
+                job.progress = 55
                 db.commit()
 
         package["audio_duration_seconds"] = sync_scenes_to_audio(
@@ -98,7 +118,7 @@ def run_job(job_id: int) -> None:
                 job = db.get(VideoJob, job_id)
                 if job:
                     job.status = "captions"
-                    job.progress = 55
+                    job.progress = 58
                     db.commit()
 
             captions = generate_caption_files(
@@ -116,13 +136,14 @@ def run_job(job_id: int) -> None:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job and captions_enabled:
+                job.status = "captions"
                 job.progress = 65
                 db.commit()
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.status = "media"
+                job.status = "media_collection"
                 job.progress = 68
                 db.commit()
 
@@ -136,13 +157,14 @@ def run_job(job_id: int) -> None:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
+                job.status = "media_collection"
                 job.progress = 86
                 db.commit()
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
-                job.status = "rendering"
+                job.status = "final_rendering"
                 job.progress = 90
                 db.commit()
 

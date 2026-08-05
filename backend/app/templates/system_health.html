@@ -1,0 +1,276 @@
+{% extends "base_app.html" %}
+
+{% block title %}System Health · {{ app_name }}{% endblock %}
+{% block page_heading %}System Health{% endblock %}
+{% block page_subheading %}
+Monitor runtime resources, local services, integrations, and deployment information.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid system-health-page">
+
+  <section class="system-health-hero">
+    <div>
+      <span class="overview-welcome-kicker">
+        Runtime Monitoring
+      </span>
+
+      <h2>{{ project_info.hostname }}</h2>
+
+      <p>
+        Live production metrics detected from the current server
+        and application environment.
+      </p>
+    </div>
+
+    <div class="system-health-live">
+      <span class="sidebar-status-dot"></span>
+      <div>
+        <strong>{{ project_info.environment_status }}</strong>
+        <small>{{ project_info.environment }} environment</small>
+      </div>
+    </div>
+  </section>
+
+  {% include "partials/system_overview.html" %}
+
+  <section class="system-health-grid">
+    <article class="crm-card">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Server Information
+          </span>
+          <h2>Runtime environment</h2>
+        </div>
+      </div>
+
+      <div class="health-detail-list">
+        <div>
+          <span>Hostname</span>
+          <strong>{{ project_info.hostname }}</strong>
+        </div>
+
+        <div>
+          <span>Operating System</span>
+          <strong>{{ project_info.operating_system }}</strong>
+        </div>
+
+        <div>
+          <span>Architecture</span>
+          <strong>{{ project_info.architecture }}</strong>
+        </div>
+
+        <div>
+          <span>Python Version</span>
+          <strong>{{ project_info.python_version }}</strong>
+        </div>
+
+        <div>
+          <span>Application Environment</span>
+          <strong>{{ project_info.environment }}</strong>
+        </div>
+
+        <div>
+          <span>Application Version</span>
+          <strong>{{ project_info.version }}</strong>
+        </div>
+      </div>
+    </article>
+
+    <article class="crm-card">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Deployment
+          </span>
+          <h2>Repository information</h2>
+        </div>
+      </div>
+
+      <div class="health-detail-list">
+        <div>
+          <span>Active Branch</span>
+          <strong>{{ project_info.branch }}</strong>
+        </div>
+
+        <div>
+          <span>Production Tag</span>
+          <strong>{{ project_info.production_tag }}</strong>
+        </div>
+
+        <div>
+          <span>Commit</span>
+          <strong>{{ project_info.commit_short }}</strong>
+        </div>
+
+        <div>
+          <span>Latest Checkpoint</span>
+          <strong>{{ project_info.checkpoint }}</strong>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          API Connections
+        </span>
+        <h2>External provider configuration</h2>
+        <p>
+          Credential availability is detected from encrypted
+          application settings.
+        </p>
+      </div>
+
+      <a href="/settings" class="crm-secondary-button">
+        Manage Integrations
+      </a>
+    </div>
+
+    <div class="health-api-grid">
+      {% for key, provider in system_metrics.apis.providers.items() %}
+      <article>
+        <div>
+          <strong>{{ provider.name }}</strong>
+          <span>{{ provider.purpose }}</span>
+        </div>
+
+        <span class="api-state {% if provider.configured %}is-ready{% endif %}">
+          {{ "Configured" if provider.configured else "Not configured" }}
+        </span>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+
+  const setBar = (id, value) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    const percent = Math.max(
+      0,
+      Math.min(100, Number(value) || 0)
+    );
+
+    element.style.width = `${percent}%`;
+  };
+
+  const setConnection = (id, service) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    element.textContent = service.label;
+    element.classList.toggle("is-online", service.online);
+    element.classList.toggle("is-offline", !service.online);
+  };
+
+  async function refreshSystemHealth() {
+    try {
+      const response = await fetch(
+        "/dashboard/metrics",
+        {
+          credentials: "same-origin",
+          cache: "no-store"
+        }
+      );
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (!data.authenticated) return;
+
+      setText(
+        "metric-cpu-value",
+        data.cpu.usage_percent === null
+          ? "Sampling…"
+          : `${data.cpu.usage_percent}%`
+      );
+
+      setText(
+        "metric-cpu-detail",
+        `${data.cpu.cores} cores · Load ${data.cpu.load_1}`
+      );
+
+      setBar("metric-cpu-bar", data.cpu.usage_percent);
+
+      setText(
+        "metric-memory-value",
+        `${data.memory.usage_percent}%`
+      );
+
+      setText(
+        "metric-memory-detail",
+        `${data.memory.used} of ${data.memory.total}`
+      );
+
+      setBar(
+        "metric-memory-bar",
+        data.memory.usage_percent
+      );
+
+      setText(
+        "metric-gpu-value",
+        `${data.gpu.usage_percent}%`
+      );
+
+      setText(
+        "metric-gpu-detail",
+        `${data.gpu.name} · ${data.gpu.temperature}`
+      );
+
+      setText(
+        "metric-gpu-memory",
+        `VRAM ${data.gpu.memory_used} / ${data.gpu.memory_total}`
+      );
+
+      setBar("metric-gpu-bar", data.gpu.usage_percent);
+
+      setText(
+        "metric-storage-value",
+        `${data.storage.usage_percent}%`
+      );
+
+      setText(
+        "metric-storage-detail",
+        `${data.storage.used} of ${data.storage.total}`
+      );
+
+      setBar(
+        "metric-storage-bar",
+        data.storage.usage_percent
+      );
+
+      setConnection("redis-status", data.redis);
+      setText("redis-detail", data.redis.detail);
+
+      setConnection("ollama-status", data.ollama);
+      setText("ollama-detail", data.ollama.detail);
+
+      setText(
+        "api-connected-count",
+        data.apis.connected
+      );
+    } catch (error) {
+      console.warn("System health refresh failed:", error);
+    }
+  }
+
+  refreshSystemHealth();
+  window.setInterval(refreshSystemHealth, 10000);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/app-shell.css">
+</head>
+
+<body class="app-shell-page">
+  <div class="app-shell">
+    <aside class="app-sidebar" id="app-sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-mark">YT</div>
+        <div class="sidebar-brand-copy">
+          <strong>YouTube AI</strong>
+          <span>Video Generator</span>
+          <small>by Atta Rasool</small>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Main navigation">
+        <a href="/" class="{% if active_page == 'overview' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">⌂</span>
+          <span>Overview</span>
+        </a>
+
+        <a href="/videos/create" class="{% if active_page == 'create' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">＋</span>
+          <span>Create Video</span>
+        </a>
+
+        <a href="/videos" class="{% if active_page == 'videos' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">▶</span>
+          <span>Videos & Queue</span>
+        </a>
+
+        <a href="/scenes" class="{% if active_page == 'scenes' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">▦</span>
+          <span>Scenes Library</span>
+        </a>
+
+        <a href="/publishing" class="{% if active_page == 'publishing' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">↑</span>
+          <span>Publishing</span>
+        </a>
+
+        <a href="/system-health" class="{% if active_page == 'health' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">◈</span>
+          <span>System Health</span>
+        </a>
+
+        <a href="/settings" class="{% if active_page == 'settings' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">⚙</span>
+          <span>API & Integrations</span>
+        </a>
+
+        <a href="/about-developer" class="{% if active_page == 'about' %}is-active{% endif %}">
+          <span class="sidebar-nav-icon">AR</span>
+          <span>About Developer</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer-card">
+        <span class="sidebar-status-dot"></span>
+        <div>
+          <strong>{{ project_info.environment }} · {{ project_info.environment_status }}</strong>
+          <small>Branch: {{ project_info.branch }}</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="app-sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <div class="app-main">
+      <header class="app-header">
+        <div class="app-header-left">
+          <button
+            type="button"
+            class="sidebar-toggle"
+            id="sidebar-toggle"
+            aria-label="Toggle navigation"
+          >☰</button>
+
+          <div>
+            <h1>{% block page_heading %}Dashboard{% endblock %}</h1>
+            <p>{% block page_subheading %}Manage your automated video production system.{% endblock %}</p>
+          </div>
+        </div>
+
+        <div class="app-header-actions">
+          {% block header_actions %}{% endblock %}
+
+          <form method="post" action="/logout">
+            <button type="submit" class="header-logout-button">
+              Logout
+            </button>
+          </form>
+        </div>
+      </header>
+
+      <main class="app-content">
+        {% block content %}{% endblock %}
+      </main>
+
+      <footer class="app-footer">
+        <div>
+          © {{ project_info.current_year }} YouTube AI Video Generator by Atta Rasool
+        </div>
+
+        <nav>
+          <a href="/privacy-policy">Privacy Policy</a>
+          <a href="/terms">Terms & Conditions</a>
+          <a href="https://attarasool.com" target="_blank" rel="noopener">
+            attarasool.com
+          </a>
+        </nav>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const sidebar = document.getElementById("app-sidebar");
+      const toggle = document.getElementById("sidebar-toggle");
+      const backdrop = document.getElementById("sidebar-backdrop");
+
+      function closeSidebar() {
+        document.body.classList.remove("sidebar-open");
+      }
+
+      if (toggle) {
+        toggle.addEventListener("click", function () {
+          document.body.classList.toggle("sidebar-open");
+        });
+      }
+
+      if (backdrop) {
+        backdrop.addEventListener("click", closeSidebar);
+      }
+
+      window.addEventListener("resize", function () {
+        if (window.innerWidth > 980) closeSidebar();
+      });
+    })();
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,267 @@
+{% extends "base_app.html" %}
+
+{% block title %}Overview · {{ app_name }}{% endblock %}
+{% block page_heading %}Overview{% endblock %}
+{% block page_subheading %}
+Monitor video production, system health, and recent activity.
+{% endblock %}
+
+{% block header_actions %}
+<a href="/videos/create" class="crm-primary-button">＋ Create Video</a>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid">
+
+  <section class="overview-welcome-card">
+    <div>
+      <span class="overview-welcome-kicker">
+        AI Production Workspace
+      </span>
+      <h2>Welcome back</h2>
+      <p>
+        Create, monitor, and manage complete AI-generated videos
+        from one streamlined production dashboard.
+      </p>
+
+      <div class="overview-welcome-actions">
+        <a href="/videos/create" class="crm-primary-button">
+          Create New Video
+        </a>
+        <a href="/videos" class="crm-secondary-button">
+          View Video Queue
+        </a>
+      </div>
+    </div>
+
+    <div class="overview-production-status">
+      <span class="overview-production-dot"></span>
+      <div>
+        <strong>Production system online</strong>
+        <small>All core services are being monitored</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="overview-stat-grid">
+    <article class="overview-stat-card">
+      <span>Total Videos</span>
+      <strong>{{ overview_stats.total }}</strong>
+      <small>All video jobs</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>In Progress</span>
+      <strong>{{ overview_stats.active }}</strong>
+      <small>Currently generating</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Completed</span>
+      <strong>{{ overview_stats.completed }}</strong>
+      <small>Ready to download</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Failed</span>
+      <strong>{{ overview_stats.failed }}</strong>
+      <small>Require attention</small>
+    </article>
+  </section>
+
+  {% include "partials/system_overview.html" %}
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <h2>Recent Videos</h2>
+        <p>
+          Latest production activity and video-generation status.
+        </p>
+      </div>
+
+      <a href="/videos" class="crm-secondary-button">
+        View All Videos
+      </a>
+    </div>
+
+    {% if recent_jobs %}
+    <div class="overview-recent-list">
+      {% for job in recent_jobs %}
+      <article class="overview-recent-job">
+        <div class="overview-recent-job-main">
+          <span class="overview-video-icon">▶</span>
+
+          <div>
+            <strong>{{ job.title }}</strong>
+            <small>
+              {{ job.duration_minutes }} minutes ·
+              {{ job.display_status }}
+            </small>
+          </div>
+        </div>
+
+        <div class="overview-recent-progress">
+          <div>
+            <span>{{ job.progress }}%</span>
+            <small>{{ job.eta_text }}</small>
+          </div>
+
+          <div class="overview-progress-track">
+            <span style="width: {{ job.progress }}%;"></span>
+          </div>
+        </div>
+
+        <div class="overview-recent-actions">
+          {% if job.status == "completed" %}
+          <a href="/jobs/{{ job.id }}/download">
+            Download
+          </a>
+          {% else %}
+          <a href="/videos">
+            View Status
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No videos created yet</h3>
+      <p>Create your first AI-generated video to begin.</p>
+      <a href="/videos/create" class="crm-primary-button">
+        Create First Video
+      </a>
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+
+  const setBar = (id, value) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    const percent = Math.max(
+      0,
+      Math.min(100, Number(value) || 0)
+    );
+
+    element.style.width = `${percent}%`;
+  };
+
+  const setConnection = (id, service) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+
+    element.textContent = service.label;
+    element.classList.toggle("is-online", service.online);
+    element.classList.toggle("is-offline", !service.online);
+  };
+
+  async function refreshSystemMetrics() {
+    try {
+      const response = await fetch(
+        "/dashboard/metrics",
+        {
+          credentials: "same-origin",
+          cache: "no-store"
+        }
+      );
+
+      if (!response.ok) return;
+
+      const data = await response.json();
+      if (!data.authenticated) return;
+
+      setText(
+        "metric-cpu-value",
+        data.cpu.usage_percent === null
+          ? "Sampling…"
+          : `${data.cpu.usage_percent}%`
+      );
+
+      setText(
+        "metric-cpu-detail",
+        `${data.cpu.cores} cores · Load ${data.cpu.load_1}`
+      );
+
+      setBar("metric-cpu-bar", data.cpu.usage_percent);
+
+      setText(
+        "metric-memory-value",
+        `${data.memory.usage_percent}%`
+      );
+
+      setText(
+        "metric-memory-detail",
+        `${data.memory.used} of ${data.memory.total}`
+      );
+
+      setBar(
+        "metric-memory-bar",
+        data.memory.usage_percent
+      );
+
+      setText(
+        "metric-gpu-value",
+        `${data.gpu.usage_percent}%`
+      );
+
+      setText(
+        "metric-gpu-detail",
+        `${data.gpu.name} · ${data.gpu.temperature}`
+      );
+
+      setText(
+        "metric-gpu-memory",
+        `VRAM ${data.gpu.memory_used} / ${data.gpu.memory_total}`
+      );
+
+      setBar("metric-gpu-bar", data.gpu.usage_percent);
+
+      setText(
+        "metric-storage-value",
+        `${data.storage.usage_percent}%`
+      );
+
+      setText(
+        "metric-storage-detail",
+        `${data.storage.used} of ${data.storage.total}`
+      );
+
+      setBar(
+        "metric-storage-bar",
+        data.storage.usage_percent
+      );
+
+      setConnection("redis-status", data.redis);
+      setText("redis-detail", data.redis.detail);
+
+      setConnection("ollama-status", data.ollama);
+      setText("ollama-detail", data.ollama.detail);
+
+      setText(
+        "api-connected-count",
+        data.apis.connected
+      );
+    } catch (error) {
+      console.warn("Metrics refresh failed:", error);
+    }
+  }
+
+  refreshSystemMetrics();
+  window.setInterval(refreshSystemMetrics, 10000);
+})();
+</script>
+{% endblock %}

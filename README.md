@@ -46,8 +46,7 @@ They are not stored in:
 ### Requirements
 
 - Ubuntu 24.04
-- NVIDIA GPU with working drivers
-- CUDA support
+- NVIDIA GPU-enabled VM
 - Python 3.12
 - sudo access
 - Private GitHub repository access
@@ -72,7 +71,7 @@ cd youtube-ai-generator
 Run installer:
 
 ```bash
-sudo bash install.sh
+sudo bash bootstrap.sh
 ```
 
 
@@ -422,3 +421,15 @@ openrelay-setup
 The recovery archive is stored in:
 
 `recovery/runtime-state.tar.gz`
+
+## One-Command Fresh GPU VM Setup
+
+After cloning the `openrelay-setup` branch and entering the project directory, run:
+
+    sudo bash bootstrap.sh
+
+The bootstrap checks the NVIDIA GPU and driver. If the driver is working, it continues with the existing `install.sh`. If it installs a driver and requests a reboot, reboot and run the same command again.
+
+Successful setup ends with:
+
+    INSTALLATION_COMPLETE

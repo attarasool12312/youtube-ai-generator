@@ -1,0 +1,277 @@
+{% extends "base_app.html" %}
+
+{% block title %}Scenes Library · {{ app_name }}{% endblock %}
+{% block page_heading %}Scenes Library{% endblock %}
+{% block page_subheading %}
+Review narration, prompts, media sources, and generated scene assets.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid scenes-page">
+
+  <section class="scenes-hero">
+    <div>
+      <span class="overview-welcome-kicker">
+        Production Assets
+      </span>
+
+      <h2>Scene media library</h2>
+
+      <p>
+        Browse scene plans and media files using portable job paths
+        detected from the current deployment.
+      </p>
+    </div>
+
+    {% if jobs_with_scenes %}
+    <form method="get" action="/scenes" class="scene-job-selector">
+      <label for="scene-job">Select Video</label>
+
+      <select
+        id="scene-job"
+        name="job_id"
+        onchange="this.form.submit()"
+      >
+        {% for job in jobs_with_scenes %}
+        <option
+          value="{{ job.id }}"
+          {% if selected_job and selected_job.id == job.id %}selected{% endif %}
+        >
+          #{{ job.id }} — {{ job.title[:48] }}{% if job.title | length > 48 %}…{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </section>
+
+  {% if request.query_params.get("message") %}
+  <div class="success">
+    {{ request.query_params.get("message") }}
+  </div>
+  {% endif %}
+
+  {% if selected_job %}
+  <section class="scene-selected-video">
+    <div>
+      <span>Selected Video</span>
+      <strong>{{ selected_job.title }}</strong>
+      <small>
+        Job #{{ selected_job.id }} ·
+        {{ selected_job.duration_minutes }} minutes ·
+        {{ selected_job.status | replace("_", " ") | title }}
+      </small>
+    </div>
+
+    {% if selected_job.status == "completed" %}
+    <a
+      href="/jobs/{{ selected_job.id }}/download"
+      class="crm-secondary-button"
+    >
+      Download Final Video
+    </a>
+    {% endif %}
+  </section>
+
+  <section class="overview-stat-grid scene-stat-grid">
+    <article class="overview-stat-card">
+      <span>Total Scenes</span>
+      <strong>{{ scene_stats.total }}</strong>
+      <small>Stored in the scene plan</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Video Assets</span>
+      <strong>{{ scene_stats.videos }}</strong>
+      <small>Portable video media files</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Image Assets</span>
+      <strong>{{ scene_stats.images }}</strong>
+      <small>Portable image media files</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Total Duration</span>
+      <strong>{{ scene_stats.duration }}s</strong>
+      <small>
+        {{ scene_stats.missing }} missing media files
+      </small>
+    </article>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Scene Plan
+        </span>
+
+        <h2>Production scenes</h2>
+
+        <p>
+          Showing page {{ page }} of {{ total_pages }}.
+          {% if providers %}
+          Providers: {{ providers | join(", ") }}.
+          {% endif %}
+        </p>
+      </div>
+    </div>
+
+    {% if scenes %}
+    <div class="scene-library-grid">
+      {% for scene in scenes %}
+      <article class="scene-library-card">
+        <div class="scene-media-preview">
+          {% if scene.media_available %}
+            {% if scene.media_extension in [".mp4", ".webm", ".mov"] %}
+            <video
+              controls
+              preload="none"
+              playsinline
+            >
+              <source
+                src="/jobs/{{ selected_job.id }}/scenes/{{ scene.scene_number }}/media"
+              >
+            </video>
+            {% else %}
+            <img
+              src="/jobs/{{ selected_job.id }}/scenes/{{ scene.scene_number }}/media"
+              alt="Scene {{ scene.scene_number }} media"
+              loading="lazy"
+            >
+            {% endif %}
+          {% else %}
+          <div class="scene-media-missing">
+            <span>Media unavailable</span>
+          </div>
+          {% endif %}
+
+          <span class="scene-number-badge">
+            Scene {{ scene.scene_number }}
+          </span>
+
+          <span class="scene-type-badge">
+            {{ scene.media_type | title }}
+          </span>
+        </div>
+
+        <div class="scene-library-content">
+          <div class="scene-library-meta">
+            <span>{{ scene.duration_seconds }} seconds</span>
+            <span>{{ scene.provider }}</span>
+          </div>
+
+          <p class="scene-narration">
+            {{ scene.narration }}
+          </p>
+
+          {% if scene.stock_keywords %}
+          <div class="scene-keywords">
+            {% for keyword in scene.stock_keywords[:5] %}
+            <span>{{ keyword }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <details class="scene-details">
+            <summary>View production details</summary>
+
+            {% if scene.query %}
+            <div>
+              <strong>Search Query</strong>
+              <p>{{ scene.query }}</p>
+            </div>
+            {% endif %}
+
+            {% if scene.image_prompt %}
+            <div>
+              <strong>Image Prompt</strong>
+              <p>{{ scene.image_prompt }}</p>
+            </div>
+            {% endif %}
+
+            {% if scene.video_prompt %}
+            <div>
+              <strong>Video Prompt</strong>
+              <p>{{ scene.video_prompt }}</p>
+            </div>
+            {% endif %}
+
+            {% if scene.author %}
+            <div>
+              <strong>Media Author</strong>
+              <p>{{ scene.author }}</p>
+            </div>
+            {% endif %}
+
+            {% if scene.source.startswith("https://") or scene.source.startswith("http://") %}
+            <a
+              href="{{ scene.source }}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="scene-source-link"
+            >
+              Open original source
+            </a>
+            {% endif %}
+          </details>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+
+    {% if total_pages > 1 %}
+    <nav class="scene-pagination" aria-label="Scene pages">
+      {% if page > 1 %}
+      <a
+        href="/scenes?job_id={{ selected_job.id }}&page={{ page - 1 }}"
+      >
+        ← Previous
+      </a>
+      {% else %}
+      <span></span>
+      {% endif %}
+
+      <strong>Page {{ page }} of {{ total_pages }}</strong>
+
+      {% if page < total_pages %}
+      <a
+        href="/scenes?job_id={{ selected_job.id }}&page={{ page + 1 }}"
+      >
+        Next →
+      </a>
+      {% else %}
+      <span></span>
+      {% endif %}
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No scenes found</h3>
+      <p>
+        This video does not currently contain a readable scene plan.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  {% else %}
+  <div class="crm-empty-state">
+    <h3>No scene plans available</h3>
+
+    <p>
+      Scene plans will automatically appear after a video reaches
+      the scene-planning stage.
+    </p>
+
+    <a href="/videos/create" class="crm-primary-button">
+      Create Video
+    </a>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

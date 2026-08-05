@@ -1,0 +1,118 @@
+{% extends "base_app.html" %}
+
+{% block title %}Terms & Conditions · {{ app_name }}{% endblock %}
+{% block page_heading %}Terms & Conditions{% endblock %}
+{% block page_subheading %}
+Conditions for using the AI video-production application.
+{% endblock %}
+
+{% block content %}
+<div class="legal-page">
+  <section class="legal-hero">
+    <span class="overview-welcome-kicker">Legal Information</span>
+    <h2>Terms & Conditions</h2>
+    <p>
+      These terms apply to use of
+      {{ project_info.application_name }} within this deployment.
+    </p>
+
+    <div class="legal-meta">
+      <span>Version: {{ project_info.version }}</span>
+      <span>Environment: {{ project_info.environment }}</span>
+    </div>
+  </section>
+
+  <section class="crm-card legal-content">
+    <article>
+      <h2>1. Authorized Use</h2>
+      <p>
+        The application may only be accessed by authorized users of
+        the deployment. Login credentials must not be shared with
+        unauthorized individuals.
+      </p>
+    </article>
+
+    <article>
+      <h2>2. Content Responsibility</h2>
+      <p>
+        The user is responsible for reviewing generated scripts,
+        narration, media, captions, attributions, and final videos
+        before publication or distribution.
+      </p>
+    </article>
+
+    <article>
+      <h2>3. Third-Party Services</h2>
+      <p>
+        AI providers, stock-media services, publishing platforms, and
+        other integrations are independent services. Their
+        availability, accuracy, licensing conditions, limits, and
+        pricing remain subject to their own policies.
+      </p>
+    </article>
+
+    <article>
+      <h2>4. Media and Licensing</h2>
+      <p>
+        Users must verify that selected media, generated assets,
+        music, images, footage, and other materials are suitable and
+        properly licensed for the intended use.
+      </p>
+    </article>
+
+    <article>
+      <h2>5. AI-Generated Output</h2>
+      <p>
+        Artificial-intelligence output may contain mistakes,
+        incomplete information, or unsuitable material. Human review
+        is required before relying on or publishing generated output.
+      </p>
+    </article>
+
+    <article>
+      <h2>6. System Availability</h2>
+      <p>
+        Video production depends on server resources, GPU
+        availability, storage, local services, external APIs, and
+        network connectivity. Continuous or uninterrupted operation
+        is not guaranteed.
+      </p>
+    </article>
+
+    <article>
+      <h2>7. Security and Backups</h2>
+      <p>
+        The deployment owner is responsible for server security,
+        credential management, access controls, backups, recovery
+        testing, software updates, and infrastructure availability.
+      </p>
+    </article>
+
+    <article>
+      <h2>8. Changes</h2>
+      <p>
+        Application functionality and these terms may be updated as
+        the system, integrations, or deployment requirements change.
+      </p>
+    </article>
+
+    <article>
+      <h2>9. Contact</h2>
+      <p>
+        Project and support inquiries can be submitted through
+        <a
+          href="https://attarasool.com"
+          target="_blank"
+          rel="noopener"
+        >attarasool.com</a>.
+      </p>
+    </article>
+
+    <div class="legal-notice">
+      These general terms should be reviewed and adapted by the
+      deployment owner or qualified legal adviser before public or
+      commercial use.
+    </div>
+  </section>
+</div>
+{% endblock %}

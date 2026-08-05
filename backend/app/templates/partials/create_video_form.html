@@ -1,0 +1,159 @@
+<section class="crm-card video-creation-panel">
+      <h2>Add Video Titles</h2>
+      <p>Enter up to 20 titles, one title per line.</p>
+      {% if error %}
+      <div class="error">{{ error }}</div>
+      {% endif %}
+      {% if success %}
+      <div class="success">{{ success }}</div>
+      {% endif %}
+      <form method="post" action="/jobs">
+        <label for="titles">Video Titles</label>
+        <textarea id="titles" name="titles" rows="12" required></textarea>
+        <div class="settings-grid">
+          <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option></select></div>
+          <div><label>Language</label><input value="English" disabled></div>
+          <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
+          <div>
+            <label>Main Narrator</label>
+            <div class="voice-select-row">
+              <select name="narrator_voice" required>
+                <option value="am_michael" selected>Michael - Male</option>
+                <option value="am_fenrir">Fenrir - Male</option>
+                <option value="am_puck">Puck - Male</option>
+                <option value="af_heart">Heart - Female</option>
+                <option value="af_bella">Bella - Female</option>
+                <option value="af_nicole">Nicole - Female</option>
+              </select>
+              <button
+                type="button"
+                class="voice-preview-button"
+                data-voice-select="narrator_voice"
+              >▶ Preview</button>
+            </div>
+          </div>
+        <div>
+  <label>Voice Speed</label>
+  <select name="voice_speed">
+    <option value="0.85">Slow</option>
+    <option value="1.0" selected>Normal</option>
+    <option value="1.15">Fast</option>
+  </select>
+</div>
+<div>
+  <label>Orientation</label>
+  <select name="orientation">
+    <option value="landscape" selected>Landscape — 16:9</option>
+    <option value="portrait">Portrait — 9:16</option>
+    <option value="square">Square — 1:1</option>
+  </select>
+</div>
+<div>
+  <label>Media Source</label>
+  <select name="media_source">
+    <option value="mixed" selected>Mixed — Stock + AI Fallback</option>
+    <option value="stock_only">Stock Only</option>
+    <option value="ai_only">AI Only — FLUX</option>
+  </select>
+</div>
+</div>
+        <div class="voice-pool">
+          <label>Additional Voices</label>
+          <div class="voice-checkboxes">
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="am_fenrir" checked> Fenrir</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="am_puck" checked> Puck</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_heart" checked> Heart</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
+            </div>
+            <div class="voice-option">
+              <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
+            </div>
+          </div>
+        </div>
+
+        <section class="caption-settings">
+          <div class="caption-settings-heading">
+            <div>
+              <h3>Video Captions</h3>
+              <p>
+                Generate timed captions with Whisper and burn them
+                into the final video.
+              </p>
+            </div>
+          </div>
+
+          <div class="caption-controls-grid">
+            <div>
+              <label for="captions_enabled">Captions</label>
+              <select
+                id="captions_enabled"
+                name="captions_enabled"
+              >
+                <option value="disabled">Disabled</option>
+                <option value="enabled" selected>Enabled</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_font_size">Font Size</label>
+              <select
+                id="caption_font_size"
+                name="caption_font_size"
+              >
+                <option value="36" selected>Small</option>
+                <option value="48">Medium</option>
+                <option value="60">Large</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_position">Position</label>
+              <select
+                id="caption_position"
+                name="caption_position"
+              >
+                <option value="top">Top</option>
+                <option value="middle">Middle</option>
+                <option value="bottom" selected>
+                  Bottom — Safe Margin
+                </option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_background">
+                Background Box
+              </label>
+              <select
+                id="caption_background"
+                name="caption_background"
+              >
+                <option value="on" selected>On</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="caption_outline">Outline</label>
+              <select
+                id="caption_outline"
+                name="caption_outline"
+              >
+                <option value="0">None</option>
+                <option value="1">Thin</option>
+                <option value="2" selected>Medium</option>
+                <option value="4">Thick</option>
+              </select>
+            </div>
+          </div>
+        </section>
+        <button type="submit">Add Titles to Queue</button>
+      </form>
+    </section>

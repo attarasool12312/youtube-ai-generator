@@ -1,0 +1,196 @@
+{% extends "base_app.html" %}
+
+{% block title %}Publishing · {{ app_name }}{% endblock %}
+{% block page_heading %}Publishing{% endblock %}
+{% block page_subheading %}
+Prepare completed videos for publishing and monitor integration readiness.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid publishing-page">
+
+  <section class="publishing-hero">
+    <div>
+      <span class="overview-welcome-kicker">
+        Distribution Workspace
+      </span>
+
+      <h2>YouTube publishing center</h2>
+
+      <p>
+        Review completed videos and confirm that the required
+        YouTube OAuth credentials and client libraries are available
+        on the current deployment.
+      </p>
+    </div>
+
+    <div class="publishing-readiness">
+      <span class="api-state {% if publishing_status.ready %}is-ready{% endif %}">
+        {{ publishing_status.label }}
+      </span>
+
+      <small>{{ publishing_status.detail }}</small>
+    </div>
+  </section>
+
+  <section class="publishing-status-grid">
+    <article class="overview-stat-card">
+      <span>Completed Videos</span>
+      <strong>{{ completed_jobs | length }}</strong>
+      <small>Available for download or publishing</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Google API Client</span>
+      <strong>
+        {{ "Ready" if publishing_status.google_api_available else "Missing" }}
+      </strong>
+      <small>Detected from the active Python environment</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>Google Authentication</span>
+      <strong>
+        {{ "Ready" if publishing_status.google_auth_available else "Missing" }}
+      </strong>
+      <small>OAuth runtime dependency status</small>
+    </article>
+
+    <article class="overview-stat-card">
+      <span>YouTube Credentials</span>
+      <strong>
+        {{ "Ready" if publishing_status.credentials_ready else "Missing" }}
+      </strong>
+      <small>Detected securely from environment configuration</small>
+    </article>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Integration Readiness
+        </span>
+
+        <h2>YouTube publishing requirements</h2>
+
+        <p>
+          Publishing will only be enabled after all required
+          dependencies and OAuth credentials are available.
+        </p>
+      </div>
+    </div>
+
+    <div class="publishing-checklist">
+      <article class="{% if publishing_status.google_api_available %}is-complete{% endif %}">
+        <span class="publishing-check-icon">
+          {{ "✓" if publishing_status.google_api_available else "!" }}
+        </span>
+
+        <div>
+          <strong>Google API client library</strong>
+          <small>
+            Required for communication with the YouTube Data API.
+          </small>
+        </div>
+      </article>
+
+      <article class="{% if publishing_status.google_auth_available %}is-complete{% endif %}">
+        <span class="publishing-check-icon">
+          {{ "✓" if publishing_status.google_auth_available else "!" }}
+        </span>
+
+        <div>
+          <strong>Google OAuth authentication library</strong>
+          <small>
+            Required for secure channel authorization.
+          </small>
+        </div>
+      </article>
+
+      <article class="{% if publishing_status.credentials_ready %}is-complete{% endif %}">
+        <span class="publishing-check-icon">
+          {{ "✓" if publishing_status.credentials_ready else "!" }}
+        </span>
+
+        <div>
+          <strong>YouTube OAuth credentials</strong>
+          <small>
+            Client credentials or a configured credential file
+            must be present on this deployment.
+          </small>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Ready Videos
+        </span>
+
+        <h2>Completed production files</h2>
+
+        <p>
+          Videos shown here are generated from the live job database.
+        </p>
+      </div>
+
+      <a href="/videos" class="crm-secondary-button">
+        Open Video Queue
+      </a>
+    </div>
+
+    {% if completed_jobs %}
+    <div class="publishing-video-list">
+      {% for job in completed_jobs %}
+      <article class="publishing-video-card">
+        <div class="publishing-video-main">
+          <span class="overview-video-icon">▶</span>
+
+          <div>
+            <strong>{{ job.title }}</strong>
+
+            <small>
+              {{ job.duration_minutes }} minutes ·
+              {{ job.orientation | title }} ·
+              {{ job.video_style | title }}
+            </small>
+          </div>
+        </div>
+
+        <span class="job-status job-status-completed">
+          Completed
+        </span>
+
+        <div class="publishing-video-actions">
+          <a href="/jobs/{{ job.id }}/download">
+            Download Video
+          </a>
+
+          <a href="/jobs/{{ job.id }}/download/script">
+            Script
+          </a>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No completed videos available</h3>
+
+      <p>
+        Completed production jobs will automatically appear here.
+      </p>
+
+      <a href="/videos/create" class="crm-primary-button">
+        Create Video
+      </a>
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

@@ -1,16 +1,38 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>API Settings</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-<div class="settings-card">
-  <h1>API Settings</h1>
-  <p>Leave a field empty to keep the existing key.</p>
+{% extends "base_app.html" %}
+
+{% block title %}API & Integrations · {{ app_name }}{% endblock %}
+{% block page_heading %}API & Integrations{% endblock %}
+{% block page_subheading %}
+Manage AI providers, stock-media services, and external integrations.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid api-settings-page">
+
+  <section class="api-settings-hero">
+    <div>
+      <span class="overview-welcome-kicker">
+        Secure Integrations
+      </span>
+
+      <h2>Connect your production providers</h2>
+
+      <p>
+        API credentials are encrypted before storage. Leave any
+        field empty to keep its existing saved value.
+      </p>
+    </div>
+
+    <div class="api-settings-summary">
+      <strong>{{ configured_count }}/{{ total_integrations }}</strong>
+      <span>providers configured</span>
+    </div>
+  </section>
 
   {% if request.query_params.get("saved") %}
-  <div class="success">API settings saved securely.</div>
+  <div class="success">
+    API settings saved securely.
+  </div>
   {% endif %}
 
   {% if request.query_params.get("message") %}
@@ -19,96 +41,318 @@
   </div>
   {% endif %}
 
-  <form method="post" action="/settings">
-    <label>Pexels API Key</label>
-    <input type="password" name="pexels_api_key"
-      placeholder="{{ 'Saved securely' if pexels_ready else 'Not configured' }}">
+  <form
+    method="post"
+    action="/settings"
+    class="api-settings-form"
+  >
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            AI Providers
+          </span>
+          <h2>Script generation services</h2>
+          <p>
+            Used by the provider fallback chain for long-form
+            script generation.
+          </p>
+        </div>
+      </div>
 
-    <label>Pixabay API Key</label>
-    <input type="password" name="pixabay_api_key"
-      placeholder="{{ 'Saved securely' if pixabay_ready else 'Not configured' }}">
+      <div class="api-provider-grid">
+        <article class="api-provider-card">
+          <div class="api-provider-card-header">
+            <div class="api-provider-logo">G</div>
+            <div>
+              <h3>Google Gemini</h3>
+              <p>Primary cloud script provider</p>
+            </div>
 
-    <label>Coverr API Key</label>
-    <input type="password" name="coverr_api_key"
-      placeholder="{{ 'Saved securely' if coverr_ready else 'Not configured' }}">
+            <span class="api-state {% if gemini_ready %}is-ready{% endif %}">
+              {{ "Connected" if gemini_ready else "Not configured" }}
+            </span>
+          </div>
 
-    <label>Openverse Client ID</label>
-    <input type="password" name="openverse_client_id"
-      placeholder="{{ 'Saved securely' if openverse_id_ready else 'Not configured' }}">
+          <label for="gemini_api_key">
+            Gemini API Key
+          </label>
 
-    <label>Openverse Client Secret</label>
-    <input type="password" name="openverse_client_secret"
-      placeholder="{{ 'Saved securely' if openverse_secret_ready else 'Not configured' }}">
+          <input
+            id="gemini_api_key"
+            type="password"
+            name="gemini_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if gemini_ready else 'Enter Gemini API key' }}"
+          >
+        </article>
 
-    
-      <label>Gemini API Key</label>
-      <input type="password" name="gemini_api_key"
-        placeholder="{{ 'Saved securely' if gemini_ready else 'Not configured' }}">
+        <article class="api-provider-card">
+          <div class="api-provider-card-header">
+            <div class="api-provider-logo">TA</div>
+            <div>
+              <h3>Together AI</h3>
+              <p>Cloud fallback script provider</p>
+            </div>
 
-      <label>Together AI API Key</label>
-      <input type="password" name="together_api_key"
-        placeholder="{{ 'Saved securely' if together_ready else 'Not configured' }}">
+            <span class="api-state {% if together_ready %}is-ready{% endif %}">
+              {{ "Connected" if together_ready else "Not configured" }}
+            </span>
+          </div>
 
-    <button type="submit">Save API Keys</button>
-    <a href="/" class="settings-back">Back to Dashboard</a>
+          <label for="together_api_key">
+            Together AI API Key
+          </label>
+
+          <input
+            id="together_api_key"
+            type="password"
+            name="together_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if together_ready else 'Enter Together AI API key' }}"
+          >
+        </article>
+      </div>
+    </section>
+
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Media Providers
+          </span>
+          <h2>Stock image and video services</h2>
+          <p>
+            Used to source visual media during scene production.
+          </p>
+        </div>
+      </div>
+
+      <div class="api-provider-grid api-provider-grid-three">
+        <article class="api-provider-card">
+          <div class="api-provider-card-header">
+            <div class="api-provider-logo">PX</div>
+            <div>
+              <h3>Pexels</h3>
+              <p>Stock images and videos</p>
+            </div>
+
+            <span class="api-state {% if pexels_ready %}is-ready{% endif %}">
+              {{ "Connected" if pexels_ready else "Not configured" }}
+            </span>
+          </div>
+
+          <label for="pexels_api_key">
+            Pexels API Key
+          </label>
+
+          <input
+            id="pexels_api_key"
+            type="password"
+            name="pexels_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if pexels_ready else 'Enter Pexels API key' }}"
+          >
+        </article>
+
+        <article class="api-provider-card">
+          <div class="api-provider-card-header">
+            <div class="api-provider-logo">PB</div>
+            <div>
+              <h3>Pixabay</h3>
+              <p>Stock images and videos</p>
+            </div>
+
+            <span class="api-state {% if pixabay_ready %}is-ready{% endif %}">
+              {{ "Connected" if pixabay_ready else "Not configured" }}
+            </span>
+          </div>
+
+          <label for="pixabay_api_key">
+            Pixabay API Key
+          </label>
+
+          <input
+            id="pixabay_api_key"
+            type="password"
+            name="pixabay_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if pixabay_ready else 'Enter Pixabay API key' }}"
+          >
+        </article>
+
+        <article class="api-provider-card">
+          <div class="api-provider-card-header">
+            <div class="api-provider-logo">CV</div>
+            <div>
+              <h3>Coverr</h3>
+              <p>Stock video provider</p>
+            </div>
+
+            <span class="api-state {% if coverr_ready %}is-ready{% endif %}">
+              {{ "Connected" if coverr_ready else "Not configured" }}
+            </span>
+          </div>
+
+          <label for="coverr_api_key">
+            Coverr API Key
+          </label>
+
+          <input
+            id="coverr_api_key"
+            type="password"
+            name="coverr_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if coverr_ready else 'Enter Coverr API key' }}"
+          >
+        </article>
+      </div>
+    </section>
+
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Open Media Search
+          </span>
+          <h2>Openverse credentials</h2>
+          <p>
+            Both the client ID and client secret are required for
+            a complete Openverse connection.
+          </p>
+        </div>
+
+        <span class="api-state {% if openverse_id_ready and openverse_secret_ready %}is-ready{% endif %}">
+          {{
+            "Connected"
+            if openverse_id_ready and openverse_secret_ready
+            else "Incomplete"
+          }}
+        </span>
+      </div>
+
+      <div class="api-fields-grid">
+        <div>
+          <label for="openverse_client_id">
+            Openverse Client ID
+          </label>
+
+          <input
+            id="openverse_client_id"
+            type="password"
+            name="openverse_client_id"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if openverse_id_ready else 'Enter Openverse client ID' }}"
+          >
+        </div>
+
+        <div>
+          <label for="openverse_client_secret">
+            Openverse Client Secret
+          </label>
+
+          <input
+            id="openverse_client_secret"
+            type="password"
+            name="openverse_client_secret"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if openverse_secret_ready else 'Enter Openverse client secret' }}"
+          >
+        </div>
+      </div>
+    </section>
+
+    <div class="api-save-bar">
+      <div>
+        <strong>Secure credential storage</strong>
+        <span>
+          Empty fields will not overwrite existing credentials.
+        </span>
+      </div>
+
+      <button type="submit" class="crm-primary-button">
+        Save API Settings
+      </button>
+    </div>
   </form>
 
-  <div class="api-remove-section">
-    <h2>Remove Saved API Key</h2>
-    <p>
-      Select a saved credential to permanently remove it.
-    </p>
+  <section class="crm-card api-remove-section">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Credential Management
+        </span>
+        <h2>Remove a saved credential</h2>
+        <p>
+          Permanently delete an API credential from encrypted
+          application storage.
+        </p>
+      </div>
+    </div>
 
     <form
       method="post"
       action="/settings/remove"
+      class="api-remove-form"
       onsubmit="return confirm('Permanently remove this saved API credential?');"
     >
-      <label for="key_name">Saved API Credential</label>
+      <div>
+        <label for="key_name">
+          Saved API Credential
+        </label>
 
-      <select id="key_name" name="key_name" required>
-        <option value="">Select API credential</option>
+        <select id="key_name" name="key_name" required>
+          <option value="">Select API credential</option>
 
-        {% if pexels_ready %}
-        <option value="pexels_api_key">Pexels API Key</option>
-        {% endif %}
+          {% if pexels_ready %}
+          <option value="pexels_api_key">
+            Pexels API Key
+          </option>
+          {% endif %}
 
-        {% if pixabay_ready %}
-        <option value="pixabay_api_key">Pixabay API Key</option>
-        {% endif %}
+          {% if pixabay_ready %}
+          <option value="pixabay_api_key">
+            Pixabay API Key
+          </option>
+          {% endif %}
 
-        {% if coverr_ready %}
-        <option value="coverr_api_key">Coverr API Key</option>
-        {% endif %}
+          {% if coverr_ready %}
+          <option value="coverr_api_key">
+            Coverr API Key
+          </option>
+          {% endif %}
 
-        {% if openverse_id_ready %}
-        <option value="openverse_client_id">
-          Openverse Client ID
-        </option>
-        {% endif %}
+          {% if openverse_id_ready %}
+          <option value="openverse_client_id">
+            Openverse Client ID
+          </option>
+          {% endif %}
 
-        {% if openverse_secret_ready %}
-        <option value="openverse_client_secret">
-          Openverse Client Secret
-        </option>
-        {% endif %}
+          {% if openverse_secret_ready %}
+          <option value="openverse_client_secret">
+            Openverse Client Secret
+          </option>
+          {% endif %}
 
-        {% if gemini_ready %}
-        <option value="gemini_api_key">Gemini API Key</option>
-        {% endif %}
+          {% if gemini_ready %}
+          <option value="gemini_api_key">
+            Gemini API Key
+          </option>
+          {% endif %}
 
-        {% if together_ready %}
-        <option value="together_api_key">
-          Together AI API Key
-        </option>
-        {% endif %}
-      </select>
+          {% if together_ready %}
+          <option value="together_api_key">
+            Together AI API Key
+          </option>
+          {% endif %}
+        </select>
+      </div>
 
-      <button type="submit" class="danger-button">
-        Remove Selected API Key
+      <button type="submit" class="api-danger-button">
+        Remove Selected Credential
       </button>
     </form>
-  </div>
+  </section>
+
 </div>
-</body>
-</html>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base_app.html" %}
+
+{% block title %}Create Video · {{ app_name }}{% endblock %}
+{% block page_heading %}Create New Video{% endblock %}
+{% block page_subheading %}
+Configure and add up to 20 video titles to the production queue.
+{% endblock %}
+
+{% block header_actions %}
+<a href="/videos" class="header-action-link">
+  View Queue
+</a>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid">
+  <section class="create-page-intro">
+    <div>
+      <span class="overview-welcome-kicker">
+        Video Production
+      </span>
+      <h2>Build your next AI-generated video</h2>
+      <p>
+        Choose the duration, style, narration, media source,
+        orientation, and caption settings before adding titles
+        to the queue.
+      </p>
+    </div>
+
+    <div class="create-page-step">
+      <strong>1–20</strong>
+      <span>titles per batch</span>
+    </div>
+  </section>
+
+  {% include "partials/create_video_form.html" %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/voice-preview.js" defer></script>
+{% endblock %}

@@ -1,0 +1,146 @@
+<section class="system-overview" aria-labelledby="system-overview-title">
+  <div class="overview-header">
+    <div>
+      <span class="overview-kicker">Production Control Center</span>
+      <h2 id="system-overview-title">Dashboard Overview</h2>
+      <p>Monitor generation services, APIs, and server resources in real time.</p>
+    </div>
+
+    <div class="live-monitor-badge">
+      <span class="live-monitor-dot"></span>
+      Live Monitoring
+    </div>
+  </div>
+
+  <div class="system-metrics-grid">
+    <article class="system-metric-card">
+      <div class="metric-card-header">
+        <span class="metric-icon">CPU</span>
+        <span class="metric-label">Processor</span>
+      </div>
+      <strong id="metric-cpu-value">
+        {% if system_metrics.cpu.usage_percent is not none %}
+          {{ system_metrics.cpu.usage_percent }}%
+        {% else %}
+          Sampling…
+        {% endif %}
+      </strong>
+      <p id="metric-cpu-detail">
+        {{ system_metrics.cpu.cores }} cores · Load {{ system_metrics.cpu.load_1 }}
+      </p>
+      <div class="metric-track">
+        <span
+          id="metric-cpu-bar"
+          style="width: {{ system_metrics.cpu.usage_percent or 0 }}%;"
+        ></span>
+      </div>
+    </article>
+
+    <article class="system-metric-card">
+      <div class="metric-card-header">
+        <span class="metric-icon">RAM</span>
+        <span class="metric-label">Memory</span>
+      </div>
+      <strong id="metric-memory-value">
+        {{ system_metrics.memory.usage_percent }}%
+      </strong>
+      <p id="metric-memory-detail">
+        {{ system_metrics.memory.used }} of {{ system_metrics.memory.total }}
+      </p>
+      <div class="metric-track">
+        <span
+          id="metric-memory-bar"
+          style="width: {{ system_metrics.memory.usage_percent }}%;"
+        ></span>
+      </div>
+    </article>
+
+    <article class="system-metric-card">
+      <div class="metric-card-header">
+        <span class="metric-icon">GPU</span>
+        <span class="metric-label">Graphics</span>
+      </div>
+      <strong id="metric-gpu-value">
+        {{ system_metrics.gpu.usage_percent }}%
+      </strong>
+      <p id="metric-gpu-detail">
+        {{ system_metrics.gpu.name }} · {{ system_metrics.gpu.temperature }}
+      </p>
+      <div class="metric-track">
+        <span
+          id="metric-gpu-bar"
+          style="width: {{ system_metrics.gpu.usage_percent }}%;"
+        ></span>
+      </div>
+      <small id="metric-gpu-memory">
+        VRAM {{ system_metrics.gpu.memory_used }} / {{ system_metrics.gpu.memory_total }}
+      </small>
+    </article>
+
+    <article class="system-metric-card">
+      <div class="metric-card-header">
+        <span class="metric-icon">SSD</span>
+        <span class="metric-label">Storage</span>
+      </div>
+      <strong id="metric-storage-value">
+        {{ system_metrics.storage.usage_percent }}%
+      </strong>
+      <p id="metric-storage-detail">
+        {{ system_metrics.storage.used }} of {{ system_metrics.storage.total }}
+      </p>
+      <div class="metric-track">
+        <span
+          id="metric-storage-bar"
+          style="width: {{ system_metrics.storage.usage_percent }}%;"
+        ></span>
+      </div>
+      <small>{{ system_metrics.storage.free }} available</small>
+    </article>
+  </div>
+
+  <div class="connection-status-grid">
+    <article class="connection-card">
+      <div>
+        <span class="connection-title">Redis Queue</span>
+        <small id="redis-detail">{{ system_metrics.redis.detail }}</small>
+      </div>
+      <span
+        id="redis-status"
+        class="connection-badge {% if system_metrics.redis.online %}is-online{% else %}is-offline{% endif %}"
+      >
+        {{ system_metrics.redis.label }}
+      </span>
+    </article>
+
+    <article class="connection-card">
+      <div>
+        <span class="connection-title">Ollama AI</span>
+        <small id="ollama-detail">{{ system_metrics.ollama.detail }}</small>
+      </div>
+      <span
+        id="ollama-status"
+        class="connection-badge {% if system_metrics.ollama.online %}is-online{% else %}is-offline{% endif %}"
+      >
+        {{ system_metrics.ollama.label }}
+      </span>
+    </article>
+
+    <article class="connection-card api-connection-card">
+      <div>
+        <span class="connection-title">API Connections</span>
+        <small>
+          <span id="api-connected-count">{{ system_metrics.apis.connected }}</span>
+          of {{ system_metrics.apis.total }} configured
+        </small>
+      </div>
+
+      <div class="api-provider-list">
+        {% for provider, ready in system_metrics.apis.providers.items() %}
+        <span class="api-provider {% if ready %}is-ready{% else %}is-missing{% endif %}">
+          {{ provider }}
+        </span>
+        {% endfor %}
+      </div>
+    </article>
+  </div>
+</section>

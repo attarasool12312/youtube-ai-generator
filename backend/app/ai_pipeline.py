@@ -353,15 +353,21 @@ def assign_scene_durations(scenes, total_seconds):
     return scenes
 
 
-def generate_video_package(title, duration_minutes, video_style):
+def generate_video_package(title, duration_minutes, video_style, progress_callback=None):
     detected_style = detect_video_style(title, video_style)
 
     script_result = create_validated_script(
-        title, duration_minutes, detected_style
+        title,
+        duration_minutes,
+        detected_style,
+        progress_callback=progress_callback,
     )
     validation = script_result["validation"]
     print("SCRIPT_INITIAL_PROVIDER:", script_result["initial_provider"], flush=True)
     print("SCRIPT_REPAIR_PROVIDERS:", script_result["repair_providers"] or ["none"], flush=True)
+
+    if progress_callback:
+        progress_callback("scene_planning", 30)
 
     scenes = split_script_into_scenes(
         script_result["script"],
@@ -378,6 +384,9 @@ def generate_video_package(title, duration_minutes, video_style):
         scenes,
         duration_minutes * 60,
     )
+
+    if progress_callback:
+        progress_callback("scene_planning", 35)
 
     return {
         "title": title,

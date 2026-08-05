@@ -1,0 +1,136 @@
+<section class="crm-card" id="video-queue-panel">
+      <h2>Video Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+          <tr
+            class="queue-job-row"
+            data-job-id="{{ job.id }}"
+            data-job-title="{{ job.title }}"
+            data-job-status="{{ job.status }}"
+            data-job-progress="{{ job.progress }}"
+          >
+            <td>{{ job.queue_position }}</td>
+
+            <td>
+              <strong>{{ job.title }}</strong>
+
+              {% if job.error_message and job.status == "failed" %}
+              <details class="job-error-details">
+                <summary>View error details</summary>
+                <pre>{{ job.error_message }}</pre>
+              </details>
+              {% endif %}
+            </td>
+
+            <td>
+              <span class="job-status job-status-{{ job.status }}">
+                {{ job.display_status }}
+              </span>
+            </td>
+
+            <td>
+              <div class="job-progress">
+                <div class="job-progress-header">
+                  <span>{{ job.progress }}%</span>
+                  <small>{{ job.eta_text }}</small>
+                </div>
+
+                <div
+                  class="job-progress-track"
+                  role="progressbar"
+                  aria-valuenow="{{ job.progress }}"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                >
+                  <div
+                    class="job-progress-fill"
+                    style="width: {{ job.progress }}%;"
+                  ></div>
+                </div>
+              </div>
+            </td>
+
+            <td>
+              <div class="job-actions">
+                {% if job.status == "completed" %}
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download"
+                >Video</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/narration"
+                >Narration</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/script"
+                >Script</a>
+
+                {% if job.captions_enabled %}
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/captions.srt"
+                >SRT</a>
+
+                <a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/download/captions.vtt"
+                >VTT</a>
+                {% endif %}
+                {% endif %}
+
+                {% if job.status in ["failed", "cancelled"] %}
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/retry"
+                >
+                  <button type="submit" class="retry-button">
+                    Retry
+                  </button>
+                </form>
+                {% endif %}
+
+                {% if job.status not in ["completed", "failed", "cancelled"] %}
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/cancel"
+                  onsubmit="return confirm('Cancel this job?');"
+                >
+                  <button type="submit" class="cancel-button">
+                    Cancel
+                  </button>
+                </form>
+                {% endif %}
+
+                <form
+                  method="post"
+                  action="/jobs/{{ job.id }}/delete"
+                  onsubmit="return confirm('Permanently delete this job and all generated files?');"
+                >
+                  <button type="submit" class="danger-button">
+                    Delete
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5">No videos in queue yet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
