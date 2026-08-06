@@ -145,6 +145,7 @@ Rules:
 - Each line must cover a distinct part of the topic
 - Arrange sections in a logical narrative order
 - Avoid repeating the same information
+- For factual topics, avoid unsupported claims, exaggerated consequences and false certainty
 - The first section must contain the opening hook
 - The final section must contain the conclusion and viewer CTA
 - Keep each outline line concise
@@ -178,7 +179,8 @@ def generate_section(
 - Finish with a clear topic-specific takeaway
 - Include one natural topic-related question
 - Invite viewers to answer in the comments
-- Include a brief natural request to like and subscribe
+- Include one brief natural request to like and subscribe
+- Do not repeat the like, subscribe or comment request in another sentence
 - Do not use a generic or repeated ending
 """
     else:
@@ -215,6 +217,15 @@ Rules:
 - Do not cover later outline items early
 - Start with a complete sentence beginning with a capital letter
 - Keep the narration natural, detailed and conversational
+- Keep factual claims accurate, proportionate and consistent with the available evidence
+- Distinguish established facts, reasonable inference and speculation
+- Keep cause-and-effect mechanisms and timescales plausible
+- Do not invent unsupported chains of consequences or present uncertain outcomes as certain
+- Do not invent precise figures, measurements, dates, quotes or probabilities
+- Consider remaining forces, alternative causes and system inertia before claiming a complete stop or major failure
+- Use cautious wording when evidence is limited, but do not weaken well-established facts with unnecessary hedging
+- Frame predicted social, economic, technological or environmental reactions as possibilities when they are not established
+- Preserve an engaging tone through explanation and meaningful stakes, not factual exaggeration
 - Do not repeat information from earlier sections
 - Do not use headings, labels, bullet points or visual directions
 - Return narration only
@@ -367,6 +378,11 @@ Rules:
 - Add only genuinely new material missing from the existing narration
 - Do not repeat, summarize or rephrase ideas, examples or events already covered
 - Add useful depth, examples, consequences or explanation
+- Keep new factual material accurate, proportionate and supported by a plausible mechanism
+- Clearly distinguish established effects, reasonable inference and speculation
+- Preserve realistic timescales and do not invent unsupported downstream consequences
+- Consider alternative causes, remaining influences and system inertia
+- Frame uncertain social, economic, technological or environmental reactions as possibilities
 - Connect naturally between the supplied surrounding sections
 - Do not restart the introduction
 - Do not conclude the full video
