@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -57,6 +66,36 @@ class VideoJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+
+    auto_publish_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    auto_publish_connection_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    auto_publish_privacy: Mapped[str] = mapped_column(
+        String(20),
+        default="private",
+    )
+    auto_publish_made_for_kids: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    auto_publish_notify_subscribers: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    auto_publish_metadata: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+    auto_publish_thumbnail: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
@@ -68,4 +107,162 @@ class ApiSetting(Base):
     encrypted_value: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now
+    )
+
+
+class YouTubeConnection(Base):
+    __tablename__ = "youtube_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel_id: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+    )
+    channel_title: Mapped[str] = mapped_column(String(255))
+    channel_thumbnail_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    google_account_email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    encrypted_access_token: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    encrypted_refresh_token: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    token_expiry: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    scopes: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class YouTubePublishJob(Base):
+    __tablename__ = "youtube_publish_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "video_job_id",
+            "youtube_connection_id",
+            name="uq_youtube_publish_video_channel",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    video_job_id: Mapped[int] = mapped_column(
+        ForeignKey("video_jobs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    youtube_connection_id: Mapped[int] = mapped_column(
+        ForeignKey("youtube_connections.id"),
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="draft",
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+
+    title: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[str] = mapped_column(Text, default="")
+    category_id: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    language: Mapped[str] = mapped_column(String(20), default="en")
+    privacy_status: Mapped[str] = mapped_column(
+        String(20),
+        default="private",
+    )
+    made_for_kids: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    contains_synthetic_media: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+    )
+    notify_subscribers: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+    scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    stock_credits: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    thumbnail_path: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    encrypted_upload_session_uri: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    bytes_uploaded: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+    youtube_video_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    youtube_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    thumbnail_status: Mapped[str] = mapped_column(
+        String(30),
+        default="not_started",
+    )
+    thumbnail_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
     )

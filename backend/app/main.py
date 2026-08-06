@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+import logging
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
@@ -16,10 +17,39 @@ from app.database import get_db
 from app.dashboard_metrics import collect_dashboard_metrics
 from app.project_info import get_project_info
 from app.publishing_status import collect_publishing_status
+from app.youtube_oauth import (
+    YouTubeOAuthConfigurationError,
+    build_youtube_oauth_flow,
+    create_youtube_authorization_url,
+    get_public_app_url,
+    normalize_public_app_url,
+)
+from app.youtube_connections import save_connected_channel
+from app.youtube_categories import YOUTUBE_CATEGORY_OPTIONS
+from app.youtube_publish_drafts import save_youtube_publish_draft
+from app.youtube_publish_files import (
+    YouTubePublishFileError,
+    resolve_final_video_path,
+)
+from app.youtube_publish_validation import (
+    YouTubePublishValidationError,
+)
 from app.scene_library import prepare_scene_items, resolve_scene_media
-from app.models import User, VideoJob
+from app.youtube_publish_queue import (
+    YouTubePublishQueueError,
+    queue_youtube_publish_job,
+)
+from app.models import (
+    User,
+    VideoJob,
+    YouTubeConnection,
+    YouTubePublishJob,
+)
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
+from app.youtube_publish_launcher import (
+    start_youtube_publish_worker,
+)
 from app.api_settings import (
     has_api_key,
     remove_api_key,
@@ -28,9 +58,12 @@ from app.api_settings import (
 from app.audio_export import create_narration_mp3
 from app.security import verify_password
 
+logger = logging.getLogger(__name__)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_queue_worker()
+    start_youtube_publish_worker()
     yield
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -127,7 +160,95 @@ JOB_STATUS_LABELS = {
 }
 
 
-def prepare_job_display(job):
+def prepare_job_display(job, publish_job=None):
+    job.pipeline_status = job.status
+    job.pipeline_css_status = job.status
+    job.pipeline_progress = job.progress
+    job.youtube_url = None
+
+    if job.status == "completed" and job.auto_publish_enabled:
+        job.pipeline_status = "youtube_preparing"
+        job.pipeline_css_status = "youtube_preparing"
+        job.pipeline_progress = 92
+        job.display_status = (
+            "Preparing YouTube Metadata & Thumbnail"
+        )
+        job.eta_text = "YouTube publishing in progress"
+
+        if publish_job is None:
+            return job
+
+        job.youtube_url = publish_job.youtube_url
+        status = publish_job.status
+        thumbnail_status = publish_job.thumbnail_status
+
+        if status == "thumbnail_generation" or thumbnail_status == "generating":
+            job.pipeline_status = "youtube_thumbnail_generation"
+            job.pipeline_css_status = "youtube_thumbnail_generation"
+            job.pipeline_progress = 94
+            job.display_status = "Generating Thumbnail"
+
+        elif status == "draft":
+            job.pipeline_status = "youtube_preparing"
+            job.pipeline_progress = 95
+            job.display_status = "Preparing YouTube Upload"
+
+        elif status == "queued":
+            job.pipeline_status = "youtube_queued"
+            job.pipeline_progress = 96
+            job.display_status = "Queued for YouTube"
+
+        elif status == "uploading":
+            job.pipeline_status = "youtube_uploading"
+            job.pipeline_progress = max(
+                1,
+                min(99, publish_job.progress),
+            )
+            job.display_status = (
+                f"Uploading to YouTube — "
+                f"{publish_job.progress}%"
+            )
+
+        elif status == "uploaded":
+            if thumbnail_status in {
+                "ready",
+                "uploading",
+                "generating",
+            }:
+                job.pipeline_status = "youtube_thumbnail_upload"
+                job.pipeline_progress = 99
+                job.display_status = "Uploading Thumbnail"
+            elif thumbnail_status == "failed":
+                job.pipeline_status = "published_warning"
+                job.pipeline_css_status = "failed"
+                job.pipeline_progress = 100
+                job.display_status = (
+                    "Published — Thumbnail Failed"
+                )
+                job.eta_text = "Published with warning"
+            else:
+                job.pipeline_status = "published"
+                job.pipeline_css_status = "completed"
+                job.pipeline_progress = 100
+                job.display_status = "Published"
+                job.eta_text = "Published to YouTube"
+
+        elif status == "failed":
+            job.pipeline_status = "youtube_failed"
+            job.pipeline_css_status = "failed"
+            job.pipeline_progress = publish_job.progress
+            job.display_status = "YouTube Upload Failed"
+            job.eta_text = "Video remains downloadable"
+
+        elif status == "needs_review":
+            job.pipeline_status = "youtube_review"
+            job.pipeline_css_status = "failed"
+            job.pipeline_progress = publish_job.progress
+            job.display_status = "YouTube Upload Needs Review"
+            job.eta_text = "Manual review required"
+
+        return job
+
     job.display_status = JOB_STATUS_LABELS.get(
         job.status,
         job.status.replace("_", " ").title(),
@@ -180,7 +301,28 @@ def load_dashboard_jobs(db):
     jobs = db.scalars(
         select(VideoJob).order_by(VideoJob.queue_position)
     ).all()
-    return [prepare_job_display(job) for job in jobs]
+
+    publish_jobs = db.scalars(
+        select(YouTubePublishJob).order_by(
+            YouTubePublishJob.id.desc()
+        )
+    ).all()
+
+    latest_publish_by_video = {}
+
+    for publish_job in publish_jobs:
+        latest_publish_by_video.setdefault(
+            publish_job.video_job_id,
+            publish_job,
+        )
+
+    return [
+        prepare_job_display(
+            job,
+            latest_publish_by_video.get(job.id),
+        )
+        for job in jobs
+    ]
 
 
 def dashboard_context(request, jobs, active_page):
@@ -253,14 +395,26 @@ def create_video_page(
 
     jobs = load_dashboard_jobs(db)
 
+    youtube_connections = db.scalars(
+        select(YouTubeConnection)
+        .where(
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+        .order_by(YouTubeConnection.channel_title)
+    ).all()
+
+    context = dashboard_context(
+        request,
+        jobs,
+        "create",
+    )
+    context["youtube_connections"] = youtube_connections
+
     return templates.TemplateResponse(
         request=request,
         name="create_video.html",
-        context=dashboard_context(
-            request,
-            jobs,
-            "create",
-        ),
+        context=context,
     )
 
 
@@ -301,6 +455,12 @@ def add_jobs(
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
+    auto_publish_connection_id: int = Form(0),
+    auto_publish_privacy: str = Form("private"),
+    auto_publish_made_for_kids: str = Form("no"),
+    auto_publish_notify_subscribers: str = Form(""),
+    auto_publish_metadata: str = Form("on"),
+    auto_publish_thumbnail: str = Form("on"),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
@@ -323,6 +483,46 @@ def add_jobs(
 
     if caption_outline not in {0, 1, 2, 4}:
         caption_outline = 2
+
+    auto_publish_enabled = auto_publish_connection_id > 0
+    selected_youtube_connection = None
+
+    if auto_publish_enabled:
+        selected_youtube_connection = db.get(
+            YouTubeConnection,
+            auto_publish_connection_id,
+        )
+
+        if (
+            selected_youtube_connection is None
+            or not selected_youtube_connection.is_active
+            or not selected_youtube_connection.encrypted_refresh_token
+        ):
+            return RedirectResponse(
+                "/videos/create?success=Selected YouTube channel is unavailable.",
+                status_code=303,
+            )
+
+    if auto_publish_privacy not in {
+        "private",
+        "unlisted",
+        "public",
+    }:
+        auto_publish_privacy = "private"
+
+    # Current unverified/testing upload flow remains private.
+    if auto_publish_enabled:
+        auto_publish_privacy = "private"
+
+    made_for_kids_value = (
+        auto_publish_made_for_kids == "yes"
+    )
+    notify_subscribers_value = (
+        auto_publish_notify_subscribers == "on"
+    )
+    auto_metadata_value = auto_publish_metadata == "on"
+    auto_thumbnail_value = auto_publish_thumbnail == "on"
+
     if not title_list:
         return RedirectResponse("/videos/create?success=No valid titles entered.", status_code=303)
     if len(title_list) > 20:
@@ -349,6 +549,19 @@ def add_jobs(
             caption_position=caption_position,
             caption_background=caption_background_value,
             caption_outline=caption_outline,
+            auto_publish_enabled=auto_publish_enabled,
+            auto_publish_connection_id=(
+                selected_youtube_connection.id
+                if selected_youtube_connection
+                else None
+            ),
+            auto_publish_privacy=auto_publish_privacy,
+            auto_publish_made_for_kids=made_for_kids_value,
+            auto_publish_notify_subscribers=(
+                notify_subscribers_value
+            ),
+            auto_publish_metadata=auto_metadata_value,
+            auto_publish_thumbnail=auto_thumbnail_value,
             status="waiting",
             progress=0,
             queue_position=next_position + index,
@@ -675,6 +888,12 @@ def publishing_page(
 
     jobs = load_dashboard_jobs(db)
 
+    youtube_connections = db.scalars(
+        select(YouTubeConnection).order_by(
+            YouTubeConnection.connected_at.desc()
+        )
+    ).all()
+
     completed_jobs = sorted(
         [
             job
@@ -685,6 +904,27 @@ def publishing_page(
         reverse=True,
     )
 
+    youtube_publish_jobs = db.scalars(
+        select(YouTubePublishJob).order_by(
+            YouTubePublishJob.id.desc()
+        )
+    ).all()
+
+    publishing_items = []
+
+    for publish_job in youtube_publish_jobs:
+        publishing_items.append({
+            "publish_job": publish_job,
+            "video_job": db.get(
+                VideoJob,
+                publish_job.video_job_id,
+            ),
+            "connection": db.get(
+                YouTubeConnection,
+                publish_job.youtube_connection_id,
+            ),
+        })
+
     return templates.TemplateResponse(
         request=request,
         name="publishing.html",
@@ -693,8 +933,387 @@ def publishing_page(
             "active_page": "publishing",
             "project_info": get_project_info(),
             "publishing_status": collect_publishing_status(),
+            "youtube_connections": youtube_connections,
+            "publishing_items": publishing_items,
             "completed_jobs": completed_jobs,
         },
+    )
+
+
+@app.get("/publishing/status")
+def youtube_publishing_status(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return {"authenticated": False, "items": []}
+
+    publish_jobs = db.scalars(
+        select(YouTubePublishJob).order_by(
+            YouTubePublishJob.id.desc()
+        )
+    ).all()
+
+    return {
+        "authenticated": True,
+        "items": [
+            {
+                "id": publish_job.id,
+                "status": publish_job.status,
+                "progress": publish_job.progress,
+                "bytes_uploaded": publish_job.bytes_uploaded,
+                "total_bytes": publish_job.total_bytes,
+                "last_error": publish_job.last_error,
+                "youtube_url": publish_job.youtube_url,
+            }
+            for publish_job in publish_jobs
+        ],
+    }
+
+
+@app.get("/publishing/jobs/{job_id}/draft")
+def youtube_publish_draft_page(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/publishing?youtube=video_not_found",
+            status_code=303,
+        )
+
+    try:
+        resolve_final_video_path(job)
+    except YouTubePublishFileError:
+        return RedirectResponse(
+            "/publishing?youtube=video_not_ready",
+            status_code=303,
+        )
+
+    youtube_connections = db.scalars(
+        select(YouTubeConnection)
+        .where(
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+        .order_by(YouTubeConnection.channel_title)
+    ).all()
+
+    default_connection_id = (
+        youtube_connections[0].id
+        if youtube_connections
+        else ""
+    )
+
+    form_data = {
+        "youtube_connection_id": default_connection_id,
+        "title": job.title,
+        "description": "",
+        "tags": "",
+        "category_id": "27",
+        "language": "en",
+        "made_for_kids": False,
+        "contains_synthetic_media": False,
+        "notify_subscribers": True,
+    }
+
+    return templates.TemplateResponse(
+        request=request,
+        name="youtube_publish_draft.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "publishing",
+            "project_info": get_project_info(),
+            "job": job,
+            "youtube_connections": youtube_connections,
+            "categories": YOUTUBE_CATEGORY_OPTIONS,
+            "form_data": form_data,
+            "errors": [],
+        },
+    )
+
+
+@app.post("/publishing/jobs/{job_id}/draft")
+def save_youtube_publish_draft_route(
+    job_id: int,
+    request: Request,
+    youtube_connection_id: int = Form(...),
+    title: str = Form(...),
+    description: str = Form(""),
+    tags: str = Form(""),
+    category_id: str = Form("27"),
+    language: str = Form("en"),
+    made_for_kids: str = Form(""),
+    contains_synthetic_media: str = Form(""),
+    notify_subscribers: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/publishing?youtube=video_not_found",
+            status_code=303,
+        )
+
+    connection = db.get(
+        YouTubeConnection,
+        youtube_connection_id,
+    )
+
+    youtube_connections = db.scalars(
+        select(YouTubeConnection)
+        .where(
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+        .order_by(YouTubeConnection.channel_title)
+    ).all()
+
+    form_data = {
+        "youtube_connection_id": youtube_connection_id,
+        "title": title,
+        "description": description,
+        "tags": tags,
+        "category_id": category_id,
+        "language": language,
+        "made_for_kids": bool(made_for_kids),
+        "contains_synthetic_media": bool(
+            contains_synthetic_media
+        ),
+        "notify_subscribers": bool(notify_subscribers),
+    }
+
+    errors = []
+
+    if connection is None:
+        errors.append(
+            "The selected YouTube channel was not found."
+        )
+    else:
+        try:
+            draft = save_youtube_publish_draft(
+                db,
+                video_job=job,
+                connection=connection,
+                title=title,
+                description=description,
+                tags=tags,
+                category_id=category_id,
+                language=language,
+                privacy_status="private",
+                made_for_kids=bool(made_for_kids),
+                contains_synthetic_media=bool(
+                    contains_synthetic_media
+                ),
+                notify_subscribers=bool(
+                    notify_subscribers
+                ),
+            )
+        except YouTubePublishValidationError as exc:
+            db.rollback()
+            errors.extend(exc.errors)
+        except YouTubePublishFileError as exc:
+            db.rollback()
+            errors.append(str(exc))
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Could not save YouTube publishing draft"
+            )
+            errors.append(
+                "The publishing draft could not be saved."
+            )
+        else:
+            return RedirectResponse(
+                f"/publishing?youtube=draft_saved"
+                f"&draft_id={draft.id}",
+                status_code=303,
+            )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="youtube_publish_draft.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "publishing",
+            "project_info": get_project_info(),
+            "job": job,
+            "youtube_connections": youtube_connections,
+            "categories": YOUTUBE_CATEGORY_OPTIONS,
+            "form_data": form_data,
+            "errors": errors,
+        },
+        status_code=422,
+    )
+
+
+@app.post("/publishing/drafts/{draft_id}/queue")
+def queue_youtube_private_upload(
+    draft_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    publish_job = db.get(
+        YouTubePublishJob,
+        draft_id,
+    )
+
+    if publish_job is None:
+        return RedirectResponse(
+            "/publishing?youtube=draft_not_found",
+            status_code=303,
+        )
+
+    try:
+        queue_youtube_publish_job(
+            db,
+            publish_job,
+        )
+    except YouTubePublishQueueError as error:
+        return RedirectResponse(
+            f"/publishing?youtube={error.code}",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        f"/publishing?youtube=upload_queued"
+        f"&draft_id={publish_job.id}",
+        status_code=303,
+    )
+
+
+@app.get("/youtube/connect")
+def connect_youtube_channel(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        authorization_url, state, code_verifier = (
+            create_youtube_authorization_url()
+        )
+    except YouTubeOAuthConfigurationError:
+        return RedirectResponse(
+            "/publishing?youtube=credentials_required",
+            status_code=303,
+        )
+
+    request.session["youtube_oauth_state"] = state
+    request.session[
+        "youtube_oauth_code_verifier"
+    ] = code_verifier
+
+    return RedirectResponse(
+        authorization_url,
+        status_code=303,
+    )
+
+
+@app.get("/youtube/oauth/callback")
+def youtube_oauth_callback(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    if request.query_params.get("error"):
+        request.session.pop("youtube_oauth_state", None)
+        request.session.pop(
+            "youtube_oauth_code_verifier",
+            None,
+        )
+        return RedirectResponse(
+            "/publishing?youtube=access_denied",
+            status_code=303,
+        )
+
+    returned_state = request.query_params.get("state", "")
+    authorization_code = request.query_params.get("code", "")
+    stored_state = request.session.pop(
+        "youtube_oauth_state",
+        None,
+    )
+    stored_code_verifier = request.session.pop(
+        "youtube_oauth_code_verifier",
+        None,
+    )
+
+    if (
+        not stored_state
+        or returned_state != stored_state
+        or not authorization_code
+        or not stored_code_verifier
+    ):
+        return RedirectResponse(
+            "/publishing?youtube=invalid_state",
+            status_code=303,
+        )
+
+    try:
+        flow = build_youtube_oauth_flow(
+            state=stored_state,
+            code_verifier=stored_code_verifier,
+        )
+        flow.fetch_token(code=authorization_code)
+        save_connected_channel(db, flow.credentials)
+    except Exception:
+        db.rollback()
+        logger.exception("YouTube OAuth callback failed")
+        return RedirectResponse(
+            "/publishing?youtube=connection_failed",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        "/publishing?youtube=connected",
+        status_code=303,
+    )
+
+
+@app.post("/youtube/connections/{connection_id}/disconnect")
+def disconnect_youtube_channel(
+    connection_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    connection = db.get(YouTubeConnection, connection_id)
+
+    if connection is None:
+        return RedirectResponse(
+            "/publishing?youtube=not_found",
+            status_code=303,
+        )
+
+    connection.is_active = False
+    connection.encrypted_access_token = None
+    connection.encrypted_refresh_token = None
+    connection.token_expiry = None
+    connection.last_error = None
+
+    db.commit()
+
+    return RedirectResponse(
+        "/publishing?youtube=disconnected",
+        status_code=303,
     )
 
 
@@ -777,6 +1396,10 @@ def api_settings_page(request: Request):
     )
     gemini_ready = has_api_key("gemini_api_key")
     together_ready = has_api_key("together_api_key")
+    youtube_client_id_ready = has_api_key("youtube_client_id")
+    youtube_client_secret_ready = has_api_key(
+        "youtube_client_secret"
+    )
 
     configured_count = sum([
         pexels_ready,
@@ -785,6 +1408,7 @@ def api_settings_page(request: Request):
         openverse_id_ready and openverse_secret_ready,
         gemini_ready,
         together_ready,
+        youtube_client_id_ready and youtube_client_secret_ready,
     ])
 
     return templates.TemplateResponse(
@@ -801,8 +1425,11 @@ def api_settings_page(request: Request):
             "openverse_secret_ready": openverse_secret_ready,
             "gemini_ready": gemini_ready,
             "together_ready": together_ready,
+            "public_app_url": get_public_app_url(),
+            "youtube_client_id_ready": youtube_client_id_ready,
+            "youtube_client_secret_ready": youtube_client_secret_ready,
             "configured_count": configured_count,
-            "total_integrations": 6,
+            "total_integrations": 7,
         },
     )
 
@@ -817,6 +1444,9 @@ def save_api_settings(
     openverse_client_secret: str = Form(""),
     gemini_api_key: str = Form(""),
     together_api_key: str = Form(""),
+    public_app_url: str = Form(""),
+    youtube_client_id: str = Form(""),
+    youtube_client_secret: str = Form(""),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
@@ -832,6 +1462,17 @@ def save_api_settings(
 
     save_api_key("gemini_api_key", gemini_api_key.strip())
     save_api_key("together_api_key", together_api_key.strip())
+    if public_app_url.strip():
+        save_api_key(
+            "public_app_url",
+            normalize_public_app_url(public_app_url),
+        )
+
+    save_api_key("youtube_client_id", youtube_client_id.strip())
+    save_api_key(
+        "youtube_client_secret",
+        youtube_client_secret.strip(),
+    )
 
     return RedirectResponse("/settings?saved=1", status_code=303)
 
@@ -844,6 +1485,9 @@ ALLOWED_API_SETTINGS = {
     "openverse_client_secret",
     "gemini_api_key",
     "together_api_key",
+    "public_app_url",
+    "youtube_client_id",
+    "youtube_client_secret",
 }
 
 

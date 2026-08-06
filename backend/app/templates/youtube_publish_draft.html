@@ -1,0 +1,224 @@
+{% extends "base_app.html" %}
+
+{% block title %}Prepare YouTube Upload · {{ app_name }}{% endblock %}
+{% block page_heading %}Prepare YouTube Upload{% endblock %}
+{% block page_subheading %}
+Review metadata and choose the destination channel before uploading.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid publishing-page">
+
+  {% if errors %}
+  <div class="error">
+    {% for error in errors %}
+    <div>{{ error }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Completed Video
+        </span>
+        <h2>{{ job.title }}</h2>
+        <p>
+          {{ job.duration_minutes }} minutes ·
+          {{ job.orientation | title }} ·
+          {{ job.video_style | title }}
+        </p>
+      </div>
+
+      <a
+        href="/jobs/{{ job.id }}/download"
+        class="crm-secondary-button"
+      >
+        Download Video
+      </a>
+    </div>
+  </section>
+
+  {% if youtube_connections %}
+  <form
+    method="post"
+    action="/publishing/jobs/{{ job.id }}/draft"
+    class="api-settings-form"
+  >
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Destination
+          </span>
+          <h2>Select YouTube channel</h2>
+          <p>
+            Each connected channel has its own encrypted OAuth token.
+          </p>
+        </div>
+      </div>
+
+      <label for="youtube_connection_id">
+        Connected Channel
+      </label>
+
+      <select
+        id="youtube_connection_id"
+        name="youtube_connection_id"
+        required
+      >
+        <option value="">Select destination channel</option>
+
+        {% for connection in youtube_connections %}
+        <option
+          value="{{ connection.id }}"
+          {% if form_data.youtube_connection_id|string == connection.id|string %}selected{% endif %}
+        >
+          {{ connection.channel_title }}
+        </option>
+        {% endfor %}
+      </select>
+    </section>
+
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Video Metadata
+          </span>
+          <h2>Title, description and discovery</h2>
+          <p>
+            These values remain editable until upload begins.
+          </p>
+        </div>
+      </div>
+
+      <label for="title">Video Title</label>
+      <input
+        id="title"
+        type="text"
+        name="title"
+        maxlength="100"
+        required
+        value="{{ form_data.title }}"
+      >
+
+      <label for="description">Description</label>
+      <textarea
+        id="description"
+        name="description"
+        rows="10"
+        placeholder="Write the YouTube video description."
+      >{{ form_data.description }}</textarea>
+
+      <label for="tags">Tags</label>
+      <textarea
+        id="tags"
+        name="tags"
+        rows="3"
+        placeholder="history, education, documentary"
+      >{{ form_data.tags }}</textarea>
+
+      <div class="api-fields-grid">
+        <div>
+          <label for="category_id">Category</label>
+          <select id="category_id" name="category_id" required>
+            {% for category_id, category_name in categories %}
+            <option
+              value="{{ category_id }}"
+              {% if form_data.category_id == category_id %}selected{% endif %}
+            >
+              {{ category_name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="language">Language</label>
+          <input
+            id="language"
+            type="text"
+            name="language"
+            maxlength="20"
+            required
+            value="{{ form_data.language }}"
+          >
+        </div>
+      </div>
+    </section>
+
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Publishing Safety
+          </span>
+          <h2>Audience and disclosure</h2>
+          <p>
+            Initial upload is private during the first implementation phase.
+          </p>
+        </div>
+      </div>
+
+      <input type="hidden" name="privacy_status" value="private">
+
+      <label>
+        <input
+          type="checkbox"
+          name="made_for_kids"
+          value="1"
+          {% if form_data.made_for_kids %}checked{% endif %}
+        >
+        This video is made for kids
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          name="contains_synthetic_media"
+          value="1"
+          {% if form_data.contains_synthetic_media %}checked{% endif %}
+        >
+        Contains realistic altered or synthetic media
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          name="notify_subscribers"
+          value="1"
+          {% if form_data.notify_subscribers %}checked{% endif %}
+        >
+        Notify subscribers when eventually published
+      </label>
+    </section>
+
+    <div class="api-save-bar">
+      <div>
+        <strong>Private upload draft</strong>
+        <span>
+          Saving this form does not upload anything to YouTube.
+        </span>
+      </div>
+
+      <button type="submit" class="crm-primary-button">
+        Save Publishing Draft
+      </button>
+    </div>
+  </form>
+  {% else %}
+  <section class="crm-card">
+    <div class="crm-empty-state">
+      <h3>No active YouTube channel</h3>
+      <p>Connect a channel before preparing this upload.</p>
+      <a href="/publishing" class="crm-primary-button">
+        Open Publishing Center
+      </a>
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -34,7 +34,7 @@ src.close()
 dst.close()
 PY
 
-cp install.sh backend/requirements.txt "$TMP/"
+cp bootstrap.sh install.sh restore.sh backup.sh backend/requirements.txt "$TMP/"
 
 if sudo -n test -f /etc/systemd/system/youtube-ai-generator.service; then
     sudo -n cat /etc/systemd/system/youtube-ai-generator.service \

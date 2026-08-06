@@ -16,6 +16,13 @@ VIDEO_JOB_COLUMN_MIGRATIONS = {
     "caption_outline": "INTEGER NOT NULL DEFAULT 2",
     "started_at": "DATETIME",
     "completed_at": "DATETIME",
+    "auto_publish_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "auto_publish_connection_id": "INTEGER",
+    "auto_publish_privacy": "VARCHAR(20) NOT NULL DEFAULT 'private'",
+    "auto_publish_made_for_kids": "BOOLEAN NOT NULL DEFAULT 0",
+    "auto_publish_notify_subscribers": "BOOLEAN NOT NULL DEFAULT 0",
+    "auto_publish_metadata": "BOOLEAN NOT NULL DEFAULT 1",
+    "auto_publish_thumbnail": "BOOLEAN NOT NULL DEFAULT 1",
 }
 
 

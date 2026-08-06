@@ -154,6 +154,169 @@
             </div>
           </div>
         </section>
+
+        <section class="caption-settings">
+          <div class="caption-settings-heading">
+            <div>
+              <h3>Automatic YouTube Publishing</h3>
+              <p>
+                Choose a connected channel to automatically prepare
+                and upload each completed video. Select no channel to
+                keep manual download only.
+              </p>
+            </div>
+          </div>
+
+          <div class="caption-controls-grid">
+            <div>
+              <label for="auto_publish_connection_id">
+                Upload Destination
+              </label>
+
+              <select
+                id="auto_publish_connection_id"
+                name="auto_publish_connection_id"
+              >
+                <option value="0" selected>
+                  Do not upload automatically
+                </option>
+
+                {% for connection in youtube_connections | default([]) %}
+                <option value="{{ connection.id }}">
+                  {{ connection.channel_title }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div data-auto-publish-option hidden>
+              <label for="auto_publish_privacy">
+                Initial Visibility
+              </label>
+
+              <select
+                id="auto_publish_privacy"
+                name="auto_publish_privacy"
+              >
+                <option value="private" selected>
+                  Private
+                </option>
+              </select>
+
+              <small>
+                Public, unlisted and scheduled publishing will be
+                enabled after production OAuth approval.
+              </small>
+            </div>
+
+            <div data-auto-publish-option hidden>
+              <label for="auto_publish_made_for_kids">
+                Audience
+              </label>
+
+              <select
+                id="auto_publish_made_for_kids"
+                name="auto_publish_made_for_kids"
+              >
+                <option value="no" selected>
+                  No, not made for kids
+                </option>
+                <option value="yes">
+                  Yes, made for kids
+                </option>
+              </select>
+            </div>
+
+            <div data-auto-publish-option hidden>
+              <label for="auto_publish_notify_subscribers">
+                Subscriber Notification
+              </label>
+
+              <select
+                id="auto_publish_notify_subscribers"
+                name="auto_publish_notify_subscribers"
+              >
+                <option value="" selected>
+                  Do not notify
+                </option>
+                <option value="on">
+                  Notify subscribers
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div
+            class="voice-checkboxes"
+            data-auto-publish-option
+            hidden
+          >
+            <div class="voice-option">
+              <label>
+                <input
+                  type="checkbox"
+                  name="auto_publish_metadata"
+                  value="on"
+                  checked
+                >
+                Automatically generate SEO-focused title,
+                description, tags, category and language
+              </label>
+            </div>
+
+            <div class="voice-option">
+              <label>
+                <input
+                  type="checkbox"
+                  name="auto_publish_thumbnail"
+                  value="on"
+                  checked
+                >
+                Automatically generate and upload a thumbnail
+              </label>
+            </div>
+          </div>
+
+          {% if not youtube_connections | default([]) %}
+          <p>
+            No active YouTube channel is connected.
+            <a href="/publishing">Connect a channel</a>
+            before enabling automatic publishing.
+          </p>
+          {% endif %}
+        </section>
+
         <button type="submit">Add Titles to Queue</button>
+
+        <script>
+        (() => {
+          const channelSelect = document.getElementById(
+            "auto_publish_connection_id"
+          );
+
+          if (!channelSelect) {
+            return;
+          }
+
+          const dependentFields = document.querySelectorAll(
+            "[data-auto-publish-option]"
+          );
+
+          const updatePublishingFields = () => {
+            const enabled = channelSelect.value !== "0";
+
+            dependentFields.forEach((field) => {
+              field.hidden = !enabled;
+            });
+          };
+
+          channelSelect.addEventListener(
+            "change",
+            updatePublishingFields
+          );
+
+          updatePublishingFields();
+        })();
+        </script>
       </form>
     </section>

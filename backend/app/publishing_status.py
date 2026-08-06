@@ -1,70 +1,93 @@
 from __future__ import annotations
 
 import importlib.util
-import os
-from pathlib import Path
+
+from sqlalchemy import func, select
+
+from app.api_settings import has_api_key
+from app.database import SessionLocal
+from app.models import YouTubeConnection
 
 
-def _configured(name: str) -> bool:
-    return bool(os.getenv(name, "").strip())
-
-
-def _configured_file(name: str) -> bool:
-    value = os.getenv(name, "").strip()
-    return bool(value and Path(value).expanduser().is_file())
+def _module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError):
+        return False
 
 
 def collect_publishing_status() -> dict[str, object]:
-    google_api_available = (
-        importlib.util.find_spec("googleapiclient") is not None
-    )
-
+    google_api_available = _module_available("googleapiclient")
     google_auth_available = (
-        importlib.util.find_spec("google.auth") is not None
-        and importlib.util.find_spec("google.oauth2") is not None
+        _module_available("google.auth")
+        and _module_available("google.oauth2")
+        and _module_available("google_auth_oauthlib")
     )
 
-    oauth_file_ready = any([
-        _configured_file("YOUTUBE_CLIENT_SECRETS_FILE"),
-        _configured_file("GOOGLE_CLIENT_SECRETS_FILE"),
-    ])
-
-    oauth_environment_ready = all([
-        _configured("YOUTUBE_CLIENT_ID"),
-        _configured("YOUTUBE_CLIENT_SECRET"),
-        _configured("YOUTUBE_REFRESH_TOKEN"),
-    ])
+    youtube_client_id_ready = has_api_key(
+        "youtube_client_id"
+    )
+    youtube_client_secret_ready = has_api_key(
+        "youtube_client_secret"
+    )
 
     credentials_ready = (
-        oauth_file_ready or oauth_environment_ready
+        youtube_client_id_ready
+        and youtube_client_secret_ready
     )
+
+    with SessionLocal() as db:
+        connected_channels = db.scalar(
+            select(func.count())
+            .select_from(YouTubeConnection)
+            .where(
+                YouTubeConnection.is_active.is_(True),
+                YouTubeConnection.encrypted_refresh_token.is_not(
+                    None
+                ),
+            )
+        ) or 0
 
     libraries_ready = (
-        google_api_available and google_auth_available
+        google_api_available
+        and google_auth_available
     )
 
-    ready = credentials_ready and libraries_ready
+    ready = (
+        libraries_ready
+        and credentials_ready
+        and connected_channels > 0
+    )
 
     if ready:
         label = "Ready"
-        detail = "YouTube publishing integration is available."
-    elif credentials_ready and not libraries_ready:
+        detail = (
+            f"{connected_channels} YouTube channel"
+            f"{'s' if connected_channels != 1 else ''} connected."
+        )
+    elif libraries_ready and credentials_ready:
+        label = "Connect channel"
+        detail = (
+            "OAuth credentials are configured. Connect a YouTube "
+            "channel to enable publishing."
+        )
+    elif credentials_ready:
         label = "Library required"
         detail = (
-            "OAuth credentials were detected, but the Google API "
-            "client libraries are not installed."
+            "OAuth credentials are configured, but Google API "
+            "libraries are unavailable."
         )
-    elif libraries_ready and not credentials_ready:
+    elif libraries_ready:
         label = "OAuth required"
         detail = (
-            "Google API libraries are installed, but YouTube OAuth "
-            "credentials are not configured."
+            "Google API libraries are ready. Add the OAuth Client "
+            "ID and Client Secret in API Settings."
         )
     else:
         label = "Not configured"
         detail = (
-            "YouTube OAuth credentials and Google API client "
-            "libraries have not been configured."
+            "Google API libraries and YouTube OAuth credentials "
+            "are not configured."
         )
 
     return {
@@ -75,6 +98,5 @@ def collect_publishing_status() -> dict[str, object]:
         "credentials_ready": credentials_ready,
         "google_api_available": google_api_available,
         "google_auth_available": google_auth_available,
-        "oauth_file_ready": oauth_file_ready,
-        "oauth_environment_ready": oauth_environment_ready,
+        "connected_channels": connected_channels,
     }

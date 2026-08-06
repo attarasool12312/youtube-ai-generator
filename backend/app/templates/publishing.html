@@ -33,6 +33,166 @@ Prepare completed videos for publishing and monitor integration readiness.
     </div>
   </section>
 
+
+  {% set youtube_message = request.query_params.get("youtube") %}
+
+  {% if youtube_message == "upload_queued" %}
+  <div class="success">
+    Private YouTube upload was added to the publishing queue.
+  </div>
+  {% elif youtube_message == "already_queued" %}
+  <div class="error">
+    This publishing job is already queued or uploading.
+  </div>
+  {% elif youtube_message == "already_uploaded" %}
+  <div class="error">
+    This video has already been uploaded to the selected channel.
+  </div>
+  {% elif youtube_message == "manual_review_required" %}
+  <div class="error">
+    This upload needs manual review before another upload attempt.
+  </div>
+  {% elif youtube_message == "channel_unavailable" %}
+  <div class="error">
+    The selected YouTube channel is disconnected or unavailable.
+  </div>
+  {% elif youtube_message == "draft_not_found" %}
+  <div class="error">
+    The selected publishing draft was not found.
+  </div>
+  {% elif youtube_message == "invalid_publish_status" %}
+  <div class="error">
+    This publishing job cannot be queued from its current status.
+  </div>
+  {% elif youtube_message == "draft_saved" %}
+  <div class="success">
+    YouTube publishing draft saved successfully.
+  </div>
+  {% elif youtube_message == "video_not_ready" %}
+  <div class="error">
+    The selected video is not completed or its final file is missing.
+  </div>
+  {% elif youtube_message == "video_not_found" %}
+  <div class="error">
+    The selected video job was not found.
+  </div>
+  {% elif youtube_message == "connected" %}
+  <div class="success">
+    YouTube channel connected successfully.
+  </div>
+  {% elif youtube_message == "disconnected" %}
+  <div class="success">
+    YouTube channel disconnected successfully.
+  </div>
+  {% elif youtube_message == "credentials_required" %}
+  <div class="error">
+    Add the Google OAuth Client ID and Client Secret in API Settings first.
+  </div>
+  {% elif youtube_message == "access_denied" %}
+  <div class="error">
+    YouTube access was cancelled or denied.
+  </div>
+  {% elif youtube_message == "invalid_state" %}
+  <div class="error">
+    The OAuth session expired or was invalid. Please connect again.
+  </div>
+  {% elif youtube_message == "connection_failed" %}
+  <div class="error">
+    YouTube channel connection failed. Check the application logs and OAuth configuration.
+  </div>
+  {% elif youtube_message == "not_found" %}
+  <div class="error">
+    The selected YouTube connection was not found.
+  </div>
+  {% endif %}
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Channel Connections
+        </span>
+
+        <h2>Connected YouTube channels</h2>
+
+        <p>
+          Connect multiple channels and choose the destination channel
+          separately for each publishing job.
+        </p>
+      </div>
+
+      {% if publishing_status.credentials_ready %}
+      <a href="/youtube/connect" class="crm-primary-button">
+        Connect YouTube Channel
+      </a>
+      {% else %}
+      <a href="/settings" class="crm-primary-button">
+        Configure OAuth
+      </a>
+      {% endif %}
+    </div>
+
+    {% if youtube_connections %}
+    <div class="publishing-video-list">
+      {% for connection in youtube_connections %}
+      <article class="publishing-video-card">
+        <div class="publishing-video-main">
+          {% if connection.channel_thumbnail_url %}
+          <img
+            src="{{ connection.channel_thumbnail_url }}"
+            alt=""
+            width="48"
+            height="48"
+            style="border-radius:50%;object-fit:cover;"
+          >
+          {% else %}
+          <span class="overview-video-icon">YT</span>
+          {% endif %}
+
+          <div>
+            <strong>{{ connection.channel_title }}</strong>
+
+            <small>
+              Channel ID: {{ connection.channel_id }}
+            </small>
+          </div>
+        </div>
+
+        <span class="job-status {% if connection.is_active %}job-status-completed{% endif %}">
+          {{ "Connected" if connection.is_active else "Disconnected" }}
+        </span>
+
+        <div class="publishing-video-actions">
+          {% if connection.is_active %}
+          <form
+            method="post"
+            action="/youtube/connections/{{ connection.id }}/disconnect"
+            onsubmit="return confirm('Disconnect this YouTube channel?');"
+          >
+            <button type="submit" class="api-danger-button">
+              Disconnect
+            </button>
+          </form>
+          {% else %}
+          <a href="/youtube/connect">
+            Reconnect
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No YouTube channel connected</h3>
+
+      <p>
+        Configure OAuth credentials, then connect the first channel.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
   <section class="publishing-status-grid">
     <article class="overview-stat-card">
       <span>Completed Videos</span>
@@ -124,6 +284,124 @@ Prepare completed videos for publishing and monitor integration readiness.
     </div>
   </section>
 
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Publishing Activity
+        </span>
+
+        <h2>YouTube upload queue and history</h2>
+
+        <p>
+          Monitor private uploads, failures, progress and completed
+          YouTube destinations.
+        </p>
+      </div>
+    </div>
+
+    {% if publishing_items %}
+    <div class="publishing-video-list">
+      {% for item in publishing_items %}
+      {% set publish_job = item.publish_job %}
+      {% set video_job = item.video_job %}
+      {% set connection = item.connection %}
+
+      <article
+        class="publishing-video-card"
+        data-publish-job-id="{{ publish_job.id }}"
+        data-current-status="{{ publish_job.status }}"
+      >
+        <div class="publishing-video-main">
+          <span class="overview-video-icon">YT</span>
+
+          <div>
+            <strong>{{ publish_job.title }}</strong>
+
+            <small>
+              {{ connection.channel_title if connection else "Unknown channel" }}
+              · {{ publish_job.privacy_status | title }}
+              · Attempt {{ publish_job.attempt_count }}
+            </small>
+
+            {% if publish_job.status in ["queued", "uploading"] %}
+            <div style="margin-top:10px;">
+              <progress
+                value="{{ publish_job.progress }}"
+                max="100"
+                style="width:100%;"
+                data-publish-progress
+              ></progress>
+
+              <small data-publish-progress-text>
+                {{ publish_job.progress }}% ·
+                {{ publish_job.bytes_uploaded }} /
+                {{ publish_job.total_bytes }} bytes
+              </small>
+            </div>
+            {% endif %}
+
+            <small
+              data-publish-error
+              style="display:block;margin-top:8px;"
+              {% if not publish_job.last_error %}hidden{% endif %}
+            >
+              {{ publish_job.last_error or "" }}
+            </small>
+          </div>
+        </div>
+
+        <span
+          class="job-status {% if publish_job.status == 'uploaded' %}job-status-completed{% endif %}"
+          data-publish-status
+        >
+          {{ publish_job.status | replace("_", " ") | title }}
+        </span>
+
+        <div class="publishing-video-actions">
+          {% if publish_job.status in ["draft", "failed"] %}
+          <form
+            method="post"
+            action="/publishing/drafts/{{ publish_job.id }}/queue"
+            onsubmit="return confirm('Upload this video privately to YouTube?');"
+          >
+            <button type="submit" class="crm-primary-button">
+              Queue Private Upload
+            </button>
+          </form>
+          {% endif %}
+
+          <a
+            data-youtube-url
+            href="{{ publish_job.youtube_url or '#' }}"
+            target="_blank"
+            rel="noopener noreferrer"
+            {% if not publish_job.youtube_url %}hidden{% endif %}
+          >
+            Open on YouTube
+          </a>
+
+          {% if video_job %}
+          <a href="/jobs/{{ video_job.id }}/download">
+            Download Video
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No publishing jobs yet</h3>
+
+      <p>
+        Prepare a completed video to create the first YouTube upload draft.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
   <section class="crm-card">
     <div class="crm-card-header">
       <div>
@@ -173,6 +451,10 @@ Prepare completed videos for publishing and monitor integration readiness.
           <a href="/jobs/{{ job.id }}/download/script">
             Script
           </a>
+
+          <a href="/publishing/jobs/{{ job.id }}/draft">
+            Prepare Upload
+          </a>
         </div>
       </article>
       {% endfor %}
@@ -193,4 +475,126 @@ Prepare completed videos for publishing and monitor integration readiness.
   </section>
 
 </div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(() => {
+  const activeStatuses = new Set(["queued", "uploading"]);
+
+  const titleCase = (value) =>
+    value
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, character => character.toUpperCase());
+
+  const formatBytes = (value) => {
+    const bytes = Number(value || 0);
+
+    if (bytes < 1024 * 1024) {
+      return `${Math.round(bytes / 1024)} KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  async function refreshPublishingStatus() {
+    try {
+      const response = await fetch("/publishing/status", {
+        headers: {"Accept": "application/json"},
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+
+      if (!payload.authenticated) {
+        window.location.href = "/login";
+        return;
+      }
+
+      for (const item of payload.items) {
+        const card = document.querySelector(
+          `[data-publish-job-id="${item.id}"]`
+        );
+
+        if (!card) {
+          continue;
+        }
+
+        const previousStatus = card.dataset.currentStatus;
+        card.dataset.currentStatus = item.status;
+
+        const statusElement = card.querySelector(
+          "[data-publish-status]"
+        );
+
+        if (statusElement) {
+          statusElement.textContent = titleCase(item.status);
+          statusElement.classList.toggle(
+            "job-status-completed",
+            item.status === "uploaded"
+          );
+        }
+
+        const progressElement = card.querySelector(
+          "[data-publish-progress]"
+        );
+
+        if (progressElement) {
+          progressElement.value = item.progress || 0;
+        }
+
+        const progressText = card.querySelector(
+          "[data-publish-progress-text]"
+        );
+
+        if (progressText) {
+          progressText.textContent =
+            `${item.progress || 0}% · ` +
+            `${formatBytes(item.bytes_uploaded)} / ` +
+            `${formatBytes(item.total_bytes)}`;
+        }
+
+        const errorElement = card.querySelector(
+          "[data-publish-error]"
+        );
+
+        if (errorElement) {
+          errorElement.textContent = item.last_error || "";
+          errorElement.hidden = !item.last_error;
+        }
+
+        const youtubeLink = card.querySelector(
+          "[data-youtube-url]"
+        );
+
+        if (youtubeLink && item.youtube_url) {
+          youtubeLink.href = item.youtube_url;
+          youtubeLink.hidden = false;
+        }
+
+        if (
+          activeStatuses.has(previousStatus) &&
+          !activeStatuses.has(item.status)
+        ) {
+          window.setTimeout(
+            () => window.location.reload(),
+            800
+          );
+          return;
+        }
+      }
+    } catch (error) {
+      console.debug("Publishing status refresh failed.", error);
+    }
+  }
+
+  refreshPublishingStatus();
+  window.setInterval(refreshPublishingStatus, 3000);
+})();
+</script>
 {% endblock %}

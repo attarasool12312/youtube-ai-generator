@@ -201,6 +201,31 @@ def run_job(job_id: int) -> None:
             job.worker_pid = None
             db.commit()
 
+        try:
+            from app.youtube_auto_publish import (
+                prepare_and_queue_auto_publish,
+            )
+
+            auto_publish_result = (
+                prepare_and_queue_auto_publish(
+                    job_id
+                )
+            )
+
+            print(
+                "AUTO_PUBLISH_RESULT:",
+                auto_publish_result,
+                flush=True,
+            )
+
+        except Exception as auto_publish_error:
+            print(
+                "AUTO_PUBLISH_FAILED:",
+                str(auto_publish_error),
+                file=sys.stderr,
+                flush=True,
+            )
+
     except Exception as error:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)

@@ -228,8 +228,8 @@
             class="queue-job-row"
             data-job-id="{{ job.id }}"
             data-job-title="{{ job.title }}"
-            data-job-status="{{ job.status }}"
-            data-job-progress="{{ job.progress }}"
+            data-job-status="{{ job.pipeline_status | default(job.status) }}"
+            data-job-progress="{{ job.pipeline_progress | default(job.progress) }}"
           >
             <td>{{ job.queue_position }}</td>
 
@@ -245,7 +245,7 @@
             </td>
 
             <td>
-              <span class="job-status job-status-{{ job.status }}">
+              <span class="job-status job-status-{{ job.pipeline_css_status | default(job.status) }}">
                 {{ job.display_status }}
               </span>
             </td>
@@ -253,20 +253,20 @@
             <td>
               <div class="job-progress">
                 <div class="job-progress-header">
-                  <span>{{ job.progress }}%</span>
+                  <span>{{ job.pipeline_progress | default(job.progress) }}%</span>
                   <small>{{ job.eta_text }}</small>
                 </div>
 
                 <div
                   class="job-progress-track"
                   role="progressbar"
-                  aria-valuenow="{{ job.progress }}"
+                  aria-valuenow="{{ job.pipeline_progress | default(job.progress) }}"
                   aria-valuemin="0"
                   aria-valuemax="100"
                 >
                   <div
                     class="job-progress-fill"
-                    style="width: {{ job.progress }}%;"
+                    style="width: {{ job.pipeline_progress | default(job.progress) }}%;"
                   ></div>
                 </div>
               </div>
@@ -314,7 +314,7 @@
                 </form>
                 {% endif %}
 
-                {% if job.status not in ["completed", "failed", "cancelled"] %}
+                {% if job.status not in ["completed", "failed", "cancelled", "published", "published_warning", "youtube_failed", "youtube_review"] %}
                 <form
                   method="post"
                   action="/jobs/{{ job.id }}/cancel"
@@ -892,6 +892,3 @@ document.addEventListener("DOMContentLoaded", function () {
   logout.parentElement.insertBefore(settings, logout);
 });
 </script>
-
-
-

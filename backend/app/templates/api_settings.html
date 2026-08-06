@@ -262,6 +262,98 @@ Manage AI providers, stock-media services, and external integrations.
       </div>
     </section>
 
+
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            YouTube Publishing
+          </span>
+          <h2>Google OAuth application credentials</h2>
+          <p>
+            These credentials belong to this application. Each connected
+            YouTube channel will receive its own separate encrypted token.
+          </p>
+        </div>
+
+        <span class="api-state {% if youtube_client_id_ready and youtube_client_secret_ready %}is-ready{% endif %}">
+          {{
+            "Configured"
+            if youtube_client_id_ready and youtube_client_secret_ready
+            else "Not configured"
+          }}
+        </span>
+      </div>
+
+      <div class="api-fields-grid">
+        <div>
+          <label for="public_app_url">
+            Public App URL
+          </label>
+
+          <input
+            id="public_app_url"
+            type="url"
+            name="public_app_url"
+            value="{{ public_app_url }}"
+            required
+          >
+
+          <small>
+            Use localhost during development and your HTTPS domain
+            after deployment.
+          </small>
+        </div>
+
+        <div>
+          <label for="youtube_callback_preview">
+            OAuth Callback URL
+          </label>
+
+          <input
+            id="youtube_callback_preview"
+            type="text"
+            value="{{ public_app_url }}/youtube/oauth/callback"
+            readonly
+          >
+
+          <small>
+            Add this exact URL to Google Cloud authorized redirect URIs.
+          </small>
+        </div>
+      </div>
+
+      <div class="api-fields-grid">
+        <div>
+          <label for="youtube_client_id">
+            Google OAuth Client ID
+          </label>
+
+          <input
+            id="youtube_client_id"
+            type="password"
+            name="youtube_client_id"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if youtube_client_id_ready else 'Enter OAuth client ID' }}"
+          >
+        </div>
+
+        <div>
+          <label for="youtube_client_secret">
+            Google OAuth Client Secret
+          </label>
+
+          <input
+            id="youtube_client_secret"
+            type="password"
+            name="youtube_client_secret"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if youtube_client_secret_ready else 'Enter OAuth client secret' }}"
+          >
+        </div>
+      </div>
+    </section>
+
     <div class="api-save-bar">
       <div>
         <strong>Secure credential storage</strong>
@@ -345,6 +437,19 @@ Manage AI providers, stock-media services, and external integrations.
             Together AI API Key
           </option>
           {% endif %}
+
+          {% if youtube_client_id_ready %}
+          <option value="youtube_client_id">
+            YouTube OAuth Client ID
+          </option>
+          {% endif %}
+
+          {% if youtube_client_secret_ready %}
+          <option value="youtube_client_secret">
+            YouTube OAuth Client Secret
+          </option>
+          {% endif %}
+
         </select>
       </div>
 

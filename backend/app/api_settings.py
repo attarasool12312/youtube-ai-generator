@@ -8,8 +8,12 @@ from app.models import ApiSetting
 cipher = Fernet(settings.settings_encryption_key.encode())
 
 
-def encrypt_value(value):
+def encrypt_value(value: str) -> str:
     return cipher.encrypt(value.encode()).decode()
+
+
+def decrypt_value(encrypted_value: str) -> str:
+    return cipher.decrypt(encrypted_value.encode()).decode()
 
 
 def save_api_key(name, value):
@@ -49,9 +53,7 @@ def get_api_key(name):
         )
         if not item:
             return ""
-        return cipher.decrypt(
-            item.encrypted_value.encode()
-        ).decode()
+        return decrypt_value(item.encrypted_value)
 
 
 def has_api_key(name):
