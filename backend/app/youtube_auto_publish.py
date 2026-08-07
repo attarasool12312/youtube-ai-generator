@@ -12,17 +12,52 @@ from app.models import (
     YouTubePublishJob,
 )
 from app.youtube_metadata_generator import (
+    GeneratedYouTubeMetadata,
     generate_youtube_metadata,
 )
 from app.youtube_publish_drafts import (
     save_youtube_publish_draft,
 )
-from app.youtube_thumbnail_generator import (
-    generate_youtube_thumbnail,
-)
 from app.youtube_publish_queue import (
     queue_youtube_publish_job,
 )
+
+
+def _saved_youtube_metadata(video_job):
+    if (
+        not video_job.youtube_title
+        or not video_job.youtube_description
+    ):
+        return None
+
+    tags = [
+        tag.strip()
+        for tag in (video_job.youtube_tags or "").split(",")
+        if tag.strip()
+    ]
+
+    return GeneratedYouTubeMetadata(
+        title=video_job.youtube_title,
+        description=video_job.youtube_description,
+        tags=tags,
+        category_id=video_job.youtube_category_id or "27",
+        language=video_job.youtube_language or "en",
+        provider=(
+            video_job.youtube_metadata_provider
+            or "saved-post-render"
+        ),
+        stock_credits=video_job.youtube_stock_credits or "",
+    )
+
+
+def _store_youtube_metadata(video_job, metadata):
+    video_job.youtube_title = metadata.title
+    video_job.youtube_description = metadata.description
+    video_job.youtube_tags = ", ".join(metadata.tags)
+    video_job.youtube_category_id = metadata.category_id
+    video_job.youtube_language = metadata.language
+    video_job.youtube_metadata_provider = metadata.provider
+    video_job.youtube_stock_credits = metadata.stock_credits
 
 
 AI_MEDIA_PROVIDERS = {
@@ -87,9 +122,6 @@ def prepare_and_queue_auto_publish(
         if not video_job.auto_publish_connection_id:
             return "skipped_no_channel"
 
-        if not video_job.auto_publish_metadata:
-            return "skipped_metadata_disabled"
-
         connection = db.get(
             YouTubeConnection,
             video_job.auto_publish_connection_id,
@@ -128,9 +160,31 @@ def prepare_and_queue_auto_publish(
                     + existing.status
                 )
 
-        metadata = generate_youtube_metadata(
-            video_job
-        )
+        if video_job.auto_publish_metadata:
+            metadata = _saved_youtube_metadata(
+                video_job
+            )
+
+            if metadata is None:
+                metadata = generate_youtube_metadata(
+                    video_job
+                )
+                _store_youtube_metadata(
+                    video_job,
+                    metadata,
+                )
+                db.commit()
+                db.refresh(video_job)
+        else:
+            metadata = GeneratedYouTubeMetadata(
+                title=(video_job.title or "Untitled Video")[:100],
+                description="",
+                tags=[],
+                category_id="27",
+                language="en",
+                provider="basic-no-ai-metadata",
+                stock_credits="",
+            )
 
         draft = save_youtube_publish_draft(
             db,
@@ -145,6 +199,7 @@ def prepare_and_queue_auto_publish(
                 video_job.auto_publish_privacy
                 or "private"
             ),
+            scheduled_at=video_job.auto_publish_scheduled_at,
             made_for_kids=bool(
                 video_job.auto_publish_made_for_kids
             ),
@@ -160,37 +215,14 @@ def prepare_and_queue_auto_publish(
             thumbnail_path=None,
         )
 
-        if video_job.auto_publish_thumbnail:
-            draft.status = "thumbnail_generation"
-            draft.thumbnail_status = "generating"
-            draft.thumbnail_error = None
-            db.commit()
-            db.refresh(draft)
-
-            try:
-                thumbnail = generate_youtube_thumbnail(
-                    video_job,
-                    publish_title=metadata.title,
-                )
-
-                draft.thumbnail_path = thumbnail.path
-                draft.thumbnail_status = "ready"
-                draft.thumbnail_error = None
-
-            except Exception as error:
-                draft.thumbnail_path = None
-                draft.thumbnail_status = "failed"
-                draft.thumbnail_error = str(error)[:4000]
-
-            draft.status = "draft"
-            db.commit()
-            db.refresh(draft)
-
-        else:
-            draft.thumbnail_status = "not_requested"
-            draft.thumbnail_error = None
-            db.commit()
-            db.refresh(draft)
+        # Thumbnail image generation is intentionally disabled.
+        # Every completed video receives a Gemini thumbnail prompt
+        # independently in job_runner.py.
+        draft.thumbnail_path = None
+        draft.thumbnail_status = "not_requested"
+        draft.thumbnail_error = None
+        db.commit()
+        db.refresh(draft)
 
         queue_youtube_publish_job(db, draft)
 

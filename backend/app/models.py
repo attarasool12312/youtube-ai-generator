@@ -67,6 +67,56 @@ class VideoJob(Base):
         DateTime, nullable=True
     )
 
+    thumbnail_headline: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    thumbnail_prompt: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    thumbnail_prompt_provider: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    youtube_title: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    youtube_description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    youtube_tags: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    youtube_category_id: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    youtube_language: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+    )
+    youtube_metadata_provider: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+    youtube_stock_credits: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    manual_thumbnail_path: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    manual_thumbnail_uploaded_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     auto_publish_enabled: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
@@ -78,6 +128,10 @@ class VideoJob(Base):
     auto_publish_privacy: Mapped[str] = mapped_column(
         String(20),
         default="private",
+    )
+    auto_publish_scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
     )
     auto_publish_made_for_kids: Mapped[bool] = mapped_column(
         Boolean,
@@ -93,7 +147,7 @@ class VideoJob(Base):
     )
     auto_publish_thumbnail: Mapped[bool] = mapped_column(
         Boolean,
-        default=True,
+        default=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

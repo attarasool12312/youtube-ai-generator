@@ -149,7 +149,7 @@ Review metadata and choose the destination channel before uploading.
       </div>
     </section>
 
-    <section class="crm-card api-provider-section">
+    <section class="crm-card api-provider-section publishing-safety-card">
       <div class="crm-card-header">
         <div>
           <span class="developer-section-label">
@@ -157,14 +157,72 @@ Review metadata and choose the destination channel before uploading.
           </span>
           <h2>Audience and disclosure</h2>
           <p>
-            Initial upload is private during the first implementation phase.
+            Choose how this video should be published on YouTube.
           </p>
         </div>
       </div>
 
-      <input type="hidden" name="privacy_status" value="private">
+      <div class="api-fields-grid">
+        <div>
+          <label for="publish_mode">Visibility</label>
+          <select
+            id="publish_mode"
+            name="publish_mode"
+            required
+          >
+            <option
+              value="private"
+              {% if form_data.publish_mode == "private" %}selected{% endif %}
+            >
+              Private
+            </option>
+            <option
+              value="unlisted"
+              {% if form_data.publish_mode == "unlisted" %}selected{% endif %}
+            >
+              Unlisted
+            </option>
+            <option
+              value="public"
+              {% if form_data.publish_mode == "public" %}selected{% endif %}
+            >
+              Public
+            </option>
+            <option
+              value="scheduled"
+              {% if form_data.publish_mode == "scheduled" %}selected{% endif %}
+            >
+              Scheduled
+            </option>
+          </select>
+        </div>
 
-      <label>
+        <div id="youtube-schedule-field" hidden>
+          <label for="scheduled_at_local">
+            Publish date and time
+          </label>
+
+          <input
+            id="scheduled_at_local"
+            type="datetime-local"
+            name="scheduled_at_local"
+            value="{{ form_data.scheduled_at_local }}"
+          >
+
+          <input
+            id="scheduled_at_utc"
+            type="hidden"
+            name="scheduled_at_utc"
+            value=""
+          >
+
+          <small>
+            Uses your current browser timezone.
+          </small>
+        </div>
+      </div>
+
+      <label class="publishing-safety-option">
         <input
           type="checkbox"
           name="made_for_kids"
@@ -174,7 +232,7 @@ Review metadata and choose the destination channel before uploading.
         This video is made for kids
       </label>
 
-      <label>
+      <label class="publishing-safety-option">
         <input
           type="checkbox"
           name="contains_synthetic_media"
@@ -184,7 +242,7 @@ Review metadata and choose the destination channel before uploading.
         Contains realistic altered or synthetic media
       </label>
 
-      <label>
+      <label class="publishing-safety-option">
         <input
           type="checkbox"
           name="notify_subscribers"
@@ -197,7 +255,7 @@ Review metadata and choose the destination channel before uploading.
 
     <div class="api-save-bar">
       <div>
-        <strong>Private upload draft</strong>
+        <strong>YouTube upload draft</strong>
         <span>
           Saving this form does not upload anything to YouTube.
         </span>
@@ -221,4 +279,52 @@ Review metadata and choose the destination channel before uploading.
   {% endif %}
 
 </div>
+
+<script>
+(() => {
+  const mode = document.getElementById("publish_mode");
+  const scheduleField = document.getElementById(
+    "youtube-schedule-field"
+  );
+  const localInput = document.getElementById(
+    "scheduled_at_local"
+  );
+  const utcInput = document.getElementById(
+    "scheduled_at_utc"
+  );
+  const form = mode ? mode.closest("form") : null;
+
+  if (!mode || !scheduleField || !localInput || !utcInput) {
+    return;
+  }
+
+  const syncSchedule = () => {
+    const scheduled = mode.value === "scheduled";
+
+    scheduleField.hidden = !scheduled;
+    localInput.required = scheduled;
+
+    if (!scheduled || !localInput.value) {
+      utcInput.value = "";
+      return;
+    }
+
+    const localDate = new Date(localInput.value);
+
+    if (!Number.isNaN(localDate.getTime())) {
+      utcInput.value = localDate.toISOString();
+    }
+  };
+
+  mode.addEventListener("change", syncSchedule);
+  localInput.addEventListener("change", syncSchedule);
+
+  if (form) {
+    form.addEventListener("submit", syncSchedule);
+  }
+
+  syncSchedule();
+})();
+</script>
+
 {% endblock %}

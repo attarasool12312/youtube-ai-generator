@@ -295,6 +295,7 @@ log "Creating project directories"
 mkdir -p \
     "$MODEL_ROOT/huggingface" \
     "$PROJECT_ROOT/backend/data" \
+    "$PROJECT_ROOT/logs/youtube-publishing" \
     "$PROJECT_ROOT/outputs/jobs" \
     "$PROJECT_ROOT/logs"
 

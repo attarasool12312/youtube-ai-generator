@@ -3324,3 +3324,68 @@
     width: 100%;
   }
 }
+
+
+/* Compact thumbnail prompt action */
+.app-shell-page #video-queue-panel .job-actions .thumbnail-copy-button {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: max-content !important;
+  flex: 0 0 auto !important;
+  white-space: nowrap;
+  padding-left: 11px;
+  padding-right: 11px;
+}
+
+
+/* =========================================================
+   YOUTUBE PUBLISHING — SAFETY CHECKBOXES
+========================================================= */
+
+.app-shell-page .publishing-page .publishing-safety-card
+.publishing-safety-option {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 11px !important;
+  width: fit-content !important;
+  max-width: 100%;
+  margin: 0 0 15px !important;
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.app-shell-page .publishing-page .publishing-safety-card
+.publishing-safety-option:last-child {
+  margin-bottom: 0 !important;
+}
+
+.app-shell-page .publishing-page .publishing-safety-card
+.publishing-safety-option input[type="checkbox"] {
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  max-width: 18px !important;
+  max-height: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  flex: 0 0 18px !important;
+  cursor: pointer;
+}
+
+
+/* YouTube publishing visibility spacing */
+.app-shell-page .publishing-page
+.publishing-safety-card > .api-fields-grid {
+  margin-bottom: 22px;
+}
+
+.app-shell-page .publishing-page
+#youtube-schedule-field small,
+.app-shell-page .video-creation-panel
+[data-auto-publish-schedule] small {
+  display: block;
+  margin-top: 6px;
+}

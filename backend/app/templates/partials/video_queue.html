@@ -67,6 +67,15 @@
                   class="download-button"
                   href="/jobs/{{ job.id }}/download"
                 >Video</a>
+                {% if job.youtube_url %}
+                <a
+                  class="download-button"
+                  href="{{ job.youtube_url }}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >YouTube</a>
+                {% endif %}
+
 
                 <a
                   class="download-button"
@@ -77,6 +86,19 @@
                   class="download-button"
                   href="/jobs/{{ job.id }}/download/script"
                 >Script</a>
+
+                {% if job.thumbnail_prompt %}
+            <button
+              type="button"
+              class="download-button thumbnail-copy-button"
+              onclick='navigator.clipboard.writeText({{ job.thumbnail_prompt|tojson }}).then(() => { const oldText = this.textContent; this.textContent = "Copied"; setTimeout(() => { this.textContent = oldText; }, 1600); }); return false;'
+            >Copy Thumbnail</button>
+            {% else %}
+<a
+                  class="download-button"
+                  href="/jobs/{{ job.id }}/thumbnail"
+                >Thumbnail</a>
+            {% endif %}
 
                 {% if job.captions_enabled %}
                 <a

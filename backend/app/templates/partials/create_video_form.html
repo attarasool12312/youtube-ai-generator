@@ -13,7 +13,13 @@
         <div class="settings-grid">
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option></select></div>
           <div><label>Language</label><input value="English" disabled></div>
-          <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
+          <div>
+  <label>Video Style</label>
+  <input type="hidden" name="video_style" value="auto">
+  <select disabled>
+    <option selected>Auto Detect</option>
+  </select>
+</div>
           <div>
             <label>Main Narrator</label>
             <div class="voice-select-row">
@@ -201,11 +207,40 @@
                 <option value="private" selected>
                   Private
                 </option>
+                <option value="unlisted">
+                  Unlisted
+                </option>
+                <option value="public">
+                  Public
+                </option>
+                <option value="scheduled">
+                  Scheduled
+                </option>
               </select>
+            </div>
+
+            <div
+              data-auto-publish-schedule
+              hidden
+            >
+              <label for="auto_publish_scheduled_at_local">
+                Publish Date & Time
+              </label>
+
+              <input
+                id="auto_publish_scheduled_at_local"
+                type="datetime-local"
+                name="auto_publish_scheduled_at_local"
+              >
+
+              <input
+                id="auto_publish_scheduled_at_utc"
+                type="hidden"
+                name="auto_publish_scheduled_at_utc"
+              >
 
               <small>
-                Public, unlisted and scheduled publishing will be
-                enabled after production OAuth approval.
+                Uses your current browser timezone.
               </small>
             </div>
 
@@ -264,17 +299,7 @@
               </label>
             </div>
 
-            <div class="voice-option">
-              <label>
-                <input
-                  type="checkbox"
-                  name="auto_publish_thumbnail"
-                  value="on"
-                  checked
-                >
-                Automatically generate and upload a thumbnail
-              </label>
-            </div>
+
           </div>
 
           {% if not youtube_connections | default([]) %}
@@ -293,6 +318,18 @@
           const channelSelect = document.getElementById(
             "auto_publish_connection_id"
           );
+          const privacySelect = document.getElementById(
+            "auto_publish_privacy"
+          );
+          const scheduleField = document.querySelector(
+            "[data-auto-publish-schedule]"
+          );
+          const localSchedule = document.getElementById(
+            "auto_publish_scheduled_at_local"
+          );
+          const utcSchedule = document.getElementById(
+            "auto_publish_scheduled_at_utc"
+          );
 
           if (!channelSelect) {
             return;
@@ -302,18 +339,76 @@
             "[data-auto-publish-option]"
           );
 
+          const syncSchedule = () => {
+            const enabled = channelSelect.value !== "0";
+            const scheduled = (
+              enabled &&
+              privacySelect &&
+              privacySelect.value === "scheduled"
+            );
+
+            if (scheduleField) {
+              scheduleField.hidden = !scheduled;
+            }
+
+            if (localSchedule) {
+              localSchedule.required = scheduled;
+            }
+
+            if (!utcSchedule) {
+              return;
+            }
+
+            if (
+              !scheduled ||
+              !localSchedule ||
+              !localSchedule.value
+            ) {
+              utcSchedule.value = "";
+              return;
+            }
+
+            const localDate = new Date(localSchedule.value);
+
+            if (!Number.isNaN(localDate.getTime())) {
+              utcSchedule.value = localDate.toISOString();
+            }
+          };
+
           const updatePublishingFields = () => {
             const enabled = channelSelect.value !== "0";
 
             dependentFields.forEach((field) => {
               field.hidden = !enabled;
             });
+
+            syncSchedule();
           };
 
           channelSelect.addEventListener(
             "change",
             updatePublishingFields
           );
+
+          if (privacySelect) {
+            privacySelect.addEventListener(
+              "change",
+              syncSchedule
+            );
+          }
+
+          if (localSchedule) {
+            localSchedule.addEventListener(
+              "change",
+              syncSchedule
+            );
+          }
+
+          const form = channelSelect.closest("form");
+
+          if (form) {
+            form.addEventListener("submit", syncSchedule);
+          }
 
           updatePublishingFields();
         })();

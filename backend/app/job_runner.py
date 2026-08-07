@@ -201,6 +201,98 @@ def run_job(job_id: int) -> None:
             job.worker_pid = None
             db.commit()
 
+        # Generate reusable post-render assets independently from
+        # YouTube channel selection. Failures here must never fail
+        # an already completed video.
+        try:
+            from app.youtube_thumbnail_generator import (
+                generate_youtube_thumbnail_prompt,
+            )
+
+            with SessionLocal() as db:
+                asset_job = db.get(VideoJob, job_id)
+
+                if asset_job is not None:
+                    thumbnail = generate_youtube_thumbnail_prompt(
+                        asset_job
+                    )
+                    asset_job.thumbnail_headline = (
+                        thumbnail.headline
+                    )
+                    asset_job.thumbnail_prompt = (
+                        thumbnail.visual_prompt
+                    )
+                    asset_job.thumbnail_prompt_provider = (
+                        thumbnail.provider
+                    )
+                    db.commit()
+
+            print(
+                "THUMBNAIL_PROMPT_READY:",
+                job_id,
+                flush=True,
+            )
+
+        except Exception as thumbnail_error:
+            print(
+                "THUMBNAIL_PROMPT_FAILED:",
+                str(thumbnail_error),
+                file=sys.stderr,
+                flush=True,
+            )
+
+        try:
+            from app.youtube_metadata_generator import (
+                generate_youtube_metadata,
+            )
+
+            with SessionLocal() as db:
+                asset_job = db.get(VideoJob, job_id)
+
+                if (
+                    asset_job is not None
+                    and asset_job.auto_publish_metadata
+                ):
+                    metadata = generate_youtube_metadata(
+                        asset_job
+                    )
+
+                    asset_job.youtube_title = metadata.title
+                    asset_job.youtube_description = (
+                        metadata.description
+                    )
+                    asset_job.youtube_tags = ", ".join(
+                        metadata.tags
+                    )
+                    asset_job.youtube_category_id = (
+                        metadata.category_id
+                    )
+                    asset_job.youtube_language = (
+                        metadata.language
+                    )
+                    asset_job.youtube_metadata_provider = (
+                        metadata.provider
+                    )
+                    asset_job.youtube_stock_credits = (
+                        metadata.stock_credits
+                    )
+                    db.commit()
+
+                    print(
+                        "YOUTUBE_METADATA_READY:",
+                        job_id,
+                        metadata.provider,
+                        flush=True,
+                    )
+
+        except Exception as metadata_error:
+            print(
+                "YOUTUBE_METADATA_FAILED:",
+                str(metadata_error),
+                file=sys.stderr,
+                flush=True,
+            )
+
         try:
             from app.youtube_auto_publish import (
                 prepare_and_queue_auto_publish,

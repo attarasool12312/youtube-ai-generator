@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-from app.api_settings import encrypt_value
+from app.api_settings import decrypt_value, encrypt_value
 from app.database import SessionLocal
 from app.models import (
     VideoJob,
@@ -252,10 +252,35 @@ def run_youtube_upload(publish_job_id: int) -> None:
             connection,
         )
 
+        total_bytes = video_path.stat().st_size
+        encrypted_resume_uri = (
+            publish_job.encrypted_upload_session_uri
+        )
+        resume_bytes = max(
+            0,
+            min(
+                int(publish_job.bytes_uploaded or 0),
+                total_bytes,
+            ),
+        )
+
         publish_job.status = "uploading"
-        publish_job.progress = 0
-        publish_job.bytes_uploaded = 0
-        publish_job.total_bytes = video_path.stat().st_size
+        publish_job.total_bytes = total_bytes
+
+        if encrypted_resume_uri:
+            publish_job.bytes_uploaded = resume_bytes
+            publish_job.progress = (
+                min(
+                    99,
+                    int(resume_bytes * 100 / total_bytes),
+                )
+                if total_bytes
+                else 0
+            )
+        else:
+            publish_job.progress = 0
+            publish_job.bytes_uploaded = 0
+
         publish_job.attempt_count += 1
         publish_job.last_error = None
         publish_job.started_at = utc_now_naive()
@@ -266,7 +291,6 @@ def run_youtube_upload(publish_job_id: int) -> None:
         notify_subscribers = bool(
             publish_job.notify_subscribers
         )
-        total_bytes = publish_job.total_bytes
 
     youtube = build(
         "youtube",
@@ -288,6 +312,41 @@ def run_youtube_upload(publish_job_id: int) -> None:
         media_body=media,
         notifySubscribers=notify_subscribers,
     )
+
+    if encrypted_resume_uri:
+        try:
+            resume_uri = decrypt_value(
+                encrypted_resume_uri
+            )
+        except Exception as error:
+            raise RuntimeError(
+                "Stored YouTube resumable upload session "
+                "could not be decrypted. Manual review is "
+                "required before starting a new upload."
+            ) from error
+
+        # google-api-python-client can query the existing
+        # resumable session for YouTube's authoritative byte
+        # position before sending the next chunk.
+        request.resumable_uri = resume_uri
+        request.resumable_progress = resume_bytes
+        request._in_error_state = True
+
+        print(
+            "YOUTUBE_UPLOAD_RESUMING:",
+            publish_job_id,
+            "saved_bytes=",
+            resume_bytes,
+            flush=True,
+        )
+    else:
+        print(
+            "YOUTUBE_UPLOAD_STARTING:",
+            publish_job_id,
+            "total_bytes=",
+            total_bytes,
+            flush=True,
+        )
 
     response = None
 
@@ -355,6 +414,13 @@ def run_youtube_upload(publish_job_id: int) -> None:
             publish_job.completed_at = utc_now_naive()
             db.commit()
 
+        print(
+            "YOUTUBE_UPLOAD_COMPLETED:",
+            publish_job_id,
+            youtube_video_id,
+            flush=True,
+        )
+
         upload_youtube_thumbnail(
             publish_job_id,
             youtube,
@@ -376,6 +442,16 @@ def run_youtube_upload(publish_job_id: int) -> None:
                 )
                 publish_job.last_error = str(error)[:4000]
                 db.commit()
+
+                print(
+                    "YOUTUBE_UPLOAD_INTERRUPTED:",
+                    publish_job_id,
+                    "status=",
+                    publish_job.status,
+                    "bytes=",
+                    publish_job.bytes_uploaded,
+                    flush=True,
+                )
 
         raise
 

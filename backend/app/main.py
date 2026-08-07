@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -24,8 +24,14 @@ from app.youtube_oauth import (
     get_public_app_url,
     normalize_public_app_url,
 )
-from app.youtube_connections import save_connected_channel
+from app.youtube_connections import (
+    ensure_channel_thumbnail_cached,
+    save_connected_channel,
+)
 from app.youtube_categories import YOUTUBE_CATEGORY_OPTIONS
+from app.youtube_thumbnail_generator import (
+    generate_youtube_thumbnail_prompt,
+)
 from app.youtube_publish_drafts import save_youtube_publish_draft
 from app.youtube_publish_files import (
     YouTubePublishFileError,
@@ -166,12 +172,21 @@ def prepare_job_display(job, publish_job=None):
     job.pipeline_progress = job.progress
     job.youtube_url = None
 
-    if job.status == "completed" and job.auto_publish_enabled:
+    if publish_job is not None:
+        job.youtube_url = publish_job.youtube_url
+
+    if (
+        job.status == "completed"
+        and (
+            job.auto_publish_enabled
+            or publish_job is not None
+        )
+    ):
         job.pipeline_status = "youtube_preparing"
         job.pipeline_css_status = "youtube_preparing"
         job.pipeline_progress = 92
         job.display_status = (
-            "Preparing YouTube Metadata & Thumbnail"
+            "Preparing YouTube Metadata & Thumbnail Prompt"
         )
         job.eta_text = "YouTube publishing in progress"
 
@@ -180,18 +195,11 @@ def prepare_job_display(job, publish_job=None):
 
         job.youtube_url = publish_job.youtube_url
         status = publish_job.status
-        thumbnail_status = publish_job.thumbnail_status
 
-        if status == "thumbnail_generation" or thumbnail_status == "generating":
-            job.pipeline_status = "youtube_thumbnail_generation"
-            job.pipeline_css_status = "youtube_thumbnail_generation"
-            job.pipeline_progress = 94
-            job.display_status = "Generating Thumbnail"
-
-        elif status == "draft":
+        if status == "draft":
             job.pipeline_status = "youtube_preparing"
             job.pipeline_progress = 95
-            job.display_status = "Preparing YouTube Upload"
+            job.display_status = "Ready for YouTube Upload"
 
         elif status == "queued":
             job.pipeline_status = "youtube_queued"
@@ -210,26 +218,15 @@ def prepare_job_display(job, publish_job=None):
             )
 
         elif status == "uploaded":
-            if thumbnail_status in {
-                "ready",
-                "uploading",
-                "generating",
-            }:
-                job.pipeline_status = "youtube_thumbnail_upload"
-                job.pipeline_progress = 99
-                job.display_status = "Uploading Thumbnail"
-            elif thumbnail_status == "failed":
-                job.pipeline_status = "published_warning"
-                job.pipeline_css_status = "failed"
-                job.pipeline_progress = 100
-                job.display_status = (
-                    "Published — Thumbnail Failed"
-                )
-                job.eta_text = "Published with warning"
+            job.pipeline_progress = 100
+            job.pipeline_css_status = "completed"
+
+            if publish_job.scheduled_at is not None:
+                job.pipeline_status = "youtube_scheduled"
+                job.display_status = "Scheduled"
+                job.eta_text = "Scheduled on YouTube"
             else:
                 job.pipeline_status = "published"
-                job.pipeline_css_status = "completed"
-                job.pipeline_progress = 100
                 job.display_status = "Published"
                 job.eta_text = "Published to YouTube"
 
@@ -457,14 +454,18 @@ def add_jobs(
     caption_outline: int = Form(2),
     auto_publish_connection_id: int = Form(0),
     auto_publish_privacy: str = Form("private"),
+    auto_publish_scheduled_at_local: str = Form(""),
+    auto_publish_scheduled_at_utc: str = Form(""),
     auto_publish_made_for_kids: str = Form("no"),
     auto_publish_notify_subscribers: str = Form(""),
     auto_publish_metadata: str = Form("on"),
-    auto_publish_thumbnail: str = Form("on"),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
+
+    # Video style is temporarily locked to automatic detection.
+    video_style = "auto"
 
     title_list = [title.strip() for title in titles.splitlines() if title.strip()]
     selected_voices = list(dict.fromkeys([narrator_voice, *voice_pool]))
@@ -503,16 +504,66 @@ def add_jobs(
                 status_code=303,
             )
 
-    if auto_publish_privacy not in {
+    publish_mode = auto_publish_privacy.strip().lower()
+
+    if publish_mode not in {
         "private",
         "unlisted",
         "public",
+        "scheduled",
     }:
+        publish_mode = "private"
+
+    auto_publish_scheduled_at = None
+
+    if auto_publish_enabled and publish_mode == "scheduled":
+        if not auto_publish_scheduled_at_utc.strip():
+            return RedirectResponse(
+                "/videos/create?success=Choose a future date and time for scheduled publishing.",
+                status_code=303,
+            )
+
+        try:
+            parsed_schedule = datetime.fromisoformat(
+                auto_publish_scheduled_at_utc.strip().replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            if parsed_schedule.tzinfo is None:
+                parsed_schedule = parsed_schedule.replace(
+                    tzinfo=timezone.utc
+                )
+
+            parsed_schedule = parsed_schedule.astimezone(
+                timezone.utc
+            )
+
+            if parsed_schedule <= datetime.now(timezone.utc):
+                return RedirectResponse(
+                    "/videos/create?success=Scheduled publishing time must be in the future.",
+                    status_code=303,
+                )
+
+            auto_publish_scheduled_at = (
+                parsed_schedule.replace(tzinfo=None)
+            )
+
+        except ValueError:
+            return RedirectResponse(
+                "/videos/create?success=Invalid scheduled publishing date and time.",
+                status_code=303,
+            )
+
+        # YouTube scheduling uses private + publishAt internally.
         auto_publish_privacy = "private"
 
-    # Current unverified/testing upload flow remains private.
-    if auto_publish_enabled:
+    elif publish_mode == "scheduled":
         auto_publish_privacy = "private"
+
+    else:
+        auto_publish_privacy = publish_mode
 
     made_for_kids_value = (
         auto_publish_made_for_kids == "yes"
@@ -521,12 +572,21 @@ def add_jobs(
         auto_publish_notify_subscribers == "on"
     )
     auto_metadata_value = auto_publish_metadata == "on"
-    auto_thumbnail_value = auto_publish_thumbnail == "on"
 
     if not title_list:
         return RedirectResponse("/videos/create?success=No valid titles entered.", status_code=303)
     if len(title_list) > 20:
         return RedirectResponse("/videos/create?success=Maximum 20 titles allowed.", status_code=303)
+
+    # Remove legacy orphan YouTube publish records before
+    # a deleted VideoJob ID can ever be reused by SQLite.
+    db.execute(
+        delete(YouTubePublishJob).where(
+            ~YouTubePublishJob.video_job_id.in_(
+                select(VideoJob.id)
+            )
+        )
+    )
 
     last_job = db.scalar(
         select(VideoJob).order_by(VideoJob.queue_position.desc()).limit(1)
@@ -556,12 +616,13 @@ def add_jobs(
                 else None
             ),
             auto_publish_privacy=auto_publish_privacy,
+            auto_publish_scheduled_at=auto_publish_scheduled_at,
             auto_publish_made_for_kids=made_for_kids_value,
             auto_publish_notify_subscribers=(
                 notify_subscribers_value
             ),
             auto_publish_metadata=auto_metadata_value,
-            auto_publish_thumbnail=auto_thumbnail_value,
+            auto_publish_thumbnail=False,
             status="waiting",
             progress=0,
             queue_position=next_position + index,
@@ -573,6 +634,86 @@ def add_jobs(
         f"/videos?success={len(title_list)} title(s) added to queue.",
         status_code=303,
     )
+
+
+@app.get("/jobs/{job_id}/thumbnail")
+def job_thumbnail_workspace(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/videos?success=Video job not found.",
+            status_code=303,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="thumbnail_workspace.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "videos",
+            "project_info": get_project_info(),
+            "job": job,
+        },
+    )
+
+
+@app.post("/jobs/{job_id}/thumbnail-prompt")
+def generate_job_thumbnail_prompt(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/videos?success=Video job not found.",
+            status_code=303,
+        )
+
+    if job.status != "completed":
+        return RedirectResponse(
+            "/videos?success=Thumbnail prompt is available after video completion.",
+            status_code=303,
+        )
+
+    try:
+        result = generate_youtube_thumbnail_prompt(job)
+
+        job.thumbnail_headline = result.headline
+        job.thumbnail_prompt = result.visual_prompt
+        job.thumbnail_prompt_provider = result.provider
+
+        db.commit()
+        db.refresh(job)
+
+        return RedirectResponse(
+            f"/videos?success=Thumbnail prompt generated for job {job.id}.",
+            status_code=303,
+        )
+
+    except Exception as error:
+        db.rollback()
+        logging.exception(
+            "Could not generate thumbnail prompt for job %s",
+            job_id,
+        )
+
+        return RedirectResponse(
+            "/videos?success=Thumbnail prompt generation failed.",
+            status_code=303,
+        )
 
 
 @app.post("/jobs/{job_id}/cancel")
@@ -699,6 +840,11 @@ def delete_job(
         output_directory=job.output_directory,
     )
 
+    db.execute(
+        delete(YouTubePublishJob).where(
+            YouTubePublishJob.video_job_id == job.id
+        )
+    )
     db.delete(job)
     db.commit()
 
@@ -894,6 +1040,14 @@ def publishing_page(
         )
     ).all()
 
+    for connection in youtube_connections:
+        connection.channel_thumbnail_url = (
+            ensure_channel_thumbnail_cached(
+                db,
+                connection,
+            )
+        )
+
     completed_jobs = sorted(
         [
             job
@@ -904,11 +1058,35 @@ def publishing_page(
         reverse=True,
     )
 
-    youtube_publish_jobs = db.scalars(
-        select(YouTubePublishJob).order_by(
-            YouTubePublishJob.id.desc()
+    try:
+        publishing_page = max(
+            1,
+            int(request.query_params.get("page", "1")),
         )
+    except ValueError:
+        publishing_page = 1
+
+    publishing_page_size = 20
+
+    youtube_publish_jobs = db.scalars(
+        select(YouTubePublishJob)
+        .order_by(YouTubePublishJob.id.desc())
+        .offset(
+            (publishing_page - 1)
+            * publishing_page_size
+        )
+        .limit(publishing_page_size + 1)
     ).all()
+
+    publishing_has_older = (
+        len(youtube_publish_jobs)
+        > publishing_page_size
+    )
+    publishing_has_newer = publishing_page > 1
+
+    youtube_publish_jobs = youtube_publish_jobs[
+        :publishing_page_size
+    ]
 
     publishing_items = []
 
@@ -935,6 +1113,9 @@ def publishing_page(
             "publishing_status": collect_publishing_status(),
             "youtube_connections": youtube_connections,
             "publishing_items": publishing_items,
+            "publishing_page": publishing_page,
+            "publishing_has_older": publishing_has_older,
+            "publishing_has_newer": publishing_has_newer,
             "completed_jobs": completed_jobs,
         },
     )
@@ -965,6 +1146,9 @@ def youtube_publishing_status(
                 "total_bytes": publish_job.total_bytes,
                 "last_error": publish_job.last_error,
                 "youtube_url": publish_job.youtube_url,
+                "is_scheduled": (
+                    publish_job.scheduled_at is not None
+                ),
             }
             for publish_job in publish_jobs
         ],
@@ -1013,14 +1197,24 @@ def youtube_publish_draft_page(
 
     form_data = {
         "youtube_connection_id": default_connection_id,
-        "title": job.title,
-        "description": "",
-        "tags": "",
-        "category_id": "27",
-        "language": "en",
-        "made_for_kids": False,
+        "title": job.youtube_title or job.title,
+        "description": job.youtube_description or "",
+        "tags": job.youtube_tags or "",
+        "category_id": job.youtube_category_id or "27",
+        "language": job.youtube_language or "en",
+        "publish_mode": (
+            "scheduled"
+            if job.auto_publish_scheduled_at
+            else (job.auto_publish_privacy or "private")
+        ),
+        "scheduled_at_local": "",
+        "made_for_kids": bool(
+            job.auto_publish_made_for_kids
+        ),
         "contains_synthetic_media": False,
-        "notify_subscribers": True,
+        "notify_subscribers": bool(
+            job.auto_publish_notify_subscribers
+        ),
     }
 
     return templates.TemplateResponse(
@@ -1049,6 +1243,9 @@ def save_youtube_publish_draft_route(
     tags: str = Form(""),
     category_id: str = Form("27"),
     language: str = Form("en"),
+    publish_mode: str = Form("private"),
+    scheduled_at_local: str = Form(""),
+    scheduled_at_utc: str = Form(""),
     made_for_kids: str = Form(""),
     contains_synthetic_media: str = Form(""),
     notify_subscribers: str = Form(""),
@@ -1086,6 +1283,8 @@ def save_youtube_publish_draft_route(
         "tags": tags,
         "category_id": category_id,
         "language": language,
+        "publish_mode": publish_mode,
+        "scheduled_at_local": scheduled_at_local,
         "made_for_kids": bool(made_for_kids),
         "contains_synthetic_media": bool(
             contains_synthetic_media
@@ -1094,12 +1293,52 @@ def save_youtube_publish_draft_route(
     }
 
     errors = []
+    scheduled_at = None
+    privacy_status = publish_mode.strip().lower()
+
+    if privacy_status == "scheduled":
+        privacy_status = "private"
+
+        if not scheduled_at_utc.strip():
+            errors.append(
+                "Choose a future date and time for scheduled publishing."
+            )
+        else:
+            try:
+                parsed_schedule = datetime.fromisoformat(
+                    scheduled_at_utc.strip().replace("Z", "+00:00")
+                )
+
+                if parsed_schedule.tzinfo is None:
+                    parsed_schedule = parsed_schedule.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                scheduled_at = (
+                    parsed_schedule
+                    .astimezone(timezone.utc)
+                    .replace(tzinfo=None)
+                )
+
+            except ValueError:
+                errors.append(
+                    "The scheduled publishing date and time is invalid."
+                )
+
+    elif privacy_status not in {
+        "private",
+        "unlisted",
+        "public",
+    }:
+        errors.append(
+            "Choose Private, Unlisted, Public, or Scheduled."
+        )
 
     if connection is None:
         errors.append(
             "The selected YouTube channel was not found."
         )
-    else:
+    elif not errors:
         try:
             draft = save_youtube_publish_draft(
                 db,
@@ -1110,7 +1349,7 @@ def save_youtube_publish_draft_route(
                 tags=tags,
                 category_id=category_id,
                 language=language,
-                privacy_status="private",
+                privacy_status=privacy_status,
                 made_for_kids=bool(made_for_kids),
                 contains_synthetic_media=bool(
                     contains_synthetic_media
@@ -1118,6 +1357,7 @@ def save_youtube_publish_draft_route(
                 notify_subscribers=bool(
                     notify_subscribers
                 ),
+                scheduled_at=scheduled_at,
             )
         except YouTubePublishValidationError as exc:
             db.rollback()

@@ -16,7 +16,7 @@ from PIL import (
     ImageOps,
 )
 
-from app.ai_provider import call_ai
+from app.ai_provider import call_gemini
 from app.local_image_generator import (
     generate_hd_image,
     get_runtime_profile,
@@ -51,6 +51,13 @@ class GeneratedYouTubeThumbnail:
     visual_prompt: str
     provider: str
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class GeneratedYouTubeThumbnailPrompt:
+    headline: str
+    visual_prompt: str
+    provider: str
 
 
 def _font_path() -> Path | None:
@@ -105,88 +112,149 @@ def _generate_thumbnail_concept(
     script: str,
 ) -> tuple[str, str, str]:
     prompt = f"""
-Create a high-click-through but honest YouTube thumbnail concept.
+Act as an elite YouTube thumbnail creative director.
+
+Create ONE premium, high-click-through but honest thumbnail concept
+specifically for the supplied video title and final script.
+
+The result must feel custom-designed for THIS exact topic.
+Never fall back to a generic stock-photo template.
 
 Return one valid JSON object only:
 {{
-  "headline": "...",
-  "visual_prompt": "..."
+    "headline": "...",
+    "visual_prompt": "..."
 }}
 
-Rules:
-- Base the concept only on the supplied title and script.
-- Headline must be 3-7 words and no more than 44 characters.
-- Headline must remain accurate and must not use misleading clickbait.
-- Copy any number exactly from the source.
-- Visual prompt must describe one clear cinematic focal subject.
-- Put the focal subject mainly on the right side.
-- Leave dark negative space on the left for headline text.
-- Use high contrast, depth, dramatic lighting and realistic detail.
-- Do not request text, captions, logos, UI, borders or watermarks.
-- Do not mention YouTube in the image prompt.
+HEADLINE:
+- Create a short, powerful thumbnail headline.
+- Prefer 2-7 words and maximum 44 characters.
+- Make it instantly understandable on a small mobile screen.
+- It may be different from the video title if a shorter phrase
+  communicates the same truthful idea more strongly.
+- Never use misleading clickbait.
+- Preserve important numbers, years, locations and factual claims.
+- Copy important numbers exactly from the supplied source.
+
+CREATIVE DIRECTION:
+- Analyze the title and script before choosing the visual.
+- Identify the video's strongest visual hook: its main promise,
+  question, tension, transformation, discovery, result, danger,
+  scale, contrast, emotion or surprising idea.
+- Build the thumbnail around that hook.
+- The image must communicate the topic within about one second.
+- Prefer a memorable topic-specific visual idea over a generic scene.
+- Use visual storytelling rather than unnecessary decoration.
+
+SUBJECT SELECTION:
+- Do NOT automatically use a person, laptop, office, hologram,
+  glowing nodes, money, arrows, charts or generic technology imagery.
+- Use those only when they genuinely strengthen this exact topic.
+- A human subject is optional.
+- Depending on the topic, the focal point may instead be an object,
+  environment, machine, landmark, historical scene, scientific
+  phenomenon, product, creature, map-like visual, transformation,
+  comparison, symbolic concept or dramatic event.
+- Keep one dominant visual idea and only meaningful supporting elements.
+- Avoid clutter.
+
+LAYOUT:
+- Choose the strongest composition for THIS specific concept.
+- Vary the layout naturally from video to video.
+- Do not repeatedly force the subject onto the same side.
+- Possible compositions include:
+  subject left / text right,
+  subject right / text left,
+  centered hero composition,
+  close-up object composition,
+  split comparison,
+  before-and-after,
+  foreground/background scale contrast,
+  symmetrical layout,
+  editorial collage,
+  dramatic wide scene,
+  or another layout that better serves the topic.
+- Reserve a deliberate, clean text-safe area for the headline.
+- The text-safe area can be left, right, top, bottom or intelligently
+  integrated into the composition.
+- Main subjects must remain large and recognizable at thumbnail size.
+
+VISUAL QUALITY:
+- Aim for premium professional YouTube thumbnail art direction,
+  not a generic cinematic stock photograph.
+- Use strong visual hierarchy and clear subject separation.
+- Choose the color palette, lighting, atmosphere and visual treatment
+  according to the topic.
+- Do not default to dark blue/orange cinematic lighting.
+- Use bold contrast and controlled color relationships.
+- Create depth where appropriate.
+- Make the composition polished, deliberate and visually expensive.
+- Photorealistic, documentary, commercial, editorial, illustrated,
+  conceptual, product-style or another treatment may be chosen when
+  it best fits the topic.
+- Avoid repetitive AI-looking effects and meaningless glowing details.
+
+VISUAL PROMPT OUTPUT:
+- Write a detailed image-generation prompt for the complete composition.
+- Clearly describe:
+  main focal subject,
+  meaningful supporting elements,
+  setting/environment,
+  framing or camera perspective,
+  subject placement,
+  text-safe area,
+  lighting,
+  color direction,
+  depth,
+  emotion/mood,
+  and visual style.
+- The prompt should be specific enough to produce a designed thumbnail,
+  not merely a nice-looking background image.
+- Do NOT ask the image model to render text in visual_prompt because
+  the application adds the exact generated headline afterward.
+- Do not request extra captions, logos, watermarks, UI or borders.
+- Do not mention these instructions or JSON in visual_prompt.
 
 Title:
 {title}
 
-Script:
+Final script:
 {_script_excerpt(script)}
 """.strip()
 
-    try:
-        result = call_ai(
-            prompt,
-            json_mode=True,
-        )
-        data = _extract_json_object(result.text)
+    result = call_gemini(
+        prompt,
+        json_mode=True,
+    )
+    data = _extract_json_object(result.text)
 
-        headline = _clean_headline(
-            data.get("headline")
-        )
-        visual_prompt = " ".join(
-            str(data.get("visual_prompt") or "").split()
-        )
+    headline = _clean_headline(
+        data.get("headline")
+    )
+    visual_prompt = " ".join(
+        str(data.get("visual_prompt") or "").split()
+    )
 
-        _validate_numeric_claims(
-            f"{title}\n{script}",
-            headline,
-        )
+    _validate_numeric_claims(
+        f"{title}\n{script}",
+        headline,
+    )
 
-        if not visual_prompt:
-            raise ValueError(
-                "AI returned an empty thumbnail prompt."
-            )
-
-        visual_prompt = (
-            visual_prompt
-            + ", cinematic documentary photography, "
-            "16:9 composition, high contrast, realistic, "
-            "subject positioned on the right, dark negative "
-            "space on the left, no text, no letters, no logos, "
-            "no watermark"
+    if not headline:
+        raise ValueError(
+            "Gemini returned an empty thumbnail headline."
         )
 
-        return (
-            headline,
-            visual_prompt,
-            result.provider,
+    if not visual_prompt:
+        raise ValueError(
+            "Gemini returned an empty thumbnail visual prompt."
         )
 
-    except Exception:
-        headline = _fallback_headline(title)
-        visual_prompt = (
-            f"Cinematic documentary visualization of {title}, "
-            "one clear dramatic focal subject positioned on the "
-            "right, realistic detail, deep contrast, atmospheric "
-            "lighting, dark negative space on the left, "
-            "16:9 composition, no text, no letters, no logos, "
-            "no watermark"
-        )
-
-        return (
-            headline,
-            visual_prompt,
-            "deterministic-fallback",
-        )
+    return (
+        headline,
+        visual_prompt,
+        result.provider,
+    )
 
 
 def _wrap_text(
@@ -605,6 +673,240 @@ def _save_optimized_jpeg(
     )
 
 
+def _generate_youtube_thumbnail_prompt_ai(
+    video_job: Any,
+    *,
+    publish_title: str | None = None,
+) -> GeneratedYouTubeThumbnailPrompt:
+    output_directory = Path(video_job.output_directory or "")
+    package_path = output_directory / "package.json"
+
+    if not package_path.is_file():
+        raise FileNotFoundError(
+            f"Video package not found: {package_path}"
+        )
+
+    package = json.loads(
+        package_path.read_text(encoding="utf-8")
+    )
+
+    title = str(
+        publish_title
+        or package.get("title")
+        or video_job.title
+    ).strip()
+
+    script = str(
+        package.get("script")
+        or video_job.script
+        or ""
+    ).strip()
+
+    if not title:
+        raise ValueError("Video title is empty.")
+
+    if not script:
+        raise ValueError("Final video script is empty.")
+
+    summary_prompt = f"""
+Read this video title and final script excerpt.
+
+Write one concise thumbnail-design summary explaining:
+- what the video is really about
+- the main promise, question, result or story
+- the strongest concrete visual subjects
+- important names, places, numbers, years or objects
+- the emotional angle viewers should instantly understand
+
+Do not create a thumbnail or headline yet.
+Do not invent information.
+Return one concise paragraph only.
+
+VIDEO TITLE:
+{title}
+
+FINAL SCRIPT:
+{_script_excerpt(script)}
+""".strip()
+
+    summary_result = call_gemini(
+        summary_prompt,
+        json_mode=False,
+    )
+
+    script_summary = " ".join(
+        summary_result.text.split()
+    ).strip()
+
+    if not script_summary:
+        raise ValueError(
+            "Gemini returned an empty script summary."
+        )
+
+    headline_prompt = f"""
+Act as an elite YouTube thumbnail headline strategist.
+
+Create ONE short, powerful, high-click-through thumbnail phrase for
+the video below.
+
+The phrase must immediately tell viewers what the video is about or
+what valuable result, question, tension, discovery or transformation
+they should expect.
+
+This system is used for EVERY niche, so adapt naturally to the topic.
+
+STRICT RULES:
+- Prefer clarity and impact over cleverness.
+- The phrase must be strongly anchored to the actual video topic.
+- Prefer 2-6 words.
+- Maximum 38 characters when practical.
+- Use a concrete topic keyword, outcome, subject, name, place, number
+  or recognizable idea from the title/summary whenever appropriate.
+- A viewer who sees ONLY the thumbnail phrase should still understand
+  the general topic.
+- Complement the title instead of becoming unrelated to it.
+- Preserve important years, numbers, names and factual claims.
+- Benefit-driven wording is excellent when the video promises a result.
+- Curiosity is allowed only when the topic remains clear.
+
+NEVER return vague filler such as:
+THE METHOD
+THE SECRET
+THE TRUTH
+SOLO IN 2026
+THIS CHANGES EVERYTHING
+YOU NEED THIS
+WATCH THIS
+GAME CHANGER
+
+Do not invent claims unsupported by the title or summary.
+
+Return JSON only:
+{{
+    "headline": "..."
+}}
+
+VIDEO TITLE:
+{title}
+
+VIDEO SUMMARY:
+{script_summary}
+""".strip()
+
+    headline_result = call_gemini(
+        headline_prompt,
+        json_mode=True,
+    )
+
+    headline_data = _extract_json_object(
+        headline_result.text
+    )
+
+    headline = _clean_headline(
+        headline_data.get("headline")
+    )
+
+    if not headline:
+        raise ValueError(
+            "Gemini returned an empty thumbnail headline."
+        )
+
+    creative_prompt = f"""
+Act as a world-class YouTube thumbnail designer and AI image-prompt
+specialist.
+
+Create ONE complete image-generation prompt for a premium,
+high-performing YouTube thumbnail.
+
+This is NOT a movie poster.
+This is NOT a corporate stock photograph.
+This is NOT a minimalist magazine advertisement.
+This is NOT automatically a dark cinematic scene.
+
+Design something that looks intentionally made for a successful
+YouTube thumbnail.
+
+Adapt completely to the actual niche and topic.
+
+Choose whatever combination of people, objects, environments,
+expressions, transformations, comparisons, scale, symbols, colors,
+lighting and composition best communicates THIS exact video.
+
+UNIVERSAL QUALITY RULES:
+- Make the main idea understandable within one second.
+- Use a strong, unmistakable focal point.
+- Make important subjects large and visually dominant.
+- Use bold visual hierarchy.
+- Use energetic, compelling visual storytelling when appropriate.
+- Colors should feel intentional, attractive and attention-grabbing.
+- Maintain excellent readability at small mobile size.
+- Avoid unnecessary empty space.
+- Avoid generic stock-photo poses.
+- Avoid generic laptop/office imagery unless genuinely useful.
+- Avoid random holograms, charts, arrows, coins or neon effects unless
+  they directly strengthen the actual topic.
+- Avoid excessive clutter.
+- Avoid sad, dull, lifeless or overly moody styling unless the video's
+  real subject requires that emotion.
+- Do not use the same layout for every video.
+- Choose the composition naturally for the topic.
+- Aim for a polished, premium, high-CTR YouTube-thumbnail aesthetic.
+- Final aspect ratio: 16:9.
+
+TYPOGRAPHY:
+The exact thumbnail headline is:
+
+"{headline}"
+
+Render this exact phrase prominently as part of the finished thumbnail.
+
+Use bold, professional, high-impact YouTube-thumbnail typography.
+Choose the placement, scale, font treatment and contrast that work best
+with the chosen composition.
+The headline should look deliberately designed, not pasted onto the
+image afterward.
+Do not change or add words.
+
+Do not add any other unnecessary text, captions, logos or watermarks.
+
+Return JSON only:
+{{
+    "image_prompt": "..."
+}}
+
+VIDEO TITLE:
+{title}
+
+VIDEO SUMMARY:
+{script_summary}
+
+EXACT THUMBNAIL HEADLINE:
+{headline}
+""".strip()
+
+    result = call_gemini(
+        creative_prompt,
+        json_mode=True,
+    )
+
+    data = _extract_json_object(result.text)
+
+    image_prompt = " ".join(
+        str(data.get("image_prompt") or "").split()
+    ).strip()
+
+    if not image_prompt:
+        raise ValueError(
+            "Gemini returned an empty thumbnail image prompt."
+        )
+
+    return GeneratedYouTubeThumbnailPrompt(
+        headline=headline,
+        visual_prompt=image_prompt,
+        provider=result.provider,
+    )
+
+
 def generate_youtube_thumbnail(
     video_job: Any,
     *,
@@ -773,4 +1075,112 @@ def generate_youtube_thumbnail(
         visual_prompt=visual_prompt,
         provider=final_provider,
         size_bytes=size_bytes,
+    )
+
+
+# THUMBNAIL_PROMPT_GUARANTEED_FALLBACK
+def generate_youtube_thumbnail_prompt(
+    video_job: Any,
+    *,
+    publish_title: str | None = None,
+) -> GeneratedYouTubeThumbnailPrompt:
+    """
+    Prefer the full Gemini creative workflow.
+
+    If Gemini returns malformed/empty structured output, retry with
+    the simpler Gemini concept generator. If that also fails, always
+    return a deterministic topic-specific prompt so completed videos
+    never lose the Copy Thumbnail workflow.
+    """
+
+    try:
+        return _generate_youtube_thumbnail_prompt_ai(
+            video_job,
+            publish_title=publish_title,
+        )
+    except Exception as primary_error:
+        print(
+            "THUMBNAIL_PROMPT_PRIMARY_FAILED:",
+            type(primary_error).__name__,
+            str(primary_error)[:300],
+            flush=True,
+        )
+
+    output_directory = Path(
+        video_job.output_directory or ""
+    )
+    package_path = output_directory / "package.json"
+
+    package = {}
+
+    if package_path.is_file():
+        try:
+            package = json.loads(
+                package_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+        except Exception:
+            package = {}
+
+    title = str(
+        publish_title
+        or package.get("title")
+        or getattr(video_job, "title", "")
+        or "YouTube Video"
+    ).strip()
+
+    script = str(
+        package.get("script")
+        or getattr(video_job, "script", "")
+        or ""
+    ).strip()
+
+    # Simpler Gemini retry.
+    if script:
+        try:
+            headline, visual_prompt, provider = (
+                _generate_thumbnail_concept(
+                    title=title,
+                    script=script,
+                )
+            )
+
+            return GeneratedYouTubeThumbnailPrompt(
+                headline=headline,
+                visual_prompt=visual_prompt,
+                provider=provider,
+            )
+        except Exception as retry_error:
+            print(
+                "THUMBNAIL_PROMPT_RETRY_FAILED:",
+                type(retry_error).__name__,
+                str(retry_error)[:300],
+                flush=True,
+            )
+
+    # Final guaranteed fallback.
+    headline = _fallback_headline(title)
+
+    visual_prompt = (
+        "Create a premium professional 16:9 YouTube thumbnail "
+        f"for this exact video topic: {title}. "
+        "Build the composition around one dominant, immediately "
+        "recognizable topic-specific visual idea. Use meaningful "
+        "subjects, objects, environments or phenomena directly "
+        "connected to the topic rather than generic stock imagery. "
+        "Use strong visual hierarchy, bold subject separation, "
+        "clear depth, dramatic but believable lighting, polished "
+        "editorial-quality detail, and a clean high-contrast "
+        "composition that remains readable at small thumbnail size. "
+        "Reserve a deliberate text-safe area for a short headline. "
+        "Do not render any text, captions, logos, watermarks, UI, "
+        "borders, random arrows, generic holograms or meaningless "
+        "glowing effects inside the generated image."
+    )
+
+    return GeneratedYouTubeThumbnailPrompt(
+        headline=headline,
+        visual_prompt=visual_prompt,
+        provider="deterministic-thumbnail-fallback",
     )

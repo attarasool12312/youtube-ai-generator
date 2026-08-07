@@ -96,8 +96,47 @@ def process_publish_job(publish_job_id: int) -> None:
             db.commit()
 
 
+def recover_interrupted_publish_jobs() -> None:
+    with SessionLocal() as db:
+        interrupted_jobs = db.scalars(
+            select(YouTubePublishJob)
+            .where(
+                YouTubePublishJob.status == "uploading"
+            )
+            .order_by(YouTubePublishJob.id)
+        ).all()
+
+        if not interrupted_jobs:
+            return
+
+        for publish_job in interrupted_jobs:
+            if publish_job.youtube_video_id:
+                publish_job.status = "uploaded"
+                publish_job.progress = 100
+                continue
+
+            if publish_job.encrypted_upload_session_uri:
+                publish_job.status = "queued"
+                publish_job.last_error = (
+                    "Recovered interrupted YouTube upload. "
+                    "The stored resumable session will be resumed."
+                )
+            else:
+                publish_job.status = "needs_review"
+                publish_job.last_error = (
+                    "The YouTube upload was interrupted before "
+                    "a resumable session was safely stored. "
+                    "Manual review is required to avoid a "
+                    "possible duplicate upload."
+                )
+
+        db.commit()
+
+
 def main() -> None:
     try:
+        recover_interrupted_publish_jobs()
+
         while True:
             publish_job_id = get_next_publish_job_id()
 

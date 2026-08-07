@@ -22,8 +22,71 @@ VIDEO_JOB_COLUMN_MIGRATIONS = {
     "auto_publish_made_for_kids": "BOOLEAN NOT NULL DEFAULT 0",
     "auto_publish_notify_subscribers": "BOOLEAN NOT NULL DEFAULT 0",
     "auto_publish_metadata": "BOOLEAN NOT NULL DEFAULT 1",
-    "auto_publish_thumbnail": "BOOLEAN NOT NULL DEFAULT 1",
+    "auto_publish_thumbnail": "BOOLEAN NOT NULL DEFAULT 0",
+    "thumbnail_headline": "VARCHAR(100)",
+    "thumbnail_prompt": "TEXT",
+    "thumbnail_prompt_provider": "VARCHAR(100)",
+    "youtube_title": "VARCHAR(100)",
+    "youtube_description": "TEXT",
+    "youtube_tags": "TEXT",
+    "youtube_category_id": "VARCHAR(20)",
+    "youtube_language": "VARCHAR(10)",
+    "youtube_metadata_provider": "VARCHAR(100)",
+    "youtube_stock_credits": "TEXT",
+    "auto_publish_scheduled_at": "DATETIME",
+    "manual_thumbnail_path": "TEXT",
+    "manual_thumbnail_uploaded_at": "DATETIME",
 }
+
+
+YOUTUBE_PUBLISH_JOB_COLUMN_MIGRATIONS = {
+    "scheduled_at": "DATETIME",
+    "encrypted_upload_session_uri": "TEXT",
+    "bytes_uploaded": "INTEGER NOT NULL DEFAULT 0",
+    "total_bytes": "INTEGER NOT NULL DEFAULT 0",
+    "youtube_video_id": "VARCHAR(100)",
+    "youtube_url": "TEXT",
+    "thumbnail_status": "VARCHAR(30) NOT NULL DEFAULT 'not_started'",
+    "thumbnail_error": "TEXT",
+    "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+    "last_error": "TEXT",
+    "started_at": "DATETIME",
+    "completed_at": "DATETIME",
+}
+
+
+def migrate_youtube_publish_jobs():
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+
+        if "youtube_publish_jobs" not in inspector.get_table_names():
+            return
+
+        columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "youtube_publish_jobs"
+            )
+        }
+
+        for (
+            column_name,
+            definition,
+        ) in YOUTUBE_PUBLISH_JOB_COLUMN_MIGRATIONS.items():
+            if column_name in columns:
+                continue
+
+            connection.execute(
+                text(
+                    "ALTER TABLE youtube_publish_jobs "
+                    f"ADD COLUMN {column_name} {definition}"
+                )
+            )
+
+            print(
+                "Added youtube_publish_jobs."
+                + column_name
+            )
 
 
 def migrate_video_jobs():
@@ -49,6 +112,7 @@ def migrate_video_jobs():
 def initialize_database():
     Base.metadata.create_all(bind=engine)
     migrate_video_jobs()
+    migrate_youtube_publish_jobs()
 
     with SessionLocal() as db:
         admin = db.scalar(select(User).where(User.username == settings.admin_username))

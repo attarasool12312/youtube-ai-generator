@@ -295,7 +295,7 @@ Prepare completed videos for publishing and monitor integration readiness.
         <h2>YouTube upload queue and history</h2>
 
         <p>
-          Monitor private uploads, failures, progress and completed
+          Monitor YouTube uploads, scheduling, failures, progress and completed
           YouTube destinations.
         </p>
       </div>
@@ -321,7 +321,7 @@ Prepare completed videos for publishing and monitor integration readiness.
 
             <small>
               {{ connection.channel_title if connection else "Unknown channel" }}
-              · {{ publish_job.privacy_status | title }}
+              · {% if publish_job.scheduled_at %}Scheduled{% else %}{{ publish_job.privacy_status | title }}{% endif %}
               · Attempt {{ publish_job.attempt_count }}
             </small>
 
@@ -356,7 +356,13 @@ Prepare completed videos for publishing and monitor integration readiness.
           class="job-status {% if publish_job.status == 'uploaded' %}job-status-completed{% endif %}"
           data-publish-status
         >
-          {{ publish_job.status | replace("_", " ") | title }}
+          {% if publish_job.status == "uploaded" %}
+            {% if publish_job.scheduled_at %}Scheduled{% else %}Published{% endif %}
+          {% elif publish_job.status == "needs_review" %}
+            Needs Review
+          {% else %}
+            {{ publish_job.status | replace("_", " ") | title }}
+          {% endif %}
         </span>
 
         <div class="publishing-video-actions">
@@ -364,10 +370,10 @@ Prepare completed videos for publishing and monitor integration readiness.
           <form
             method="post"
             action="/publishing/drafts/{{ publish_job.id }}/queue"
-            onsubmit="return confirm('Upload this video privately to YouTube?');"
+            onsubmit="return confirm('Queue this video for YouTube upload?');"
           >
             <button type="submit" class="crm-primary-button">
-              Queue Private Upload
+              Queue YouTube Upload
             </button>
           </form>
           {% endif %}
@@ -391,6 +397,36 @@ Prepare completed videos for publishing and monitor integration readiness.
       </article>
       {% endfor %}
     </div>
+
+    {% if publishing_has_newer or publishing_has_older %}
+    <div
+      style="
+        display:flex;
+        justify-content:flex-end;
+        gap:10px;
+        margin-top:20px;
+      "
+    >
+      {% if publishing_has_newer %}
+      <a
+        href="/publishing?page={{ publishing_page - 1 }}"
+        class="crm-secondary-button"
+      >
+        Newer
+      </a>
+      {% endif %}
+
+      {% if publishing_has_older %}
+      <a
+        href="/publishing?page={{ publishing_page + 1 }}"
+        class="crm-secondary-button"
+      >
+        Older
+      </a>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% else %}
     <div class="crm-empty-state">
       <h3>No publishing jobs yet</h3>
@@ -533,7 +569,16 @@ Prepare completed videos for publishing and monitor integration readiness.
         );
 
         if (statusElement) {
-          statusElement.textContent = titleCase(item.status);
+          if (item.status === "uploaded") {
+            statusElement.textContent = item.is_scheduled
+              ? "Scheduled"
+              : "Published";
+          } else if (item.status === "needs_review") {
+            statusElement.textContent = "Needs Review";
+          } else {
+            statusElement.textContent = titleCase(item.status);
+          }
+
           statusElement.classList.toggle(
             "job-status-completed",
             item.status === "uploaded"

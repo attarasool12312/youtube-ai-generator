@@ -106,6 +106,63 @@ def cache_channel_thumbnail(
         return None
 
 
+def ensure_channel_thumbnail_cached(
+    db: Session,
+    connection: YouTubeConnection,
+) -> str | None:
+    thumbnail_url = connection.channel_thumbnail_url
+
+    if thumbnail_url and thumbnail_url.startswith("/static/"):
+        relative_path = thumbnail_url[len("/static/"):]
+        target = (
+            Path(__file__).resolve().parent
+            / "static"
+            / relative_path
+        )
+
+        if target.is_file():
+            return thumbnail_url
+
+    elif thumbnail_url:
+        return thumbnail_url
+
+    if (
+        not connection.is_active
+        or not connection.encrypted_refresh_token
+    ):
+        return None
+
+    try:
+        credentials = refresh_channel_credentials(
+            db,
+            connection,
+        )
+        channel_info = fetch_authorized_channel(
+            credentials,
+        )
+
+        cached_thumbnail = cache_channel_thumbnail(
+            connection.channel_id,
+            channel_info["channel_thumbnail_url"],
+        )
+
+        if not cached_thumbnail:
+            return None
+
+        connection.channel_thumbnail_url = cached_thumbnail
+        db.commit()
+        db.refresh(connection)
+
+        return cached_thumbnail
+
+    except Exception:
+        logger.warning(
+            "Could not restore missing YouTube channel thumbnail",
+            exc_info=True,
+        )
+        return None
+
+
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 

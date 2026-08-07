@@ -1,0 +1,145 @@
+{% extends "base_app.html" %}
+
+{% block title %}Thumbnail · {{ app_name }}{% endblock %}
+{% block page_heading %}Thumbnail Workspace{% endblock %}
+{% block page_subheading %}
+Create a professional thumbnail prompt or upload your own thumbnail.
+{% endblock %}
+
+{% block content %}
+
+<section class="crm-card api-provider-section">
+  <div class="crm-card-header">
+    <div>
+      <span class="developer-section-label">Video</span>
+      <h2>{{ job.title }}</h2>
+      <p>
+        Thumbnail generation is separate from video generation
+        and does not use the local image model.
+      </p>
+    </div>
+
+    <a href="/videos" class="crm-secondary-button">
+      Back to Videos
+    </a>
+  </div>
+</section>
+
+<section class="crm-card api-provider-section">
+  <div class="crm-card-header">
+    <div>
+      <span class="developer-section-label">
+        AI Thumbnail Prompt
+      </span>
+
+      <h2>Professional thumbnail concept</h2>
+
+      <p>
+        Generate a prompt, copy it, then use it with any
+        external image generator you prefer.
+      </p>
+    </div>
+  </div>
+
+  {% if job.thumbnail_headline %}
+  <label>Suggested Headline</label>
+  <input
+    type="text"
+    value="{{ job.thumbnail_headline }}"
+    readonly
+  >
+  {% endif %}
+
+  {% if job.thumbnail_prompt %}
+  <label for="thumbnail-prompt">Thumbnail Prompt</label>
+
+  <textarea
+    id="thumbnail-prompt"
+    rows="9"
+    readonly
+  >{{ job.thumbnail_prompt }}</textarea>
+
+  <div
+    style="
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    "
+  >
+    <button
+      type="button"
+      class="crm-secondary-button"
+      onclick="copyThumbnailPrompt(this)"
+    >
+      Copy Prompt
+    </button>
+
+    <form
+      method="post"
+      action="/jobs/{{ job.id }}/thumbnail-prompt"
+      style="margin:0;"
+    >
+      <button type="submit" class="crm-secondary-button">
+        Regenerate Prompt
+      </button>
+    </form>
+  </div>
+
+  {% if job.thumbnail_prompt_provider %}
+  <small style="display:block;margin-top:12px;">
+    Provider: {{ job.thumbnail_prompt_provider }}
+  </small>
+  {% endif %}
+
+  {% else %}
+
+  <form
+    method="post"
+    action="/jobs/{{ job.id }}/thumbnail-prompt"
+  >
+    <button type="submit" class="crm-primary-button">
+      Generate Thumbnail Prompt
+    </button>
+  </form>
+
+  {% endif %}
+</section>
+
+<section class="crm-card api-provider-section">
+  <div class="crm-card-header">
+    <div>
+      <span class="developer-section-label">
+        Manual Thumbnail
+      </span>
+
+      <h2>Upload your finished thumbnail</h2>
+
+      <p>
+        JPG/PNG upload and YouTube replacement controls
+        will appear here in the next step.
+      </p>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyThumbnailPrompt(button) {
+  const field = document.getElementById("thumbnail-prompt");
+
+  if (!field) return;
+
+  navigator.clipboard.writeText(field.value).then(() => {
+    const original = button.textContent;
+    button.textContent = "Copied";
+
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1500);
+  });
+}
+</script>
+{% endblock %}

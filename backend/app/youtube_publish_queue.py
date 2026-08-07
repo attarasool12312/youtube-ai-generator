@@ -38,13 +38,20 @@ def queue_youtube_publish_job(
             "This upload is already queued or running.",
         )
 
-    if publish_job.status == "needs_review":
+    if (
+        publish_job.status == "needs_review"
+        and not publish_job.encrypted_upload_session_uri
+    ):
         raise YouTubePublishQueueError(
             "manual_review_required",
             "This upload requires manual review before retrying.",
         )
 
-    if publish_job.status not in {"draft", "failed"}:
+    if publish_job.status not in {
+        "draft",
+        "failed",
+        "needs_review",
+    }:
         raise YouTubePublishQueueError(
             "invalid_publish_status",
             "This publishing job cannot currently be queued.",
@@ -83,10 +90,30 @@ def queue_youtube_publish_job(
             str(error),
         ) from error
 
+    resume_pending = bool(
+        publish_job.encrypted_upload_session_uri
+    )
+
     publish_job.status = "queued"
-    publish_job.progress = 0
-    publish_job.bytes_uploaded = 0
-    publish_job.encrypted_upload_session_uri = None
+
+    if resume_pending:
+        if publish_job.total_bytes:
+            publish_job.progress = max(
+                0,
+                min(
+                    99,
+                    int(
+                        publish_job.bytes_uploaded
+                        * 100
+                        / publish_job.total_bytes
+                    ),
+                ),
+            )
+    else:
+        publish_job.progress = 0
+        publish_job.bytes_uploaded = 0
+        publish_job.encrypted_upload_session_uri = None
+
     publish_job.last_error = None
     publish_job.started_at = None
     publish_job.completed_at = None
