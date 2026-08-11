@@ -337,7 +337,11 @@ def dashboard_context(request, jobs, active_page):
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
+        return templates.TemplateResponse(
+            request=request,
+            name="app_info_public.html",
+            context={"app_name": "Atta Video AI"},
+        )
 
     jobs = load_dashboard_jobs(db)
 
@@ -436,6 +440,9 @@ def videos_page(
     )
 
 
+from app.video_profiles import normalize_profile_key
+
+
 @app.post("/jobs")
 def add_jobs(
     request: Request,
@@ -464,8 +471,8 @@ def add_jobs(
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
 
-    # Video style is temporarily locked to automatic detection.
-    video_style = "auto"
+    # Validate the requested production profile.
+    video_style = normalize_profile_key(video_style)
 
     title_list = [title.strip() for title in titles.splitlines() if title.strip()]
     selected_voices = list(dict.fromkeys([narrator_voice, *voice_pool]))
@@ -1574,11 +1581,19 @@ def system_health_page(request: Request):
     )
 
 
+@app.get("/app-info")
+def public_app_info_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="app_info_public.html",
+        context={
+            "app_name": "Atta Video AI",
+        },
+    )
+
+
 @app.get("/privacy-policy")
 def privacy_policy_page(request: Request):
-    if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
-
     return templates.TemplateResponse(
         request=request,
         name="privacy_policy.html",
@@ -1592,9 +1607,6 @@ def privacy_policy_page(request: Request):
 
 @app.get("/terms")
 def terms_page(request: Request):
-    if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
-
     return templates.TemplateResponse(
         request=request,
         name="terms.html",

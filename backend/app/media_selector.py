@@ -71,6 +71,7 @@ def select_media(
     used_sources=None,
     ai_prompt=None,
     media_source="mixed",
+    prefer_wikimedia=False,
 ):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -87,6 +88,50 @@ def select_media(
             number,
             orientation,
         )
+
+    # Historical profiles prefer exact archival imagery from
+    # Wikimedia Commons before falling back to generic stock media.
+    if prefer_wikimedia:
+        try:
+            result = download_image(
+                query,
+                folder / f"scene-{number:03d}.jpg",
+                orientation,
+                used_sources=used_sources,
+                offset=number - 1,
+            )
+
+            if result:
+                source = result.get("source")
+
+                if source:
+                    used_sources.add(source)
+
+                return result
+
+        except Exception as error:
+            print(
+                f"Wikimedia unavailable for scene {number}: {error}",
+                flush=True,
+            )
+
+    # Historical Mixed mode:
+    # relevant Wikimedia first, then AI rather than unrelated stock.
+    # Stock remains the final resilience fallback only if AI fails.
+    if prefer_wikimedia and media_source == "mixed":
+        try:
+            return flux_image(
+                ai_prompt or query,
+                folder,
+                number,
+                orientation,
+            )
+        except Exception as error:
+            print(
+                f"Historical AI fallback unavailable for scene "
+                f"{number}: {error}",
+                flush=True,
+            )
 
     use_video = requested == "video" and number % 4 != 0
     if use_video:

@@ -9,8 +9,8 @@
 <body class="dashboard-page">
   <header class="topbar">
     <div>
-      <h1>YouTube AI Video Generator</h1>
-      <p>by Atta Rasool</p>
+      <h1>Atta Video AI</h1>
+      <p></p>
     </div>
     <div class="notification-controls">
       <button
@@ -66,7 +66,23 @@
         <div class="settings-grid">
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option></select></div>
           <div><label>Language</label><input value="English" disabled></div>
-          <div><label>Video Style</label><select name="video_style"><option value="auto" selected>Auto Detect</option><option value="documentary">Documentary</option><option value="storytelling">Storytelling</option><option value="educational">Educational</option><option value="listicle">Listicle / Top 10</option><option value="news">News Style</option><option value="motivational">Motivational</option></select></div>
+          <div>
+            <label>Video Profile</label>
+            <select name="video_style" required>
+              <option value="auto" selected>Auto Detect</option>
+              <option value="general_explainer">General Explainer</option>
+              <option value="tech_science">Tech &amp; Science</option>
+              <option value="what_if">What-If / Fictional</option>
+              <option value="historical_person">Historical Person / Biography</option>
+              <option value="historical_place">Historical Place / Monument</option>
+              <option value="historical_event">Historical Event / Era</option>
+              <option value="geography_travel">Geography / Travel Documentary</option>
+              <option value="nature_wildlife">Nature / Wildlife</option>
+              <option value="space_astronomy">Space / Astronomy</option>
+              <option value="business_economics">Business / Economics</option>
+              <option value="educational_how_it_works">Educational / How It Works</option>
+            </select>
+          </div>
           <div>
             <label>Main Narrator</label>
             <div class="voice-select-row">

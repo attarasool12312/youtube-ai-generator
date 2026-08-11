@@ -152,6 +152,7 @@ def run_job(job_id: int) -> None:
             output_dir,
             orientation,
             media_source,
+            package.get("detected_style", video_style),
         )
 
         with SessionLocal() as db:

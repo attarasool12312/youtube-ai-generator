@@ -21,8 +21,67 @@ SECTION_MIN_RATIO = 0.93
 SECTION_MAX_RATIO = 1.10
 
 
+from app.video_profiles import script_profile_instructions
+
+
 def word_count(text):
     return len(re.findall(r"\b[\w'-]+\b", text))
+
+
+def remove_sequential_word_markers(text):
+    """Remove leaked sequential word indexes such as
+    '(238) dreamed (239) of (240) a', while preserving isolated
+    legitimate numbers such as '(1893)'.
+    """
+    matches = list(
+        re.finditer(r"\(\s*(\d{1,6})\s*\)", text or "")
+    )
+
+    if len(matches) < 4:
+        return text
+
+    removable = set()
+    run = [matches[0]]
+
+    for previous, current in zip(matches, matches[1:]):
+        if int(current.group(1)) == int(previous.group(1)) + 1:
+            run.append(current)
+        else:
+            if len(run) >= 4:
+                removable.update(
+                    (item.start(), item.end())
+                    for item in run
+                )
+            run = [current]
+
+    if len(run) >= 4:
+        removable.update(
+            (item.start(), item.end())
+            for item in run
+        )
+
+    if not removable:
+        return text
+
+    pieces = []
+    cursor = 0
+
+    for item in matches:
+        span = (item.start(), item.end())
+
+        if span not in removable:
+            continue
+
+        pieces.append(text[cursor:item.start()])
+        cursor = item.end()
+
+    pieces.append(text[cursor:])
+
+    cleaned = "".join(pieces)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.;!?])", r"\1", cleaned)
+
+    return cleaned
 
 
 def emit_progress(callback, status, progress):
@@ -32,6 +91,7 @@ def emit_progress(callback, status, progress):
 
 def clean_script(text):
     text = text.strip()
+    text = remove_sequential_word_markers(text)
 
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -50,6 +110,7 @@ def clean_script(text):
         text,
     )
     text = re.sub(r"\n{3,}", "\n\n", text)
+    text = remove_sequential_word_markers(text)
 
     return text.strip()
 
@@ -138,6 +199,8 @@ Create a concise continuity outline for a long-form YouTube narration.
 
 Title: {title}
 Style: {style}
+Profile-specific instructions:
+{script_profile_instructions(style)}
 Number of sections: {section_count}
 
 Rules:
@@ -200,6 +263,8 @@ long-form YouTube narration.
 
 Title: {title}
 Style: {style}
+Profile-specific instructions:
+{script_profile_instructions(style)}
 Required length for this section: between {minimum_words} and
 {maximum_words} words. Aim for {target_words} words.
 
@@ -299,6 +364,8 @@ Balance the current YouTube narration to fit the required word range.
 
 Title: {title}
 Style: {style}
+Profile-specific instructions:
+{script_profile_instructions(style)}
 Current draft length: {current_words} words.
 Required final length: between {minimum_words} and
 {maximum_words} words.
@@ -360,6 +427,8 @@ narration.
 
 Title: {title}
 Style: {style}
+Profile-specific instructions:
+{script_profile_instructions(style)}
 Target length: approximately {target_words} words.
 
 Full outline:
@@ -501,7 +570,66 @@ def head_words(text, limit=120):
 
 
 
-def ensure_ending_requirements(script, duration):
+def profile_ending_question(style):
+    questions = {
+        "auto": (
+            "Which part of this topic would you like "
+            "to explore next?"
+        ),
+        "general_explainer": (
+            "Which part of this topic would you like "
+            "to explore next?"
+        ),
+        "tech_science": (
+            "Which part of this technology or science "
+            "topic should we explore next?"
+        ),
+        "what_if": (
+            "Which consequence of this scenario do you "
+            "think would happen first?"
+        ),
+        "historical_person": (
+            "Which part of this person's life or legacy "
+            "stands out most to you?"
+        ),
+        "historical_place": (
+            "Which part of this place's history interests "
+            "you most?"
+        ),
+        "historical_event": (
+            "Which moment or consequence of this event "
+            "do you think mattered most?"
+        ),
+        "geography_travel": (
+            "Which place or feature would you like to "
+            "explore further?"
+        ),
+        "nature_wildlife": (
+            "Which behavior or natural feature surprised "
+            "you most?"
+        ),
+        "space_astronomy": (
+            "Which part of this space topic should we "
+            "explore next?"
+        ),
+        "business_economics": (
+            "Which part of this business or economic "
+            "story should we break down next?"
+        ),
+        "educational_how_it_works": (
+            "Which step or mechanism would you like "
+            "explained further?"
+        ),
+    }
+
+    return questions.get(
+        style,
+        questions["general_explainer"],
+    )
+
+
+def ensure_ending_requirements(script, duration, style="general_explainer"):
+    script = clean_script(script)
     validation = validate_script(script, duration)
     issues = validation.get("issues", [])
 
@@ -535,7 +663,7 @@ def ensure_ending_requirements(script, duration):
 
     if missing_question:
         additions.append(
-            "Which step will you try first?"
+            profile_ending_question(style)
         )
 
     if missing_comment:
@@ -545,15 +673,15 @@ def ensure_ending_requirements(script, duration):
 
     if missing_like and missing_subscribe:
         additions.append(
-            "If this helped, like the video and subscribe for more practical guides."
+            "If you enjoyed this video, like it and subscribe for more."
         )
     elif missing_like:
         additions.append(
-            "If this helped, give the video a like."
+            "If you enjoyed this video, give it a like."
         )
     elif missing_subscribe:
         additions.append(
-            "Subscribe for more practical guides like this."
+            "Subscribe for more videos like this."
         )
 
     if not additions:
@@ -633,6 +761,67 @@ def ensure_ending_requirements(script, duration):
         )
 
     return candidate
+
+def trim_script_to_max_words(script, maximum_words):
+    """Deterministically remove excess middle sentences while
+    preserving the opening and final CTA/conclusion.
+    """
+    script = clean_script(script)
+
+    if word_count(script) <= maximum_words:
+        return script
+
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(
+            r"(?<=[.!?])\s+",
+            script,
+        )
+        if sentence.strip()
+    ]
+
+    if len(sentences) <= 3:
+        return script
+
+    while word_count(" ".join(sentences)) > maximum_words:
+        overflow = (
+            word_count(" ".join(sentences))
+            - maximum_words
+        )
+
+        # Preserve opening and last two conclusion/CTA sentences.
+        removable = list(
+            range(1, max(1, len(sentences) - 2))
+        )
+
+        if not removable:
+            break
+
+        large_enough = [
+            index
+            for index in removable
+            if word_count(sentences[index]) >= overflow
+        ]
+
+        if large_enough:
+            remove_index = min(
+                large_enough,
+                key=lambda index: word_count(
+                    sentences[index]
+                ),
+            )
+        else:
+            remove_index = max(
+                removable,
+                key=lambda index: word_count(
+                    sentences[index]
+                ),
+            )
+
+        sentences.pop(remove_index)
+
+    return clean_script(" ".join(sentences))
+
 
 def generate_initial_script(title, duration, style, progress_callback=None):
     target = int(duration * WORDS_PER_MINUTE)
@@ -936,6 +1125,7 @@ def create_validated_script(title, duration, style, progress_callback=None):
         if section.strip()
     )
 
+    script = clean_script(script)
     final_validation = validate_script(script, duration)
 
     ending_issues = [
@@ -954,7 +1144,28 @@ def create_validated_script(title, duration, style, progress_callback=None):
         script = ensure_ending_requirements(
             script,
             duration,
+            style,
         )
+        script = clean_script(script)
+        final_validation = validate_script(
+            script,
+            duration,
+        )
+
+    # Final deterministic length safety gate. This prevents a
+    # good script from failing simply because an LLM shortening
+    # attempt remains slightly above the allowed maximum.
+    maximum_words = final_validation.get(
+        "maximum_words",
+        math.floor(duration * WORDS_PER_MINUTE * 1.10),
+    )
+
+    if final_validation["word_count"] > maximum_words:
+        script = trim_script_to_max_words(
+            script,
+            maximum_words,
+        )
+
         final_validation = validate_script(
             script,
             duration,

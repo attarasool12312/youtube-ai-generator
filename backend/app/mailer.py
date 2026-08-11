@@ -9,7 +9,7 @@ async def send_reset_email(to_email: str, reset_url: str) -> None:
     message = EmailMessage()
     message["From"] = settings.smtp_username
     message["To"] = to_email
-    message["Subject"] = "Reset your YouTube AI Generator password"
+    message["Subject"] = "Reset your Atta Video AI password"
     message.set_content(f"Open this link to reset your password:\n\n{reset_url}\n\nThis link expires in 1 hour.")
 
     await aiosmtplib.send(

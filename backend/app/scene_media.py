@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.media_selector import select_media
+from app.video_profiles import is_historical_profile
 from app.paths import DATA_ROOT
 
 
@@ -10,11 +11,13 @@ def download_scene_images(
     output_dir,
     orientation="landscape",
     media_source="mixed",
+    video_profile="general_explainer",
 ):
     media_dir = Path(output_dir) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     attributions = []
     history_path = DATA_ROOT / "media_history.json"
+    prefer_wikimedia = is_historical_profile(video_profile)
 
     try:
         history = json.loads(history_path.read_text())
@@ -27,7 +30,21 @@ def download_scene_images(
     for scene in scenes:
         number = int(scene["scene_number"])
         keywords = scene.get("stock_keywords") or []
-        query = " ".join(keywords[:4])
+
+        if isinstance(keywords, str):
+            keywords = [keywords]
+
+        query = str(
+            scene.get("search_query") or ""
+        ).strip()
+
+        if not query:
+            query = " ".join(
+                str(keyword).strip()
+                for keyword in keywords[:4]
+                if str(keyword).strip()
+            )
+
         query = query or scene["narration"][:100]
 
         try:
@@ -38,6 +55,7 @@ def download_scene_images(
                 used_sources,
                 scene.get("image_prompt") or query,
                 media_source,
+                prefer_wikimedia=prefer_wikimedia,
             )
             scene["media_file"] = result["media_file"]
             scene["media_provider"] = result["provider"]

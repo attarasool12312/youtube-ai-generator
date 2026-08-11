@@ -92,7 +92,60 @@ How this application handles account, configuration, and production data.
     </article>
 
     <article>
-      <h2>8. Contact</h2>
+      <h2>8. Google and YouTube User Data</h2>
+
+      <p>
+        Atta Video AI uses Google OAuth to allow users to connect their
+        own YouTube channels. The application requests only the Google
+        permissions required for its YouTube publishing features.
+      </p>
+
+      <p>
+        The YouTube read-only permission is used to identify and display
+        information about the connected YouTube channel. The YouTube
+        upload permission is used to upload videos to that channel when
+        the authorized user requests or configures a publishing action.
+      </p>
+
+      <p>
+        The application may store the connected channel identifier,
+        channel information required by the application, and OAuth
+        credentials required to maintain the connection. OAuth access
+        and refresh tokens are encrypted before being stored.
+      </p>
+
+      <p>
+        Google user data is used only to provide the user-facing YouTube
+        connection and publishing functionality requested by the user.
+        Google user data is not sold, used for advertising, transferred
+        to data brokers, used for credit decisions, or used to train
+        artificial-intelligence models.
+      </p>
+
+      <p>
+        Google user data is not disclosed to third parties except where
+        necessary to provide the requested application functionality,
+        maintain security, comply with applicable law, or where the user
+        has explicitly authorized the disclosure.
+      </p>
+
+      <p>
+        The application uses HTTPS for network communication and
+        encryption for stored OAuth credentials. Access to administrative
+        application functions is protected by authentication.
+      </p>
+
+      <p>
+        OAuth credentials are retained while a YouTube connection remains
+        active and is required for the requested functionality. When a
+        channel is disconnected through Atta Video AI, its stored access
+        and refresh tokens are removed from the active connection.
+        Users may also revoke access through their Google Account.
+      </p>
+    </article>
+
+    <article>
+      <h2>9. Contact</h2>
       <p>
         Questions about this application can be submitted through
         <a

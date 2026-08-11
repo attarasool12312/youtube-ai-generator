@@ -6,7 +6,7 @@ pipe = KPipeline(lang_code="a")
 parts = []
 
 for _, _, audio in pipe(
-    "Hello. Your YouTube AI video generator is now creating natural narration.",
+    "Hello. Atta Video AI is now creating natural narration.",
     voice="am_michael",
     speed=1.0,
 ):

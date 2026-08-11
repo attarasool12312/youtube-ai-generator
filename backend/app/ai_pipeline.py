@@ -11,6 +11,12 @@ from app.ai_provider import (
 from app.scene_ai import call_scene_json
 from app.script_validator import validate_script
 from app.script_workflow import create_validated_script
+from app.video_profiles import (
+    MANUAL_PROFILE_KEYS,
+    normalize_profile_key,
+    profile_detection_prompt,
+    media_profile_instructions,
+)
 
 
 def call_qwen(prompt: str) -> str:
@@ -245,11 +251,21 @@ def _enrich_scene_batch_once(title, video_style, scenes):
     prompt = (
         f"Video title: {title}\n"
         f"Style: {video_style}\n"
+        "Profile-specific media instructions:\n"
+        f"{media_profile_instructions(video_style)}\n"
         "Create media metadata for the supplied scenes.\n"
         "Do not rewrite narration.\n"
         "Return JSON with key scenes.\n"
-        "Each scene needs scene_number, stock_keywords, "
+        "Each scene needs scene_number, search_query, stock_keywords, "
         "image_prompt, video_prompt and media_type.\n"
+        "search_query must be one concise search phrase describing the "
+        "most visually important real subject in that scene.\n"
+        "When a scene involves a named person, place, monument, event, "
+        "species, company, technology or spacecraft, keep that exact "
+        "proper name in search_query.\n"
+        "Do not replace specific subjects with generic concepts such as "
+        "man, woman, building, office, crowd, technology or history.\n"
+        "stock_keywords should support the same exact subject and context.\n"
         f"Scenes: {json.dumps(scenes)}"
     )
 
@@ -272,6 +288,7 @@ def _enrich_scene_batch_once(title, video_style, scenes):
 
         enriched.append({
             **scene,
+            "search_query": item.get("search_query", ""),
             "stock_keywords": item.get("stock_keywords", []),
             "image_prompt": item.get("image_prompt", ""),
             "video_prompt": item.get("video_prompt", ""),
@@ -282,26 +299,30 @@ def _enrich_scene_batch_once(title, video_style, scenes):
 
 
 def detect_video_style(title, requested_style):
+    requested_style = normalize_profile_key(requested_style)
+
     if requested_style != "auto":
         return requested_style
 
     result = call_qwen(
-        f"Choose the best YouTube style for this title: {title}\n"
-        "Choose exactly one: documentary, storytelling, educational, "
-        "listicle, news, motivational.\n"
-        "Return only the style name."
+        profile_detection_prompt(title)
     ).lower().strip()
 
-    allowed = {
-        "documentary",
-        "storytelling",
-        "educational",
-        "listicle",
-        "news",
-        "motivational",
-    }
+    result = result.replace("`", "").strip()
 
-    return result if result in allowed else "documentary"
+    if "\n" in result:
+        result = result.splitlines()[0].strip()
+
+    if ":" in result:
+        candidate = result.split(":", 1)[0].strip()
+        if candidate in MANUAL_PROFILE_KEYS:
+            result = candidate
+
+    return (
+        result
+        if result in MANUAL_PROFILE_KEYS
+        else "general_explainer"
+    )
 
 
 
