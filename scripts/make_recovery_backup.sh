@@ -29,8 +29,8 @@ tar \
     cp "$ROOT/backend/data/app.db" \
        "$WORK/runtime/app.db"
 
-[ -f "$ROOT/requirements.txt" ] && \
-    cp "$ROOT/requirements.txt" \
+[ -f "$ROOT/backend/requirements.txt" ] && \
+    cp "$ROOT/backend/requirements.txt" \
        "$WORK/runtime/requirements.txt"
 
 "$ROOT/.venv/bin/pip" freeze \

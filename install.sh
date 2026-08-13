@@ -378,6 +378,46 @@ run_as_user env \
     YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
     "$PYTHON" "$PROJECT_ROOT/scripts/generate_voice_previews.py"
 
+log "Verifying narrator voices and previews"
+
+run_as_user env \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    "$PYTHON" - <<'PYVOICES'
+from app.voice_registry import (
+    APPROVED_NARRATOR_VOICES,
+    ADDITIONAL_VOICES,
+    voice_preview_path,
+)
+
+voices = list(APPROVED_NARRATOR_VOICES)
+additional = list(ADDITIONAL_VOICES)
+
+if len(voices) != 28:
+    raise SystemExit(
+        f"Expected 28 approved narrator voices, found {len(voices)}."
+    )
+
+if len(additional) != 5:
+    raise SystemExit(
+        f"Expected 5 additional voices, found {len(additional)}."
+    )
+
+missing = [
+    voice.voice_id
+    for voice in voices
+    if not voice_preview_path(voice.voice_id).is_file()
+    or voice_preview_path(voice.voice_id).stat().st_size <= 1000
+]
+
+if missing:
+    raise SystemExit(
+        "Missing/invalid voice previews: " + ", ".join(missing)
+    )
+
+print("VOICE_SETUP_OK: 28 narrator voices, 5 additional voices, 28 previews")
+PYVOICES
+
 log "Starting Redis"
 
 systemctl enable --now redis-server
@@ -638,6 +678,25 @@ curl -fsS http://127.0.0.1:8000/health
 echo
 
 redis-cli ping
+
+log "Checking current application modules"
+
+run_as_user env \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
+    "$PYTHON" - <<'PYAPP'
+import app.main
+import app.ai_pipeline
+import app.script_workflow
+import app.media_selector
+import app.provider_quota
+import app.youtube_metadata_generator
+import app.youtube_thumbnail_generator
+import app.voice_registry
+
+print("APPLICATION_IMPORTS_OK")
+PYAPP
 
 ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
     fail "Ollama model is missing."
