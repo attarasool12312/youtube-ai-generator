@@ -4,19 +4,15 @@ import subprocess
 from pathlib import Path
 
 from app.kokoro_service import generate_narration
+from app.voice_registry import (
+    APPROVED_NARRATOR_VOICES,
+    VOICE_PREVIEW_DIRECTORY,
+    voice_preview_path,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = PROJECT_ROOT / "backend" / "app" / "static" / "voice-previews"
-
-VOICES = {
-    "am_michael": "Michael",
-    "am_fenrir": "Fenrir",
-    "am_puck": "Puck",
-    "af_heart": "Heart",
-    "af_bella": "Bella",
-    "af_nicole": "Nicole",
-}
+OUTPUT_DIR = VOICE_PREVIEW_DIRECTORY
 
 PREVIEW_TEXT = (
     "Welcome to the YouTube AI Video Generator. "
@@ -25,7 +21,7 @@ PREVIEW_TEXT = (
 
 
 def create_preview(voice: str, label: str) -> None:
-    target = OUTPUT_DIR / f"{voice}.mp3"
+    target = voice_preview_path(voice)
 
     if target.exists() and target.stat().st_size > 1000:
         print(f"Preserved: {label} -> {target.name}")
@@ -66,8 +62,8 @@ def create_preview(voice: str, label: str) -> None:
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    for voice, label in VOICES.items():
-        create_preview(voice, label)
+    for voice in APPROVED_NARRATOR_VOICES:
+        create_preview(voice.voice_id, voice.display_label)
 
     print("VOICE_PREVIEWS_COMPLETE")
 

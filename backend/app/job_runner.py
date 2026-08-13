@@ -1,4 +1,5 @@
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ from app.video_renderer import render_video
 from app.paths import OUTPUT_ROOT
 
 from app.audio_export import create_narration_mp3
+
+logger = logging.getLogger(__name__)
 
 
 def update_job_progress(job_id, status, progress):
@@ -45,7 +48,7 @@ def run_job(job_id: int) -> None:
         duration_minutes = job.duration_minutes
         video_style = job.video_style
         orientation = job.orientation or 'landscape'
-        media_source = job.media_source or "mixed"
+        media_source = "ai_only" if job.media_source == "ai_only" else "stock_only"
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         captions_enabled = bool(job.captions_enabled)
@@ -110,6 +113,19 @@ def run_job(job_id: int) -> None:
             package["scenes"],
             output_dir / "narration.wav",
         )
+        actual_seconds = package["audio_duration_seconds"]
+        words = int(package.get("word_count") or 0)
+        wpm = words / (actual_seconds / 60) if actual_seconds > 0 else 0.0
+        logger.info(
+            "NARRATION target=%.1fs actual=%.1fs words=%d wpm=%.1f voice=%s speed=%s",
+            duration_minutes * 60.0, actual_seconds, words, wpm, narrator_voice, voice_speed,
+        )
+        ratio = actual_seconds / (duration_minutes * 60.0)
+        if ratio < 0.82 or ratio > 1.18:
+            logger.warning(
+                "NARRATION_DURATION_OUTLIER target=%.1fs actual=%.1fs ratio=%.3f",
+                duration_minutes * 60.0, actual_seconds, ratio,
+            )
 
         captions = None
 
@@ -153,6 +169,8 @@ def run_job(job_id: int) -> None:
             orientation,
             media_source,
             package.get("detected_style", video_style),
+            package.get("title", title),
+            duration_minutes,
         )
 
         with SessionLocal() as db:
@@ -332,4 +350,9 @@ def run_job(job_id: int) -> None:
 
 
 if __name__ == "__main__":
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     run_job(int(sys.argv[1]))

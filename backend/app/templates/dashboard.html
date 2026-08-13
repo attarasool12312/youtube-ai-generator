@@ -73,7 +73,6 @@
               <option value="general_explainer">General Explainer</option>
               <option value="tech_science">Tech &amp; Science</option>
               <option value="what_if">What-If / Fictional</option>
-              <option value="historical_person">Historical Person / Biography</option>
               <option value="historical_place">Historical Place / Monument</option>
               <option value="historical_event">Historical Event / Era</option>
               <option value="geography_travel">Geography / Travel Documentary</option>
@@ -81,23 +80,28 @@
               <option value="space_astronomy">Space / Astronomy</option>
               <option value="business_economics">Business / Economics</option>
               <option value="educational_how_it_works">Educational / How It Works</option>
+              <option value="health_wellness">Health &amp; Wellness</option>
+              <option value="sports">Sports</option>
+              <option value="automotive_transport">Automotive &amp; Transport</option>
+              <option value="food_cooking">Food &amp; Cooking</option>
+              <option value="environment_climate">Environment &amp; Climate</option>
+              <option value="culture_society">Culture &amp; Society</option>
+              <option value="architecture_engineering">Architecture &amp; Engineering</option>
             </select>
           </div>
           <div>
             <label>Main Narrator</label>
             <div class="voice-select-row">
               <select name="narrator_voice" required>
-                <option value="am_michael" selected>Michael - Male</option>
-                <option value="am_fenrir">Fenrir - Male</option>
-                <option value="am_puck">Puck - Male</option>
-                <option value="af_heart">Heart - Female</option>
-                <option value="af_bella">Bella - Female</option>
-                <option value="af_nicole">Nicole - Female</option>
+                {% for voice in narrator_voices %}
+                <option value="{{ voice.voice_id }}"{% if voice.voice_id == default_narrator_voice %} selected{% endif %}>{{ voice.display_label }}</option>
+                {% endfor %}
               </select>
               <button
                 type="button"
                 class="voice-preview-button"
                 data-voice-select="narrator_voice"
+                data-preview-root="{{ voice_preview_url_root }}"
               >▶ Preview</button>
             </div>
           </div>
@@ -120,8 +124,7 @@
 <div>
   <label>Media Source</label>
   <select name="media_source">
-    <option value="mixed" selected>Mixed — Stock + AI Fallback</option>
-    <option value="stock_only">Stock Only</option>
+    <option value="stock_only" selected>Stock Only</option>
     <option value="ai_only">AI Only — FLUX</option>
   </select>
 </div>
@@ -129,21 +132,11 @@
         <div class="voice-pool">
           <label>Additional Voices</label>
           <div class="voice-checkboxes">
+            {% for voice in additional_voices %}
             <div class="voice-option">
-              <label><input type="checkbox" name="voice_pool" value="am_fenrir" checked> Fenrir</label>
+              <label><input type="checkbox" name="voice_pool" value="{{ voice.voice_id }}"> {{ voice.label }} ({{ voice.english_variant }})</label>
             </div>
-            <div class="voice-option">
-              <label><input type="checkbox" name="voice_pool" value="am_puck" checked> Puck</label>
-            </div>
-            <div class="voice-option">
-              <label><input type="checkbox" name="voice_pool" value="af_heart" checked> Heart</label>
-            </div>
-            <div class="voice-option">
-              <label><input type="checkbox" name="voice_pool" value="af_bella" checked> Bella</label>
-            </div>
-            <div class="voice-option">
-              <label><input type="checkbox" name="voice_pool" value="af_nicole"> Nicole</label>
-            </div>
+            {% endfor %}
           </div>
         </div>
 
@@ -397,6 +390,8 @@
         "script_sections",
         "script_validation",
         "script_refinement",
+        "scene_splitting",
+        "scene_enrichment",
         "scene_planning",
         "narration_tts",
         "media_collection",
@@ -411,7 +406,10 @@
         "generating_media",
         "rendering",
         "rendering_video",
-        "uploading"
+        "uploading",
+        "youtube_preparing",
+        "youtube_queued",
+        "youtube_uploading"
       ]);
 
       const panelSelector = "#video-queue-panel";

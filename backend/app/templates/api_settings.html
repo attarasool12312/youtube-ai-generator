@@ -41,6 +41,82 @@ Manage AI providers, stock-media services, and external integrations.
   </div>
   {% endif %}
 
+  <section class="crm-card api-limits-section" id="api-limits">
+    <div class="crm-card-header api-limits-header">
+      <div>
+        <span class="developer-section-label">Provider Monitoring</span>
+        <h2>API Limits &amp; Quota Status</h2>
+        <p>
+          Live provider response data where available. Results are cached for
+          five minutes to avoid consuming quota unnecessarily.
+        </p>
+        {% if limits_checked_at %}
+        <small>Last checked: <time class="quota-time" datetime="{{ limits_checked_at }}">{{ limits_checked_at }}</time> · {{ limits_cache_state }}</small>
+        {% endif %}
+      </div>
+      <form method="post" action="/settings/limits/refresh">
+        <button type="submit" class="crm-secondary-button">Refresh Limits</button>
+      </form>
+    </div>
+
+    <div class="api-limits-table" role="table" aria-label="Provider quota status">
+      <div class="api-limits-row api-limits-labels" role="row">
+        <span>Provider</span><span>Connection</span><span>Limit</span>
+        <span>Remaining / Used</span><span>Reset</span><span>Status</span><span>Action / API Test</span>
+      </div>
+      {% for quota in provider_quotas %}
+      <article class="api-limits-row" role="row">
+        <strong data-label="Provider">{{ quota.provider }}</strong>
+        <span data-label="Connection">
+          {{ "Connected" if quota.connected else "Not configured" }}
+          {% if quota.http_status %}<small>HTTP {{ quota.http_status }}</small>{% endif %}
+        </span>
+        <span data-label="Limit">
+          {% if quota.limit is not none %}
+            {{ "{:,}".format(quota.limit) }}{% if quota.window %} / {{ quota.window }}{% endif %}
+          {% else %}
+            {{ quota.quota_message }}
+          {% endif %}
+        </span>
+        <span data-label="Remaining / Used">
+          {% if quota.remaining is not none %}
+            <strong>{{ "{:,}".format(quota.remaining) }}</strong>
+            {% if quota.used is not none %}<small>Used: {{ "{:,}".format(quota.used) }}</small>{% endif %}
+          {% else %}
+            {{ "Daily quota remaining: Not exposed by API" if quota.provider == "YouTube" else quota.quota_message }}
+          {% endif %}
+        </span>
+        <span data-label="Reset">
+          {% if quota.reset_at %}
+            <time class="quota-time" datetime="{{ quota.reset_at }}">{{ quota.reset_at }}</time>
+          {% elif quota.reset_in_seconds is not none %}
+            {{ quota.reset_in_seconds }} sec
+          {% elif quota.retry_after is not none %}
+            Retry in {{ quota.retry_after }} sec
+          {% else %}
+            {{ quota.quota_message }}
+          {% endif %}
+        </span>
+        <span data-label="Status">
+          <span class="quota-badge is-{{ quota.status }}">
+            {% if quota.status == "rate_limited" %}Rate Limited
+            {% elif quota.status == "not_exposed" %}Not Exposed
+            {% else %}{{ quota.status|replace("_", " ")|title }}{% endif %}
+          </span>
+        </span>
+        {% set provider_key = {"Pexels":"pexels", "Pixabay":"pixabay", "Coverr":"coverr", "Openverse":"openverse", "Google Gemini":"gemini", "Together AI":"together", "YouTube":"youtube"}.get(quota.provider) %}
+        <span data-label="Action / API Test">
+          <form method="post" action="/settings/providers/{{ provider_key }}/test">
+            <button type="submit" class="crm-secondary-button">{{ "Test Connection" if quota.provider == "YouTube" else "Test API" }}</button>
+          </form>
+          {% set tested = provider_test_results.get(provider_key) %}
+          {% if tested %}<small><strong>{{ tested.status }}</strong> · {{ tested.detail }}<br>Tested: <time class="quota-time" datetime="{{ tested.tested_at }}">{{ tested.tested_at }}</time></small>{% endif %}
+        </span>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
   <form
     method="post"
     action="/settings"
@@ -460,4 +536,12 @@ Manage AI providers, stock-media services, and external integrations.
   </section>
 
 </div>
+<script>
+  document.querySelectorAll('.quota-time').forEach((element) => {
+    const value = new Date(element.dateTime);
+    if (!Number.isNaN(value.getTime())) {
+      element.textContent = value.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+  });
+</script>
 {% endblock %}

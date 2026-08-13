@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.paths import OUTPUT_ROOT
+from app.download_filenames import content_disposition_for_video
 from app.config import settings
 from app.database import get_db
 from app.dashboard_metrics import collect_dashboard_metrics
@@ -61,8 +62,14 @@ from app.api_settings import (
     remove_api_key,
     save_api_key,
 )
+from app.provider_quota import clear_quota_cache, get_provider_quotas
+from app.api_health import get_test_results, test_provider
 from app.audio_export import create_narration_mp3
 from app.security import verify_password
+from app.voice_registry import (
+    DEFAULT_NARRATOR_VOICE,
+    validate_voice_speed, validated_voice_pool, voice_template_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +90,7 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="backend/app/static"), name="static")
 templates = Jinja2Templates(directory="backend/app/templates")
+templates.env.globals.update(voice_template_context())
 
 
 @app.get("/health")
@@ -145,6 +153,8 @@ JOB_STATUS_LABELS = {
     "script_sections": "Script Section Generation",
     "script_validation": "Script Validation",
     "script_refinement": "Script Repair / Refinement",
+    "scene_splitting": "Scene Splitting",
+    "scene_enrichment": "Scene Metadata Generation",
     "scene_planning": "Scene Planning",
     "narration_tts": "Narration / TTS",
     "media_collection": "Media Collection",
@@ -324,6 +334,7 @@ def load_dashboard_jobs(db):
 
 def dashboard_context(request, jobs, active_page):
     return {
+        **voice_template_context(),
         "app_name": settings.app_name,
         "jobs": jobs,
         "active_page": active_page,
@@ -450,8 +461,8 @@ def add_jobs(
     duration_minutes: int = Form(10),
     video_style: str = Form("auto"),
     orientation: str = Form("landscape"),
-    media_source: str = Form("mixed"),
-    narrator_voice: str = Form("am_michael"),
+    media_source: str = Form("stock_only"),
+    narrator_voice: str = Form(DEFAULT_NARRATOR_VOICE),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
     captions_enabled: str = Form("enabled"),
@@ -475,13 +486,21 @@ def add_jobs(
     video_style = normalize_profile_key(video_style)
 
     title_list = [title.strip() for title in titles.splitlines() if title.strip()]
-    selected_voices = list(dict.fromkeys([narrator_voice, *voice_pool]))
+    try:
+        selected_voices = validated_voice_pool([narrator_voice, *voice_pool])
+        narrator_voice = selected_voices[0]
+        voice_speed = validate_voice_speed(voice_speed)
+    except ValueError:
+        return RedirectResponse(
+            "/videos/create?success=Invalid narrator voice or speed.",
+            status_code=303,
+        )
 
     captions_enabled_value = captions_enabled == "enabled"
     caption_background_value = caption_background == "on"
 
-    if media_source not in {"stock_only", "ai_only", "mixed"}:
-        media_source = "mixed"
+    if media_source not in {"stock_only", "ai_only"}:
+        media_source = "stock_only"
 
     if caption_font_size not in {36, 48, 60}:
         caption_font_size = 48
@@ -889,7 +908,7 @@ def download_job_video(
         iterfile(),
         media_type="video/mp4",
         headers={
-            "Content-Disposition": f'attachment; filename="video-job-{job.id}.mp4"',
+            "Content-Disposition": content_disposition_for_video(job.title, job.id),
             "Content-Length": str(video.stat().st_size),
         },
     )
@@ -1652,6 +1671,10 @@ def api_settings_page(request: Request):
     youtube_client_secret_ready = has_api_key(
         "youtube_client_secret"
     )
+    force_limits_refresh = request.query_params.get("limits_refreshed") == "1"
+    provider_quotas = get_provider_quotas(
+        force_refresh=force_limits_refresh
+    )
 
     configured_count = sum([
         pexels_ready,
@@ -1682,8 +1705,37 @@ def api_settings_page(request: Request):
             "youtube_client_secret_ready": youtube_client_secret_ready,
             "configured_count": configured_count,
             "total_integrations": 7,
+            "provider_quotas": provider_quotas,
+            "limits_checked_at": (
+                provider_quotas[0]["checked_at"]
+                if provider_quotas else None
+            ),
+            "limits_cache_state": provider_quotas[0].get("cache_state", "Cached") if provider_quotas else "Cached",
+            "provider_test_results": get_test_results(),
         },
     )
+
+
+@app.post("/settings/limits/refresh")
+def refresh_api_limits(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    clear_quota_cache()
+    return RedirectResponse(
+        "/settings?limits_refreshed=1#api-limits",
+        status_code=303,
+    )
+
+
+@app.post("/settings/providers/{provider}/test")
+def test_api_provider(request: Request, provider: str):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    if provider not in {"pexels", "pixabay", "coverr", "openverse", "gemini", "together", "youtube"}:
+        raise HTTPException(status_code=404, detail="Unknown provider")
+    test_provider(provider)
+    return RedirectResponse("/settings#api-limits", status_code=303)
 
 
 @app.post("/settings")
@@ -1725,6 +1777,7 @@ def save_api_settings(
         "youtube_client_secret",
         youtube_client_secret.strip(),
     )
+    clear_quota_cache()
 
     return RedirectResponse("/settings?saved=1", status_code=303)
 
@@ -1758,6 +1811,8 @@ def remove_api_setting(
         )
 
     removed = remove_api_key(key_name)
+    if removed:
+        clear_quota_cache()
 
     message = (
         "API setting removed."

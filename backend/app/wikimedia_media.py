@@ -1,28 +1,51 @@
+"""Safe, entity-aware Wikimedia Commons image selection."""
 from __future__ import annotations
 
+from collections import Counter
 import html
-import re
 from io import BytesIO
+import logging
 from pathlib import Path
+import re
+import time
 
 import httpx
 from PIL import Image
+from app.media_relevance import build_media_query_candidates, normalize_media_text, score_media_candidate
+from app.media_relevance import build_media_query_candidates, normalize_media_text
 
 
 API = "https://commons.wikimedia.org/w/api.php"
-
 HEADERS = {
-    "User-Agent": (
-        "AttaVideoAI/1.0 "
-        "(https://attavideoai.site/; admin@attarasool.com)"
-    )
+    "User-Agent": "AttaVideoAI/1.0 (https://attavideoai.site/; admin@attarasool.com)"
 }
+ALLOWED_MIME = frozenset({"image/jpeg", "image/png", "image/webp"})
+TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
+MAX_RETRIES = 3
+RETRY_DELAYS = (0.25, 0.75)
+PAGE_SIZE = 20
+MAX_PAGES_PER_QUERY = 2
+MAX_API_PAGES = 6
+MAX_CANDIDATES = 120
+MAX_DOWNLOAD_ATTEMPTS = 8
+MIN_FRESH_POOL = 5
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+_GENERIC = frozenset({
+    "archival", "archive", "black", "early", "famous", "historic", "historical",
+    "history", "image", "late", "old", "older", "photo", "photograph",
+    "photography", "picture", "portrait", "the", "of", "and", "in", "with",
+    "at", "on",
+})
+_BANNED_TERMS = (
+    "book cover", "catalogue", "catalog of", "frontispiece", "title page",
+    "dust jacket", "magazine cover", "album cover",
+)
 
 
 def _value(item):
-    if isinstance(item, dict):
-        return str(item.get("value", "") or "")
-    return str(item or "")
+    return str(item.get("value", "") or "") if isinstance(item, dict) else str(item or "")
 
 
 def _clean(value):
@@ -31,416 +54,274 @@ def _clean(value):
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _normalized(value):
+    return normalize_media_text(value)
+
+
+def _tokens(value):
+    return tuple(token for token in _normalized(value).split() if len(token) > 1)
+
+
 def _allowed_license(name):
     name = (name or "").upper().strip()
-
-    if "PUBLIC DOMAIN" in name:
+    if "PUBLIC DOMAIN" in name or "CC0" in name:
         return True
-
-    if "CC0" in name:
-        return True
-
     if "CC BY" in name:
-        blocked = (
-            "BY-SA",
-            "BY-NC",
-            "BY-ND",
-            "NONCOMMERCIAL",
-            "NO DERIVATIVES",
-        )
-        return not any(x in name for x in blocked)
-
+        blocked = ("BY-SA", "BY-NC", "BY-ND", "NONCOMMERCIAL", "NO DERIVATIVES")
+        return not any(term in name for term in blocked)
     return False
 
 
-def _query_candidates(query):
-    query = " ".join(str(query or "").split())
+def _query_candidates(query, topic_context=None):
+    return build_media_query_candidates(query, topic_context)
 
-    candidates = [query]
 
-    cleaned = query
+def _request(client, url, **kwargs):
+    """Retry only transient network/status failures."""
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.get(url, **kwargs)
+            if response.status_code in TRANSIENT_STATUS:
+                last_error = httpx.HTTPStatusError(
+                    f"Transient Wikimedia HTTP {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            else:
+                response.raise_for_status()
+                return response
+        except (httpx.TimeoutException, httpx.TransportError) as error:
+            last_error = error
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+    raise last_error or RuntimeError("Wikimedia request failed")
 
-    removable = (
-        " historical portrait",
-        " historical photograph",
-        " historical photo",
-        " archival photograph",
-        " archival photo",
-        " black and white photograph",
-        " black and white photo",
-        " historical archival",
-        " historical",
-        " portrait",
-        " photograph",
-        " photo",
-        " archival",
+
+def _metadata_text(page, meta):
+    categories = page.get("categories") or []
+    category_text = " ".join(
+        item.get("title", "") if isinstance(item, dict) else str(item)
+        for item in categories
     )
+    return " ".join((
+        str(page.get("title", "") or ""),
+        _clean(_value(meta.get("ImageDescription"))),
+        _clean(_value(meta.get("ObjectName"))),
+        category_text,
+    ))
 
-    lower = cleaned.lower()
 
-    for phrase in removable:
-        if phrase in lower:
-            index = lower.find(phrase)
-            cleaned = (
-                cleaned[:index]
-                + cleaned[index + len(phrase):]
-            ).strip()
-            lower = cleaned.lower()
+def _entity_evidence(title, metadata_text, topic_context):
+    required = getattr(topic_context, "required_anchor_phrases", ()) or ()
+    entity = required[0] if required else _normalized(getattr(topic_context, "primary_topic", "") or "")
+    if not entity:
+        return True, 0, 0
+    title_normalized = _normalized(title)
+    metadata_normalized = _normalized(metadata_text)
+    entity_tokens = tuple(entity.split())
+    title_tokens = set(title_normalized.split())
+    metadata_tokens = set(metadata_normalized.split())
+    phrase_in_title = f" {entity} " in f" {title_normalized} "
+    phrase_in_metadata = f" {entity} " in f" {metadata_normalized} "
+    all_title = bool(entity_tokens) and set(entity_tokens).issubset(title_tokens)
+    all_metadata = bool(entity_tokens) and set(entity_tokens).issubset(metadata_tokens)
+    matched = phrase_in_title or phrase_in_metadata or all_title or all_metadata
+    score = 24 if phrase_in_title else 16 if all_title else 12 if phrase_in_metadata else 8 if all_metadata else 0
+    return matched, score, len(set(entity_tokens) & title_tokens)
 
-    if cleaned and cleaned not in candidates:
-        candidates.append(cleaned)
 
-    descriptive_prefixes = {
-        "young",
-        "early",
-        "old",
-        "older",
-        "late",
-        "historic",
-        "historical",
-        "famous",
-    }
-
-    entity_words = cleaned.split()
-
-    while (
-        entity_words
-        and entity_words[0].lower()
-        in descriptive_prefixes
-    ):
-        entity_words.pop(0)
-
-    entity_query = " ".join(entity_words)
-
-    if (
-        entity_query
-        and entity_query not in candidates
-    ):
-        candidates.append(entity_query)
-
-    # Do NOT arbitrarily truncate a query to its first
-    # three or four words. That can turn meaningful subjects
-    # such as "War of the Currents" into junk like "War of the".
-    #
-    # Safe candidates are now limited to:
-    # 1. the original scene query
-    # 2. the query with generic visual wording removed
-    # 3. the entity query with descriptive prefixes removed
-    #
-    # If none of these produce a relevant Commons result,
-    # Wikimedia should fail cleanly instead of broadening into
-    # an unrelated historical image.
-
-    return candidates
+def _candidate_from_page(page, search_query, topic_context, current_sources, history_sources):
+    info_list = page.get("imageinfo") or []
+    if not info_list:
+        return None, "MIME"
+    info = info_list[0]
+    mime = str(info.get("mime") or "").lower().strip()
+    if mime not in ALLOWED_MIME:
+        return None, "MIME"
+    source = str(info.get("descriptionurl") or "").strip()
+    if source and source in current_sources:
+        return None, "duplicate-current-job"
+    meta = info.get("extmetadata") or {}
+    license_name = _clean(_value(meta.get("LicenseShortName")))
+    if not _allowed_license(license_name):
+        return None, "license"
+    author = _clean(_value(meta.get("Artist")))
+    if license_name.upper().startswith("CC BY") and not author:
+        return None, "license"
+    image_url = str(info.get("thumburl") or info.get("url") or "").strip()
+    if not image_url:
+        return None, "MIME"
+    title = str(page.get("title", "") or "")
+    searchable_title = _normalized(title)
+    if any(_normalized(term) in searchable_title for term in _BANNED_TERMS):
+        return None, "banned/document-type"
+    metadata_text = _metadata_text(page, meta)
+    relevance = score_media_candidate(
+        topic_context, search_query, title=title, description=metadata_text,
+        categories=page.get("categories") or (),
+    )
+    if not relevance.accepted:
+        return None, "relevance"
+    entity_match = relevance.entity_match
+    score = relevance.score
+    title_entity_matches = int(relevance.entity_match)
+    context_title = relevance.context_matches
+    context_metadata = 0
+    return {
+        "title": title, "source": source, "author": author,
+        "license": license_name,
+        "license_url": _clean(_value(meta.get("LicenseUrl"))),
+        "image_url": image_url, "expected_mime": mime,
+        "search_query_used": search_query, "relevance_score": score,
+        "title_match_count": title_entity_matches + context_title,
+        "entity_match": entity_match,
+        "context_match_count": context_title + context_metadata,
+        "history_duplicate": bool(source and source in history_sources),
+    }, None
 
 
 def _save_jpeg(content, output_path):
     with Image.open(BytesIO(content)) as image:
         image.load()
-
         if image.mode != "RGB":
             if "A" in image.mode:
                 rgba = image.convert("RGBA")
-                background = Image.new(
-                    "RGB",
-                    rgba.size,
-                    (255, 255, 255),
-                )
-                background.paste(
-                    rgba,
-                    mask=rgba.getchannel("A"),
-                )
+                background = Image.new("RGB", rgba.size, (255, 255, 255))
+                background.paste(rgba, mask=rgba.getchannel("A"))
                 image = background
             else:
                 image = image.convert("RGB")
-
         image.thumbnail((1920, 1920))
-
-        output_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        image.save(
-            output_path,
-            "JPEG",
-            quality=92,
-        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(output_path, "JPEG", quality=92)
 
 
-def download_image(
-    query,
-    output_path,
-    orientation=None,
-    used_sources=None,
-    offset=0,
-):
+def _download_candidate(client, candidate, output_path):
+    response = _request(client, candidate["image_url"])
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    if content_type not in ALLOWED_MIME:
+        raise ValueError(f"unsupported actual MIME: {content_type or 'missing'}")
+    declared_size = response.headers.get("content-length")
+    if declared_size and int(declared_size) > MAX_IMAGE_BYTES:
+        raise ValueError("image exceeds maximum size")
+    if len(response.content) > MAX_IMAGE_BYTES:
+        raise ValueError("image exceeds maximum size")
+    _save_jpeg(response.content, Path(output_path))
+
+
+def download_image(query, output_path, orientation=None, used_sources=None, offset=0,
+                   topic_context=None, history_sources=None, client=None):
+    """Search, rank and download an allowed Commons image with bounded effort."""
     del orientation
-
     query = str(query or "").strip()
-    used_sources = used_sources or set()
-
+    current_sources = set(used_sources or ())
+    history_sources = set(history_sources or ()) - current_sources
     if not query:
         raise RuntimeError("Empty Wikimedia search query.")
-
-    with httpx.Client(
-        timeout=40,
-        follow_redirects=True,
-        headers=HEADERS,
-    ) as client:
-
-        all_queries = _query_candidates(query)
-
+    all_queries = _query_candidates(query, topic_context)
+    own_client = client is None
+    client = client or httpx.Client(timeout=25, follow_redirects=True, headers=HEADERS)
+    rejection_counts = Counter()
+    candidates_by_source = {}
+    api_pages = 0
+    total_seen = 0
+    try:
         for search_query in all_queries:
-            params = {
-                "action": "query",
-                "generator": "search",
-                "gsrsearch": search_query,
-                "gsrnamespace": 6,
-                "gsrlimit": 20,
-                "prop": "imageinfo",
-                "iiprop": "url|mime|extmetadata",
-                "iiurlwidth": 1920,
-                "format": "json",
-                "formatversion": 2,
-            }
-
-            response = client.get(API, params=params)
-            response.raise_for_status()
-
-            pages = (
-                response.json()
-                .get("query", {})
-                .get("pages", [])
-            )
-
-            candidates = []
-
-            for page in pages:
-                info_list = page.get("imageinfo") or []
-
-                if not info_list:
-                    continue
-
-                info = info_list[0]
-
-                mime = str(
-                    info.get("mime") or ""
-                ).lower().strip()
-
-                # Keep only normal raster images suitable for
-                # automated video scenes. Reject PDFs, SVGs,
-                # TIFF documents and other non-standard files.
-                if mime not in {
-                    "image/jpeg",
-                    "image/png",
-                    "image/webp",
-                }:
-                    continue
-
-                source = str(
-                    info.get("descriptionurl") or ""
-                ).strip()
-
-                if source and source in used_sources:
-                    continue
-
-                meta = info.get("extmetadata") or {}
-
-                license_name = _clean(
-                    _value(meta.get("LicenseShortName"))
-                )
-
-                if not _allowed_license(license_name):
-                    continue
-
-                author = _clean(
-                    _value(meta.get("Artist"))
-                )
-
-                if (
-                    license_name.upper().startswith("CC BY")
-                    and not author
-                ):
-                    continue
-
-                image_url = (
-                    info.get("thumburl")
-                    or info.get("url")
-                )
-
-                if not image_url:
-                    continue
-
-                title = str(
-                    page.get("title", "") or ""
-                )
-
-                description = _clean(
-                    _value(meta.get("ImageDescription"))
-                )
-
-                title_searchable = title.lower()
-                description_searchable = description.lower()
-
-                banned_title_terms = {
-                    " cover",
-                    "catalogue",
-                    "catalog of",
-                    "title page",
-                    "book cover",
-                    "frontispiece",
+            continuation = None
+            query_eligible = 0
+            for page_number in range(MAX_PAGES_PER_QUERY):
+                if api_pages >= MAX_API_PAGES or total_seen >= MAX_CANDIDATES:
+                    break
+                params = {
+                    "action": "query", "generator": "search", "gsrsearch": search_query,
+                    "gsrnamespace": 6, "gsrlimit": PAGE_SIZE,
+                    "prop": "imageinfo|categories", "cllimit": "max",
+                    "iiprop": "url|mime|size|extmetadata", "iiurlwidth": 1920,
+                    "format": "json", "formatversion": 2,
                 }
-
-                if any(
-                    term in title_searchable
-                    for term in banned_title_terms
-                ):
-                    continue
-
-                generic_words = {
-                    "historical",
-                    "historic",
-                    "history",
-                    "portrait",
-                    "photograph",
-                    "photo",
-                    "archival",
-                    "black",
-                    "white",
-                    "image",
-                    "picture",
-                    "young",
-                    "early",
-                    "old",
-                    "older",
-                    "late",
-                    "famous",
-                    "the",
-                    "of",
-                    "and",
-                    "in",
-                    "with",
-                    "at",
-                    "on",
-                }
-
-                query_tokens = [
-                    word.lower().strip(
-                        ".,:;!?()[]{}'\""
+                if continuation:
+                    params.update(continuation)
+                response = _request(client, API, params=params)
+                payload = response.json()
+                pages = payload.get("query", {}).get("pages", [])
+                api_pages += 1
+                total_seen += len(pages)
+                for page in pages:
+                    candidate, reason = _candidate_from_page(
+                        page, search_query, topic_context, current_sources, history_sources
                     )
-                    for word in search_query.split()
-                ]
-
-                important_tokens = [
-                    token
-                    for token in query_tokens
-                    if len(token) >= 3
-                    and token not in generic_words
-                    and not token.isdigit()
-                ]
-
-                title_matches = [
-                    token
-                    for token in important_tokens
-                    if token in title_searchable
-                ]
-
-                description_matches = [
-                    token
-                    for token in important_tokens
-                    if token in description_searchable
-                ]
-
-                minimum_title_matches = (
-                    2
-                    if len(important_tokens) >= 3
-                    else 1
+                    if reason:
+                        rejection_counts[reason] += 1
+                        continue
+                    query_eligible += 1
+                    key = candidate["source"] or candidate["image_url"]
+                    previous = candidates_by_source.get(key)
+                    if not previous or candidate["relevance_score"] > previous["relevance_score"]:
+                        candidates_by_source[key] = candidate
+                logger.debug(
+                    "Wikimedia query=%r page=%d seen=%d eligible=%d rejections=%s",
+                    search_query, page_number + 1, len(pages), query_eligible,
+                    dict(rejection_counts),
                 )
-
-                if (
-                    important_tokens
-                    and len(title_matches)
-                    < minimum_title_matches
-                ):
-                    continue
-
-                # File-title matches are much stronger evidence
-                # than incidental words inside a description.
-                score = (
-                    len(title_matches) * 5
-                    + len(description_matches)
-                )
-
-                candidates.append({
-                    "title": title,
-                    "source": source,
-                    "author": author,
-                    "license": license_name,
-                    "license_url": _clean(
-                        _value(meta.get("LicenseUrl"))
-                    ),
-                    "image_url": image_url,
-                    "search_query_used": search_query,
-                    "relevance_score": score,
-                    "title_match_count": len(title_matches),
-                })
-
-            if not candidates:
+                continuation = payload.get("continue")
+                fresh_count = sum(not item["history_duplicate"] for item in candidates_by_source.values())
+                if not continuation or fresh_count >= MIN_FRESH_POOL:
+                    break
+            if sum(not item["history_duplicate"] for item in candidates_by_source.values()) >= MIN_FRESH_POOL:
+                break
+        ranked = sorted(
+            candidates_by_source.values(),
+            key=lambda item: (item["history_duplicate"], -item["relevance_score"], item["title"]),
+        )
+        if ranked and offset:
+            fresh = [item for item in ranked if not item["history_duplicate"]]
+            history = [item for item in ranked if item["history_duplicate"]]
+            if fresh:
+                shift = int(offset) % min(len(fresh), 4)
+                fresh = fresh[shift:] + fresh[:shift]
+            ranked = fresh + history
+        fresh_ranked = [item for item in ranked if not item["history_duplicate"]]
+        history_ranked = [item for item in ranked if item["history_duplicate"]]
+        if fresh_ranked and history_ranked:
+            download_pool = fresh_ranked[:MAX_DOWNLOAD_ATTEMPTS - 1] + history_ranked[:1]
+        else:
+            download_pool = ranked[:MAX_DOWNLOAD_ATTEMPTS]
+        for candidate in download_pool:
+            try:
+                _download_candidate(client, candidate, output_path)
+            except Exception as error:
+                reason = "decode failure" if isinstance(error, (OSError, Image.DecompressionBombError)) else "download failure"
+                rejection_counts[reason] += 1
+                logger.debug("Wikimedia rejected title=%r reason=%s detail=%s", candidate["title"], reason, error)
                 continue
-
-            candidates.sort(
-                key=lambda item: item["relevance_score"],
-                reverse=True,
+            logger.debug(
+                "Wikimedia selected query=%r title=%r score=%d history_duplicate=%s",
+                candidate["search_query_used"], candidate["title"],
+                candidate["relevance_score"], candidate["history_duplicate"],
             )
-
-            top_score = candidates[0]["relevance_score"]
-
-            best = [
-                item
-                for item in candidates
-                if item["relevance_score"] == top_score
-            ]
-
-            candidate = best[
-                int(offset or 0) % min(len(best), 4)
-            ]
-
-            media_response = client.get(
-                candidate["image_url"]
-            )
-            media_response.raise_for_status()
-
-            path = Path(output_path)
-
-            _save_jpeg(
-                media_response.content,
-                path,
-            )
-
             return {
-                "provider": "wikimedia",
-                "media_type": "image",
-                "media_file": str(path),
-                "source": candidate["source"],
-                "title": candidate["title"],
-                "author": candidate["author"],
-                "license": candidate["license"],
-                "license_url": candidate["license_url"],
+                "provider": "wikimedia", "media_type": "image",
+                "media_file": str(Path(output_path)), "source": candidate["source"],
+                "title": candidate["title"], "author": candidate["author"],
+                "license": candidate["license"], "license_url": candidate["license_url"],
                 "wikimedia_query": candidate["search_query_used"],
                 "wikimedia_relevance_score": candidate["relevance_score"],
-                "wikimedia_title_matches": candidate.get(
-                    "title_match_count",
-                    0,
-                ),
+                "wikimedia_title_matches": candidate["title_match_count"],
+                "wikimedia_entity_match": candidate["entity_match"],
+                "wikimedia_context_matches": candidate["context_match_count"],
                 "attribution": (
-                    f"{candidate['title']} | "
-                    f"Creator: {candidate['author']} | "
-                    f"License: {candidate['license']} | "
-                    f"{candidate['source']}"
+                    f"{candidate['title']} | Creator: {candidate['author']} | "
+                    f"License: {candidate['license']} | {candidate['source']}"
                 ),
             }
-
+    finally:
+        if own_client:
+            client.close()
+    logger.debug(
+        "Wikimedia exhausted query=%r variants=%d pages=%d candidates=%d rejections=%s",
+        query, len(all_queries), api_pages, len(candidates_by_source), dict(rejection_counts),
+    )
     raise RuntimeError(
-        f"No approved Wikimedia image found after query fallbacks: {query}"
+        f"No approved Wikimedia image found after bounded search; rejections={dict(rejection_counts)}"
     )

@@ -8,17 +8,20 @@ from app.ai_provider import (
     call_together,
 )
 from app.script_validator import (
+    deduplicate_cta_intents,
     find_duplicate_sentences,
     repeated_phrase_ratio,
     validate_script,
 )
 
 WORDS_PER_MINUTE = 145
-MAX_EXPANSION_ATTEMPTS = 1
+MAX_EXPANSION_ATTEMPTS = 2
 MAX_SHORTEN_ATTEMPTS = 1
 MAX_CHUNK_WORDS = 800
 SECTION_MIN_RATIO = 0.93
 SECTION_MAX_RATIO = 1.10
+CADENCE_LONG_SENTENCE_WORDS = 30
+CADENCE_EXTREME_SENTENCE_WORDS = 40
 
 
 from app.video_profiles import script_profile_instructions
@@ -26,6 +29,72 @@ from app.video_profiles import script_profile_instructions
 
 def word_count(text):
     return len(re.findall(r"\b[\w'-]+\b", text))
+
+
+def narration_sentences(text):
+    return [sentence.strip() for sentence in re.split(
+        r"(?<=[.!?])\s+", str(text or "").strip()
+    ) if sentence.strip()]
+
+
+def analyze_spoken_cadence(text):
+    sentences = narration_sentences(text)
+    lengths = [word_count(sentence) for sentence in sentences]
+    long_count = sum(length >= CADENCE_LONG_SENTENCE_WORDS for length in lengths)
+    extreme_count = sum(length >= CADENCE_EXTREME_SENTENCE_WORDS for length in lengths)
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", text) if part.strip()]
+    total = len(sentences)
+    long_ratio = long_count / total if total else 0.0
+    poor = bool(word_count(text) >= 120 and (
+        extreme_count >= 2
+        or (long_count >= 3 and long_ratio >= 0.30)
+        or (total <= 5 and word_count(text) >= 300)
+        or (len(paragraphs) == 1 and total <= 8 and word_count(text) >= 300)
+    ))
+    return {
+        "word_count": word_count(text),
+        "sentence_count": total,
+        "long_sentence_count": long_count,
+        "extreme_sentence_count": extreme_count,
+        "long_sentence_ratio": long_ratio,
+        "paragraph_count": len(paragraphs),
+        "poor": poor,
+    }
+
+
+def repair_spoken_cadence(text):
+    """One conservative word-preserving punctuation and paragraph pass."""
+    repaired = str(text or "").strip()
+    patterns = (
+        r";\s+(?=[A-Za-z])",
+        r",\s+(?=(?:but|yet|while|although|however|meanwhile|instead)\b)",
+        r",\s+(?=(?:and|so)\s+(?:this|that|these|those|it|they|we)\b)",
+    )
+    for pattern in patterns:
+        repaired = re.sub(pattern, ". ", repaired, flags=re.IGNORECASE)
+    repaired = re.sub(
+        r"(?<=[.!?]\s)([a-z])",
+        lambda match: match.group(1).upper(),
+        repaired,
+    )
+    sentences = narration_sentences(repaired)
+    if len(sentences) < 2:
+        return repaired
+    return "\n\n".join(
+        " ".join(sentences[index:index + 3])
+        for index in range(0, len(sentences), 3)
+    )
+
+
+def apply_spoken_cadence_repair(text):
+    before = analyze_spoken_cadence(text)
+    if not before["poor"]:
+        return text, before, before, False
+    candidate = repair_spoken_cadence(text)
+    after = analyze_spoken_cadence(candidate)
+    if word_count(candidate) != before["word_count"]:
+        return text, before, before, False
+    return candidate, before, after, candidate != text
 
 
 def remove_sequential_word_markers(text):
@@ -111,6 +180,7 @@ def clean_script(text):
     )
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = remove_sequential_word_markers(text)
+    text = deduplicate_cta_intents(text)
 
     return text.strip()
 
@@ -282,6 +352,12 @@ Rules:
 - Do not cover later outline items early
 - Start with a complete sentence beginning with a capital letter
 - Keep the narration natural, detailed and conversational
+- Write for spoken delivery with a conversational documentary cadence
+- Prefer natural sentences of roughly 12-22 words where they fit the thought
+- Split 30-plus-word sentences at logical boundaries when practical; longer sentences remain allowed when they sound natural
+- Keep one major thought per sentence where reasonable, with natural commas where a narrator would pause
+- Use paragraphs of roughly 2-4 sentences at meaningful topic transitions
+- Vary sentence length naturally; do not make the narration robotic
 - Keep factual claims accurate, proportionate and consistent with the available evidence
 - Distinguish established facts, reasonable inference and speculation
 - Keep cause-and-effect mechanisms and timescales plausible
@@ -387,6 +463,7 @@ Rules:
 - Do not introduce new facts, examples or claims
 - Keep useful details while removing repetition and filler
 - Keep the tone natural and conversational
+- Preserve natural spoken sentence boundaries and meaningful paragraph breaks
 - Do not use headings, labels, bullets or visual directions
 - Do not produce fewer than {minimum_words} words
 - Never exceed {maximum_words} words
@@ -453,6 +530,7 @@ Rules:
 - Consider alternative causes, remaining influences and system inertia
 - Frame uncertain social, economic, technological or environmental reactions as possibilities
 - Connect naturally between the supplied surrounding sections
+- Write for speech: use clear sentence boundaries, natural pauses, and meaningful paragraphs rather than dense run-ons
 - Do not restart the introduction
 - Do not conclude the full video
 - Do not include a comment, like or subscribe CTA
@@ -588,10 +666,6 @@ def profile_ending_question(style):
             "Which consequence of this scenario do you "
             "think would happen first?"
         ),
-        "historical_person": (
-            "Which part of this person's life or legacy "
-            "stands out most to you?"
-        ),
         "historical_place": (
             "Which part of this place's history interests "
             "you most?"
@@ -620,6 +694,13 @@ def profile_ending_question(style):
             "Which step or mechanism would you like "
             "explained further?"
         ),
+        "health_wellness": "Which part of health and wellbeing should we explore next?",
+        "sports": "Which technique or tactic should we break down next?",
+        "automotive_transport": "Which vehicle system should we explain next?",
+        "food_cooking": "Which ingredient or cooking process should we explore next?",
+        "environment_climate": "Which environmental solution should we examine next?",
+        "culture_society": "Which cultural pattern should we explore next?",
+        "architecture_engineering": "Which structural feature should we explain next?",
     }
 
     return questions.get(
@@ -632,6 +713,8 @@ def ensure_ending_requirements(script, duration, style="general_explainer"):
     script = clean_script(script)
     validation = validate_script(script, duration)
     issues = validation.get("issues", [])
+    required_question = profile_ending_question(style)
+    missing_profile_question = required_question not in script
 
     ending_issues = [
         issue
@@ -639,7 +722,7 @@ def ensure_ending_requirements(script, duration, style="general_explainer"):
         if issue.startswith("Ending is missing")
     ]
 
-    if not ending_issues:
+    if not ending_issues and not missing_profile_question:
         return script
 
     missing_question = any(
@@ -661,10 +744,8 @@ def ensure_ending_requirements(script, duration, style="general_explainer"):
 
     additions = []
 
-    if missing_question:
-        additions.append(
-            profile_ending_question(style)
-        )
+    if missing_question or missing_profile_question:
+        additions.append(required_question)
 
     if missing_comment:
         additions.append(
@@ -1134,7 +1215,7 @@ def create_validated_script(title, duration, style, progress_callback=None):
         if issue.startswith("Ending is missing")
     ]
 
-    if ending_issues:
+    if ending_issues or profile_ending_question(style) not in script:
         emit_progress(
             progress_callback,
             "script_refinement",
@@ -1179,6 +1260,11 @@ def create_validated_script(title, duration, style, progress_callback=None):
             + issues
         )
 
+    script, cadence_before, cadence_after, cadence_repaired = (
+        apply_spoken_cadence_repair(script)
+    )
+    final_validation = validate_script(script, duration)
+
     section_providers = generated["section_providers"]
 
     return {
@@ -1194,4 +1280,9 @@ def create_validated_script(title, duration, style, progress_callback=None):
         "outline_provider": generated["outline_provider"],
         "chunk_providers": section_providers,
         "validation": final_validation,
+        "cadence": {
+            "before": cadence_before,
+            "after": cadence_after,
+            "repaired": cadence_repaired,
+        },
     }

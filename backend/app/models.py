@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.voice_registry import DEFAULT_NARRATOR_VOICE, DEFAULT_VOICE_POOL_CSV
 
 
 def utc_now():
@@ -38,10 +39,10 @@ class VideoJob(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=10)
     video_style: Mapped[str] = mapped_column(String(30), default="auto")
     orientation: Mapped[str] = mapped_column(String(20), default="landscape")
-    media_source: Mapped[str] = mapped_column(String(20), default="mixed")
+    media_source: Mapped[str] = mapped_column(String(20), default="stock_only")
     voice_mode: Mapped[str] = mapped_column(String(20), default="multi")
-    narrator_voice: Mapped[str] = mapped_column(String(50), default="am_michael")
-    voice_pool: Mapped[str] = mapped_column(Text, default="am_michael,am_fenrir,am_puck,af_heart,af_bella,af_nicole")
+    narrator_voice: Mapped[str] = mapped_column(String(50), default=DEFAULT_NARRATOR_VOICE)
+    voice_pool: Mapped[str] = mapped_column(Text, default=DEFAULT_VOICE_POOL_CSV)
     voice_speed: Mapped[float] = mapped_column(Float, default=1.0)
     captions_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     caption_font_size: Mapped[int] = mapped_column(Integer, default=36)

@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import re
 
@@ -9,6 +10,10 @@ from app.ai_provider import (
     call_ai, call_gemini, call_ollama, call_together,
 )
 from app.scene_ai import call_scene_json
+from app.media_relevance import (
+    build_media_topic_context,
+    validate_scene_query,
+)
 from app.script_validator import validate_script
 from app.script_workflow import create_validated_script
 from app.video_profiles import (
@@ -17,6 +22,9 @@ from app.video_profiles import (
     profile_detection_prompt,
     media_profile_instructions,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def call_qwen(prompt: str) -> str:
@@ -247,7 +255,10 @@ def split_script_into_scenes(script, duration_minutes):
     return scenes
 
 
-def _enrich_scene_batch_once(title, video_style, scenes):
+def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
+    topic_context = topic_context or build_media_topic_context(
+        title, video_style
+    )
     prompt = (
         f"Video title: {title}\n"
         f"Style: {video_style}\n"
@@ -286,9 +297,21 @@ def _enrich_scene_batch_once(title, video_style, scenes):
                 f"Missing metadata for scene {scene['scene_number']}."
             )
 
+        validation = validate_scene_query(
+            item.get("search_query", ""), topic_context
+        )
+        if validation.repaired:
+            logger.debug(
+                "Scene media query repaired profile=%s topic=%r original=%r final=%r",
+                topic_context.profile,
+                topic_context.primary_topic,
+                validation.original_query,
+                validation.final_query,
+            )
+
         enriched.append({
             **scene,
-            "search_query": item.get("search_query", ""),
+            "search_query": validation.final_query,
             "stock_keywords": item.get("stock_keywords", []),
             "image_prompt": item.get("image_prompt", ""),
             "video_prompt": item.get("video_prompt", ""),
@@ -328,12 +351,13 @@ def detect_video_style(title, requested_style):
 
 def enrich_scene_batch(title, video_style, scenes):
     enriched = []
+    topic_context = build_media_topic_context(title, video_style)
 
     for start in range(0, len(scenes), 6):
         batch = scenes[start:start + 6]
         enriched.extend(
             _enrich_scene_batch_once(
-                title, video_style, batch
+                title, video_style, batch, topic_context
             )
         )
 
@@ -388,12 +412,15 @@ def generate_video_package(title, duration_minutes, video_style, progress_callba
     print("SCRIPT_REPAIR_PROVIDERS:", script_result["repair_providers"] or ["none"], flush=True)
 
     if progress_callback:
-        progress_callback("scene_planning", 30)
+        progress_callback("scene_splitting", 30)
 
     scenes = split_script_into_scenes(
         script_result["script"],
         duration_minutes,
     )
+
+    if progress_callback:
+        progress_callback("scene_enrichment", 32)
 
     scenes = enrich_scene_batch(
         title,

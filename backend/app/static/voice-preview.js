@@ -30,7 +30,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!voice) return;
 
-      const source = `/static/voice-previews/${encodeURIComponent(voice)}.mp3`;
+      const previewRoot = button.dataset.previewRoot;
+      if (!previewRoot || !/^[a-z]{2}_[a-z]+$/.test(voice)) return;
+      const source = `${previewRoot}/${encodeURIComponent(voice)}.mp3`;
 
       if (activeButton === button && !audio.paused) {
         audio.pause();

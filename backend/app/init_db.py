@@ -8,7 +8,7 @@ from app.security import hash_password
 
 
 VIDEO_JOB_COLUMN_MIGRATIONS = {
-    "media_source": "VARCHAR(20) NOT NULL DEFAULT 'mixed'",
+    "media_source": "VARCHAR(20) NOT NULL DEFAULT 'stock_only'",
     "captions_enabled": "BOOLEAN NOT NULL DEFAULT 1",
     "caption_font_size": "INTEGER NOT NULL DEFAULT 36",
     "caption_position": "VARCHAR(20) NOT NULL DEFAULT 'bottom'",

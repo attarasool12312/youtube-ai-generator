@@ -31,6 +31,11 @@ from app.youtube_metadata_generator import (
 THUMBNAIL_WIDTH = 1280
 THUMBNAIL_HEIGHT = 720
 MAX_THUMBNAIL_BYTES = 1_900_000
+TYPOGRAPHY_PRESETS = (
+    ("white_dimension", (255, 255, 255, 255), (8, 12, 22, 255), (30, 38, 54, 245)),
+    ("gold_impact", (255, 211, 62, 255), (20, 12, 2, 255), (105, 55, 5, 245)),
+    ("cool_premium", (220, 240, 255, 255), (3, 12, 29, 255), (10, 45, 82, 245)),
+)
 
 FONT_CANDIDATES = (
     Path(
@@ -85,9 +90,6 @@ def _clean_headline(value: Any) -> str:
         str(value or "").replace("<", "").replace(">", "").split()
     ).strip(" -:|")
 
-    if not headline:
-        return "THE HIDDEN STORY"
-
     words = headline.split()
 
     if len(words) > 8:
@@ -97,13 +99,36 @@ def _clean_headline(value: Any) -> str:
 
 
 def _fallback_headline(title: str) -> str:
-    title = _clean_headline(title)
-    words = title.split()
+    cleaned = _clean_headline(title)
+    if not cleaned:
+        return "UNTITLED VIDEO"
+    words = cleaned.split()
+    # Keep the concrete beginning of the actual title; strip only structural
+    # question wrappers when enough topic wording remains.
+    if len(words) > 2 and words[0].casefold() in {"how", "why", "what", "who"}:
+        words.pop(0)
+        while len(words) > 2 and words[0].casefold() in {
+            "a", "an", "do", "does", "did", "if", "is", "are", "the", "was", "were"
+        }:
+            words.pop(0)
+    return _clean_headline(" ".join(words[:7])) or cleaned
 
-    if len(words) <= 7:
-        return title
 
-    return " ".join(words[:7])
+def _external_thumbnail_prompt(title: str, headline: str, visual_prompt: str) -> str:
+    lowered = visual_prompt.casefold()
+    contradictions = (
+        "do not render text", "do not render any text", "render no text",
+        "text-free", "without text",
+    )
+    if any(phrase in lowered for phrase in contradictions):
+        raise ValueError("External thumbnail prompt contradicts rendered-headline contract.")
+    return (
+        f"Create a complete premium 16:9 YouTube thumbnail for {title}. "
+        f"Use this exact headline as visible rendered text: \"{headline}\". "
+        "Give the headline deliberate placement, bold professional typography, "
+        "strong contrast, and clear mobile-size readability. Do not change or add "
+        f"words. Visual composition: {visual_prompt}"
+    )
 
 
 def _generate_thumbnail_concept(
@@ -257,6 +282,24 @@ Final script:
     )
 
 
+def _local_thumbnail_concept(title: str, script: str) -> tuple[str, str, str]:
+    """Return a text-free background contract with deterministic fallback."""
+    try:
+        return _generate_thumbnail_concept(title=title, script=script)
+    except Exception as error:
+        headline = _fallback_headline(title)
+        visual_prompt = (
+            f"Create a premium professional text-free 16:9 YouTube thumbnail "
+            f"background for this exact topic: {title}. Show one large, recognizable "
+            "primary subject and only meaningful supporting elements, with strong "
+            "visual hierarchy, subject separation, deliberate lighting, and a clean "
+            "high-contrast area where the application will overlay its headline. "
+            "Do not render text, letters, captions, logos, or watermarks. Avoid "
+            "generic holograms and meaningless glowing effects."
+        )
+        return headline, visual_prompt, f"deterministic-local-fallback:{type(error).__name__}"
+
+
 def _wrap_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -313,45 +356,38 @@ def _wrap_text(
     return retained
 
 
-def _fit_headline(
-    draw: ImageDraw.ImageDraw,
-    headline: str,
-) -> tuple[ImageFont.ImageFont, list[str], int]:
-    for size in range(86, 51, -2):
+def _fit_headline(draw, headline):
+    for size in range(92, 35, -2):
         font = _font(size)
-        lines = _wrap_text(
-            draw,
-            headline,
-            font,
-            max_width=650,
-            max_lines=3,
-        )
-
-        line_bbox = draw.textbbox(
-            (0, 0),
-            "Ag",
-            font=font,
-        )
-        line_height = (
-            line_bbox[3]
-            - line_bbox[1]
-            + 12
-        )
-        total_height = line_height * len(lines)
-
-        if total_height <= 330:
+        lines = _wrap_text(draw, headline, font, max_width=680, max_lines=20)
+        bbox = draw.textbbox((0, 0), "Ag", font=font)
+        line_height = bbox[3] - bbox[1] + 5
+        if len(lines) <= 4 and line_height * len(lines) <= 350:
             return font, lines, line_height
+    font = _font(34)
+    lines = _wrap_text(draw, headline, font, max_width=680, max_lines=20)
+    bbox = draw.textbbox((0, 0), "Ag", font=font)
+    return font, lines, bbox[3] - bbox[1] + 4
 
-    font = _font(50)
-    lines = _wrap_text(
-        draw,
-        headline,
-        font,
-        max_width=650,
-        max_lines=3,
-    )
 
-    return font, lines, 66
+def _typography_preset(headline):
+    index = int(sha256(headline.encode("utf-8")).hexdigest()[:8], 16)
+    return TYPOGRAPHY_PRESETS[index % len(TYPOGRAPHY_PRESETS)]
+
+
+def _draw_premium_headline(image, headline, x=70, top=183):
+    draw = ImageDraw.Draw(image)
+    font, lines, line_height = _fit_headline(draw, headline)
+    name, face, stroke, depth = _typography_preset(headline)
+    for index, line in enumerate(lines):
+        y = top + index * line_height
+        draw.text((x + 14, y + 16), line, font=font, fill=(0, 0, 0, 145), stroke_width=8, stroke_fill=(0, 0, 0, 130))
+        for offset in range(9, 0, -1):
+            draw.text((x + offset, y + offset), line, font=font, fill=depth, stroke_width=7, stroke_fill=stroke)
+        draw.text((x, y), line, font=font, fill=face, stroke_width=7, stroke_fill=stroke)
+        draw.text((x + 2, y + 1), line, font=font, fill=face, stroke_width=1, stroke_fill=(255, 255, 255, 150))
+    width = int(max((draw.textlength(line, font=font) for line in lines), default=0))
+    return lines, (x, top, x + width + 24, top + len(lines) * line_height + 25), name
 
 
 
@@ -593,33 +629,7 @@ def _apply_overlays(
         fill=(10, 14, 24, 255),
     )
 
-    headline_font, lines, line_height = (
-        _fit_headline(
-            draw,
-            headline,
-        )
-    )
-
-    y = 183
-
-    for line in lines:
-        draw.text(
-            (70 + 4, y + 5),
-            line,
-            font=headline_font,
-            fill=(0, 0, 0, 185),
-            stroke_width=2,
-            stroke_fill=(0, 0, 0, 185),
-        )
-        draw.text(
-            (70, y),
-            line,
-            font=headline_font,
-            fill=(255, 255, 255, 255),
-            stroke_width=2,
-            stroke_fill=(0, 0, 0, 220),
-        )
-        y += line_height
+    _draw_premium_headline(image, headline)
 
     draw.rounded_rectangle(
         (
@@ -902,7 +912,7 @@ EXACT THUMBNAIL HEADLINE:
 
     return GeneratedYouTubeThumbnailPrompt(
         headline=headline,
-        visual_prompt=image_prompt,
+        visual_prompt=_external_thumbnail_prompt(title, headline, image_prompt),
         provider=result.provider,
     )
 
@@ -977,7 +987,7 @@ def generate_youtube_thumbnail(
     ).strip()
 
     headline, visual_prompt, provider = (
-        _generate_thumbnail_concept(
+        _local_thumbnail_concept(
             title=title,
             script=script,
         )
@@ -1148,7 +1158,9 @@ def generate_youtube_thumbnail_prompt(
 
             return GeneratedYouTubeThumbnailPrompt(
                 headline=headline,
-                visual_prompt=visual_prompt,
+                visual_prompt=_external_thumbnail_prompt(
+                    title, headline, visual_prompt
+                ),
                 provider=provider,
             )
         except Exception as retry_error:
@@ -1173,10 +1185,11 @@ def generate_youtube_thumbnail_prompt(
         "clear depth, dramatic but believable lighting, polished "
         "editorial-quality detail, and a clean high-contrast "
         "composition that remains readable at small thumbnail size. "
-        "Reserve a deliberate text-safe area for a short headline. "
-        "Do not render any text, captions, logos, watermarks, UI, "
-        "borders, random arrows, generic holograms or meaningless "
-        "glowing effects inside the generated image."
+        f"Render this exact headline prominently: \"{headline}\". "
+        "Use deliberate placement, bold professional typography, strong "
+        "contrast, and mobile-size readability. Do not change or add words. "
+        "Do not add logos, watermarks, UI, borders, random arrows, generic "
+        "holograms or meaningless glowing effects."
     )
 
     return GeneratedYouTubeThumbnailPrompt(

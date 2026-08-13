@@ -71,28 +71,6 @@ VIDEO_PROFILES = {
         "historical": False,
     },
 
-    "historical_person": {
-        "label": "Historical Person / Biography",
-        "description": (
-            "Biographies of historical figures and notable people."
-        ),
-        "script_instructions": (
-            "Build the biography around the actual person, chronology, "
-            "major locations, documented achievements, conflicts and "
-            "historical context. Keep names, relationships and chronology "
-            "consistent. Avoid invented quotes or unsupported personal "
-            "details."
-        ),
-        "media_instructions": (
-            "Prioritize the exact historical person by full name. "
-            "Search for portraits, photographs, paintings, documents, "
-            "associated locations, institutions, events and period "
-            "material. Keep proper names in search queries. Never replace "
-            "a named historical person with generic modern people."
-        ),
-        "historical": True,
-    },
-
     "historical_place": {
         "label": "Historical Place / Monument",
         "description": (
@@ -225,6 +203,42 @@ VIDEO_PROFILES = {
         ),
         "historical": False,
     },
+
+    "health_wellness": {
+        "label": "Health & Wellness", "description": "Health, sleep, fitness, nutrition and wellbeing topics.",
+        "script_instructions": "Explain health and wellbeing evidence clearly, distinguish general education from medical advice, and avoid overstating benefits, risks or certainty.",
+        "media_instructions": "Prefer the relevant body system, healthy activity, care setting or everyday behavior.", "historical": False,
+    },
+    "sports": {
+        "label": "Sports", "description": "Sports, athletes, tactics, training and competition.",
+        "script_instructions": "Explain rules, technique, tactics and performance clearly, using accurate sporting terms without assuming expert knowledge.",
+        "media_instructions": "Prefer the correct sport, action, equipment, venue and useful training footage.", "historical": False,
+    },
+    "automotive_transport": {
+        "label": "Automotive & Transport", "description": "Cars, electric vehicles, aviation, rail and transport systems.",
+        "script_instructions": "Explain the vehicle or transport system, its components, operation and tradeoffs accurately, with practical examples and clear cause and effect.",
+        "media_instructions": "Prefer the vehicle, transport mode, component or related movement discussed.", "historical": False,
+    },
+    "food_cooking": {
+        "label": "Food & Cooking", "description": "Ingredients, cooking methods, fermentation and food culture.",
+        "script_instructions": "Explain ingredients, technique and food science in a practical order. Keep safety, timing and cultural context accurate without inventing rigid rules.",
+        "media_instructions": "Prefer the food, ingredient, preparation method, kitchen action or culinary context.", "historical": False,
+    },
+    "environment_climate": {
+        "label": "Environment & Climate", "description": "Climate, ecosystems, energy, conservation and environmental change.",
+        "script_instructions": "Explain environmental systems, evidence, impacts and solutions accurately. Separate observed facts from projections and represent uncertainty responsibly.",
+        "media_instructions": "Prefer the relevant ecosystem, energy system, environmental process or human impact.", "historical": False,
+    },
+    "culture_society": {
+        "label": "Culture & Society", "description": "Language, customs, communities, media and social behavior.",
+        "script_instructions": "Explain cultural and social patterns with context and respectful language. Avoid stereotypes, sweeping claims and treating one community as universal.",
+        "media_instructions": "Prefer authentic people, places, objects, practices and contextual community footage.", "historical": False,
+    },
+    "architecture_engineering": {
+        "label": "Architecture & Engineering", "description": "Buildings, structures, construction and civil engineering.",
+        "script_instructions": "Explain the structure, loads, materials, construction and design decisions clearly, connecting components to how the whole system performs.",
+        "media_instructions": "Prefer the structure, construction process, material, component or engineering context.", "historical": False,
+    },
 }
 
 
@@ -239,7 +253,7 @@ MANUAL_PROFILE_KEYS = tuple(
 
 def normalize_profile_key(value: str | None) -> str:
     key = (value or "auto").strip().lower()
-    return key if key in VIDEO_PROFILE_KEYS else "auto"
+    return key if key in VIDEO_PROFILE_KEYS else "general_explainer"
 
 
 def get_profile(value: str | None) -> dict:
@@ -283,7 +297,7 @@ Available profiles:
 
 Classification rules:
 - Base the decision on the main subject and the visuals required.
-- A named historical person normally uses historical_person.
+- Biographies and other unsupported or ambiguous subjects use general_explainer.
 - A historic building, monument or archaeological site normally uses historical_place.
 - A war, revolution, dynasty, civilization, incident or historical era normally uses historical_event.
 - Countries, cities and modern travel topics normally use geography_travel.
@@ -293,7 +307,7 @@ Classification rules:
 - Space topics use space_astronomy.
 - Companies, markets, finance and economics use business_economics.
 - Process explanations use educational_how_it_works.
-- Use general_explainer only when no more specific profile clearly fits.
+- Health and wellbeing topics use health_wellness.n- Sports rules, tactics and performance use sports.n- Vehicles and transport systems use automotive_transport.n- Cooking and food science use food_cooking.n- Climate, energy and conservation use environment_climate.n- Language, customs and social behavior use culture_society.n- Buildings and structural design use architecture_engineering.n- Use a specialized profile only when the title clearly fits it.n- Use general_explainer for ambiguous, niche, unknown or unsupported subjects.
 
 Return exactly one profile key and nothing else.
 """

@@ -28,6 +28,8 @@ PROVIDER_LABELS = {
     "pexels": "Pexels",
     "pixabay": "Pixabay",
     "unsplash": "Unsplash",
+    "wikimedia": "Wikimedia Commons",
+    "openverse": "Openverse",
 }
 
 NUMBER_WORD_VALUES = {
@@ -247,6 +249,8 @@ def build_stock_credits(
             continue
 
         author = _clean_inline(scene.get("author"))
+        license_name = _clean_inline(scene.get("license"))
+        license_url = _clean_inline(scene.get("license_url"))
         scene_number = scene.get("scene_number")
 
         record = records.setdefault(
@@ -254,6 +258,8 @@ def build_stock_credits(
             {
                 "provider": provider,
                 "author": author,
+                "license": license_name,
+                "license_url": license_url,
                 "scenes": [],
             },
         )
@@ -277,8 +283,13 @@ def build_stock_credits(
             else f"Scenes {scene_numbers}"
         )
 
+        license_text = ""
+        if record["license"]:
+            license_text = f" — License: {record['license']}"
+            if record["license_url"].startswith(("https://", "http://")):
+                license_text += f" ({record['license_url']})"
         lines.append(
-            f"{prefix}: {provider} — {author} — {source}"
+            f"{prefix}: {provider} — {author}{license_text} — {source}"
         )
 
     return "\n".join(lines)

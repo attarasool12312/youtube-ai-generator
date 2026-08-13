@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 import re
 
@@ -5,8 +6,11 @@ import httpx
 
 from app.api_settings import get_api_key
 from app.openverse_client import openverse_headers
+from app.media_relevance import build_media_query_candidates, score_media_candidate
 
 CLIENT = httpx.Client(timeout=60, follow_redirects=True)
+logger = logging.getLogger(__name__)
+MAX_SCORED_CANDIDATES = 30
 
 
 def orientation_ok(width, height, orientation):
@@ -87,21 +91,108 @@ def pixabay_image_orientation(orientation):
     return "all"
 
 
-def pixabay_query_candidates(query):
+def provider_query_candidates(query, topic_context=None):
+    if topic_context is not None:
+        return build_media_query_candidates(
+            query, topic_context,
+            limit=4,
+        )
+    return [query]
+
+
+def pixabay_query_candidates(query, topic_context=None):
     normalized = normalized_query(query)
     words = normalized.split()
 
     candidates = [
-        normalized,
         " ".join(words[:4]),
         " ".join(words[:2]),
     ]
+    if topic_context is not None:
+        topic_words = normalized_query(topic_context.primary_topic).split()
+        candidates = [" ".join(topic_words[:4]), " ".join(topic_words[:2])] + candidates
 
     return [
         candidate
         for index, candidate in enumerate(candidates)
-        if candidate and candidate not in candidates[:index]
+        if candidate and len(candidate) <= 60 and len(candidate.split()) <= 4
+        and candidate not in candidates[:index]
     ]
+
+
+def _provider_metadata(provider, item):
+    if provider == "pexels":
+        return item.get("alt") or item.get("url", ""), "", ()
+    if provider == "pixabay":
+        return str(item.get("tags") or ""), "", str(item.get("tags") or "").split(",")
+    if provider == "coverr":
+        return item.get("title") or item.get("slug", ""), item.get("description", ""), item.get("tags") or ()
+    return item.get("title", ""), item.get("description", ""), item.get("tags") or ()
+
+
+def rank_provider_items(items, provider, query, topic_context, used_sources, offset=0):
+    items = list(items)[:MAX_SCORED_CANDIDATES]
+    if topic_context is None:
+        return rotate_items(items, offset)
+    ranked = []
+    for item in items:
+        source = item.get("url") or item.get("pageURL") or item.get("foreign_landing_url") or ""
+        asset_id = item.get("id") or item.get("slug")
+        asset_key = f"{provider}:{asset_id}" if asset_id not in (None, "") else ""
+        if source in (used_sources or set()) or asset_key in (used_sources or set()):
+                continue
+        title, description, tags = _provider_metadata(provider, item)
+        relevance = score_media_candidate(
+            topic_context, query, title=str(title or ""),
+            description=str(description or ""), tags=tags,
+        )
+        logger.debug(
+            "Media candidate provider=%s profile=%s topic=%r query=%r score=%d accepted=%s reason=%s",
+            provider, topic_context.profile, topic_context.primary_topic, query,
+            relevance.score, relevance.accepted, relevance.reason,
+        )
+        if not relevance.accepted:
+                continue
+        item["_media_relevance"] = relevance
+        item["_media_title"] = str(title or "")
+        item["_media_tags"] = tags
+        item["_asset_key"] = asset_key
+        ranked.append(item)
+    ranked.sort(key=lambda value: value["_media_relevance"].score, reverse=True)
+    if ranked and offset:
+        top_score = ranked[0]["_media_relevance"].score
+        tied = [item for item in ranked if item["_media_relevance"].score == top_score]
+        rest = ranked[len(tied):]
+        shift = int(offset) % min(len(tied), 4)
+        ranked = tied[shift:] + tied[:shift] + rest
+    return ranked
+
+
+def _relevance_fields(item):
+    relevance = item.get("_media_relevance")
+    fields = {
+        "title": item.get("_media_title", ""),
+        "tags": item.get("_media_tags", ()),
+        "asset_id": item.get("id") or item.get("slug"),
+        "asset_key": item.get("_asset_key", ""),
+    }
+    if relevance:
+        fields.update({
+            "relevance_score": relevance.score,
+            "relevance_reason": relevance.reason,
+            "relevance_entity_match": relevance.entity_match,
+            "relevance_context_matches": relevance.context_matches,
+        })
+    return fields
+
+
+def try_save_media(url, output_path, headers=None):
+    try:
+        save_media(url, output_path, headers=headers)
+        return True
+    except Exception as error:
+        logger.debug("Media candidate download rejected url=%r reason=%s", url, error)
+        return False
 
 
 def save_media(url, output_path, headers=None):
@@ -114,7 +205,7 @@ def save_media(url, output_path, headers=None):
     return str(path)
 
 
-def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
+def pexels_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     response = CLIENT.get(
         "https://api.pexels.com/videos/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
@@ -122,13 +213,11 @@ def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
     )
     response.raise_for_status()
 
-    items = rotate_items(
-        response.json().get("videos", []), offset
-    )
+    items = rank_provider_items(response.json().get("videos", []), "pexels", query, topic_context, used_sources, offset)
     for item in items:
         source = item.get("url", "")
         if source in (used_sources or set()):
-            continue
+                continue
         files = sorted(
             item.get("video_files", []),
             key=lambda x: (x.get("width") or 0) *
@@ -147,7 +236,8 @@ def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
                 continue
             if max(width, height) > 1920:
                 continue
-            save_media(file["link"], output_path)
+            if not try_save_media(file["link"], output_path):
+                continue
             return {
                 "provider": "pexels",
                 "media_type": "video",
@@ -155,13 +245,14 @@ def pexels_video(query, output_path, orientation, used_sources=None, offset=0):
                 "author": item.get("user", {}).get("name", ""),
                 "width": width,
                 "height": height,
+                **_relevance_fields(item),
             }
 
     raise RuntimeError("No suitable Pexels video found.")
 
 
-def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
-    for candidate in pixabay_query_candidates(query):
+def pixabay_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
+    for candidate in pixabay_query_candidates(query, topic_context):
         response = CLIENT.get(
             "https://pixabay.com/api/videos/",
             params={
@@ -174,11 +265,7 @@ def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
         )
         response.raise_for_status()
 
-        items = rank_pixabay_items(
-            response.json().get("hits", []),
-            candidate,
-            offset,
-        )
+        items = rank_provider_items(response.json().get("hits", []), "pixabay", candidate, topic_context, used_sources, offset)
 
         for item in items:
             source = item.get("pageURL", "")
@@ -206,7 +293,8 @@ def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
                 if not orientation_ok(width, height, orientation):
                     continue
 
-                save_media(url, output_path)
+                if not try_save_media(url, output_path):
+                    continue
                 return {
                     "provider": "pixabay",
                     "media_type": "video",
@@ -214,13 +302,14 @@ def pixabay_video(query, output_path, orientation, used_sources=None, offset=0):
                     "author": item.get("user", ""),
                     "width": width,
                     "height": height,
+                **_relevance_fields(item),
                     "matched_query": candidate,
                 }
 
     raise RuntimeError("No suitable Pixabay video found.")
 
 
-def coverr_video(query, output_path, orientation, used_sources=None, offset=0):
+def coverr_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     response = CLIENT.get(
         "https://api.coverr.co/videos",
         headers={"Authorization":
@@ -228,38 +317,38 @@ def coverr_video(query, output_path, orientation, used_sources=None, offset=0):
         params={"query": query, "page_size": 15, "urls": "true"},
     )
     response.raise_for_status()
-    items = rotate_items(
-        response.json().get("hits", []), offset
-    )
+    items = rank_provider_items(response.json().get("hits", []), "coverr", query, topic_context, used_sources, offset)
     for item in items:
         source = (
             "https://coverr.co/videos/"
             + str(item.get("slug", ""))
         )
         if source in (used_sources or set()):
-            continue
+                continue
         if item.get("is_premium"):
-            continue
+                continue
 
         width = item.get("max_width") or 0
         height = item.get("max_height") or 0
         url = item.get("urls", {}).get("mp4_download")
 
         if not url or not orientation_ok(width, height, orientation):
-            continue
+                continue
 
-        save_media(url, output_path)
+        if not try_save_media(url, output_path):
+                continue
         return {
             "provider": "coverr", "media_type": "video",
             "source": source,
             "author": str(item.get("contributor_id") or ""),
             "width": width, "height": height,
+            **_relevance_fields(item),
         }
 
     raise RuntimeError("No suitable Coverr video found.")
 
 
-def pexels_image(query, output_path, orientation, used_sources=None, offset=0):
+def pexels_image(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     response = CLIENT.get(
         "https://api.pexels.com/v1/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
@@ -267,32 +356,32 @@ def pexels_image(query, output_path, orientation, used_sources=None, offset=0):
     )
     response.raise_for_status()
 
-    items = rotate_items(
-        response.json().get("photos", []), offset
-    )
+    items = rank_provider_items(response.json().get("photos", []), "pexels", query, topic_context, used_sources, offset)
     for item in items:
         source = item.get("url", "")
         if source in (used_sources or set()):
-            continue
+                continue
         width, height = item["width"], item["height"]
         if not orientation_ok(width, height, orientation):
-            continue
-        save_media(item["src"]["large2x"], output_path)
+                continue
+        if not try_save_media(item["src"]["large2x"], output_path):
+                continue
         return {
             "provider": "pexels", "media_type": "image",
             "source": source, "author": item["photographer"],
             "width": width, "height": height,
+            **_relevance_fields(item),
         }
 
     raise RuntimeError("No suitable Pexels image found.")
 
 
-def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
+def pixabay_image(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     minimum_width, minimum_height = pixabay_minimum_dimensions(
         orientation
     )
 
-    for candidate in pixabay_query_candidates(query):
+    for candidate in pixabay_query_candidates(query, topic_context):
         response = CLIENT.get(
             "https://pixabay.com/api/",
             params={
@@ -311,11 +400,7 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
         )
         response.raise_for_status()
 
-        items = rank_pixabay_items(
-            response.json().get("hits", []),
-            candidate,
-            offset,
-        )
+        items = rank_provider_items(response.json().get("hits", []), "pixabay", candidate, topic_context, used_sources, offset)
 
         for item in items:
             source = item.get("pageURL", "")
@@ -336,7 +421,8 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
             if not orientation_ok(width, height, orientation):
                 continue
 
-            save_media(url, output_path)
+            if not try_save_media(url, output_path):
+                continue
             return {
                 "provider": "pixabay",
                 "media_type": "image",
@@ -344,13 +430,14 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0):
                 "author": item.get("user", ""),
                 "width": width,
                 "height": height,
+                **_relevance_fields(item),
                 "matched_query": candidate,
             }
 
     raise RuntimeError("No suitable Pixabay image found.")
 
 
-def openverse_image(query, output_path, orientation, used_sources=None, offset=0):
+def openverse_image(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     response = CLIENT.get(
         "https://api.openverse.org/v1/images/",
         headers=openverse_headers(),
@@ -358,27 +445,26 @@ def openverse_image(query, output_path, orientation, used_sources=None, offset=0
     )
     response.raise_for_status()
 
-    items = rotate_items(
-        response.json().get("results", []), offset
-    )
+    items = rank_provider_items(response.json().get("results", []), "openverse", query, topic_context, used_sources, offset)
     for item in items:
         source = (
             item.get("foreign_landing_url")
             or item.get("url", "")
         )
         if source in (used_sources or set()):
-            continue
+                continue
         width = item.get("width") or 0
         height = item.get("height") or 0
         license_slug = str(item.get("license") or "").strip().lower()
         if license_slug not in {"cc0", "pdm", "by"}:
-            continue
+                continue
         if not item.get("url"):
-            continue
+                continue
         if not orientation_ok(width, height, orientation):
-            continue
+                continue
 
-        save_media(item["url"], output_path)
+        if not try_save_media(item["url"], output_path):
+                continue
         return {
             "provider": "openverse",
             "media_type": "image",
@@ -388,6 +474,7 @@ def openverse_image(query, output_path, orientation, used_sources=None, offset=0
             "license_url": item.get("license_url", ""),
             "width": width,
             "height": height,
+                **_relevance_fields(item),
         }
 
     raise RuntimeError("No suitable Openverse image found.")
