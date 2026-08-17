@@ -72,7 +72,6 @@
   <label>Media Source</label>
   <select name="media_source">
     <option value="stock_only" selected>Stock Only</option>
-    <option value="ai_only">AI Only — FLUX</option>
   </select>
 </div>
 </div>
@@ -418,3 +417,65 @@
         </script>
       </form>
     </section>
+
+
+<script>
+(function () {
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const title = params.get("title");
+  const duration = params.get("duration_minutes");
+  const profile = params.get("video_style");
+  const media = params.get("media_source");
+
+  const titleField = document.querySelector(
+    'textarea[name="titles"]'
+  );
+
+  if (title && titleField) {
+    titleField.value = title;
+  }
+
+  function selectValue(name, value) {
+    if (!value) return;
+
+    const field = document.querySelector(
+      'select[name="' + name + '"]'
+    );
+
+    if (!field) return;
+
+    const exists = Array.from(
+      field.options
+    ).some(
+      option => option.value === value
+    );
+
+    if (exists) {
+      field.value = value;
+      field.dispatchEvent(
+        new Event("change", {
+          bubbles: true
+        })
+      );
+    }
+  }
+
+  selectValue(
+    "duration_minutes",
+    duration
+  );
+
+  selectValue(
+    "video_style",
+    profile
+  );
+
+  selectValue(
+    "media_source",
+    media
+  );
+})();
+</script>

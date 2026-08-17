@@ -48,7 +48,8 @@ def run_job(job_id: int) -> None:
         duration_minutes = job.duration_minutes
         video_style = job.video_style
         orientation = job.orientation or 'landscape'
-        media_source = "ai_only" if job.media_source == "ai_only" else "stock_only"
+        # AI scene media is currently disabled.
+        media_source = "stock_only"
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         captions_enabled = bool(job.captions_enabled)

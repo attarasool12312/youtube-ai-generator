@@ -99,19 +99,178 @@ def _clean_headline(value: Any) -> str:
 
 
 def _fallback_headline(title: str) -> str:
-    cleaned = _clean_headline(title)
-    if not cleaned:
+    raw = " ".join(
+        str(title or "").replace("<", "").replace(">", "").split()
+    ).strip(" -:|")
+
+    if not raw:
         return "UNTITLED VIDEO"
-    words = cleaned.split()
-    # Keep the concrete beginning of the actual title; strip only structural
-    # question wrappers when enough topic wording remains.
-    if len(words) > 2 and words[0].casefold() in {"how", "why", "what", "who"}:
+
+    words = raw.split()
+
+    # Preserve the title wording whenever it already fits.
+    if len(words) <= 8:
+        return _clean_headline(raw)
+
+    # For longer question titles, remove only as much structural wording
+    # as needed to fit while keeping the central title wording intact.
+    if words and words[0].casefold() in {"how", "why", "what", "who"}:
         words.pop(0)
-        while len(words) > 2 and words[0].casefold() in {
-            "a", "an", "do", "does", "did", "if", "is", "are", "the", "was", "were"
-        }:
-            words.pop(0)
-    return _clean_headline(" ".join(words[:7])) or cleaned
+
+    if (
+        len(words) > 8
+        and words
+        and words[0].casefold()
+        in {"do", "does", "did", "is", "are", "was", "were"}
+    ):
+        words.pop(0)
+
+    return _clean_headline(" ".join(words[:8])) or _clean_headline(raw)
+
+
+
+def _headline_has_intent_drift(title: str, headline: str) -> bool:
+    """Catch only obvious deterministic meaning drift."""
+    title_text = " ".join(str(title or "").casefold().split())
+    headline_text = " ".join(str(headline or "").casefold().split())
+
+    if not headline_text:
+        return True
+
+    advice_starts = (
+        "how to ",
+        "ways to ",
+        "tips to ",
+        "best way to ",
+        "easy way to ",
+    )
+
+    headline_is_advice = headline_text.startswith(advice_starts)
+
+    title_is_advice = (
+        title_text.startswith("how to ")
+        or " ways to " in f" {title_text} "
+        or " tips " in f" {title_text} "
+    )
+
+    return headline_is_advice and not title_is_advice
+
+
+def _ground_thumbnail_headline(
+    title: str,
+    headline: str,
+    context: str = "",
+) -> str:
+    """
+    Globally verify that a creative thumbnail headline still promises
+    the same video. Creative paraphrases remain allowed.
+    """
+    candidate = _clean_headline(headline)
+
+    if not candidate:
+        return _fallback_headline(title)
+
+    deterministic_drift = _headline_has_intent_drift(
+        title,
+        candidate,
+    )
+
+    review_prompt = f"""
+Act as a strict YouTube thumbnail headline relevance reviewer.
+
+Decide whether the candidate thumbnail headline truthfully represents
+the SAME video as the supplied video title.
+
+Creative wording is allowed. The headline does NOT need to reuse the
+same words when a clear equivalent communicates the same idea.
+
+Examples of acceptable creativity:
+- a technical term may be replaced by a clear equivalent
+- a long title may become a shorter punchier phrase
+- wording may become more dramatic without changing the promise
+
+Reject the candidate if it:
+- changes the video's central question, intent or promise
+- turns WHY/WHAT/explanation into HOW-TO/advice when the title does not
+- drops an essential named person, place, event, object or subject so
+  the headline becomes vague or could describe a different video
+- changes an important number, year, quantity or factual claim
+- focuses on only a side topic instead of the video's central subject
+- introduces a result, solution, danger or claim not promised by the title
+- becomes generic wording that could fit many unrelated videos
+
+Do NOT reject a strong creative paraphrase merely because it uses
+different vocabulary.
+
+If the candidate is not suitable, create a corrected replacement that:
+- is normally 2-7 words
+- is concise and mobile-readable
+- keeps the exact same video intent
+- keeps essential subject identity
+- keeps important numbers/years accurate
+- remains creative rather than simply copying the whole title when a
+  shorter truthful phrase works
+
+Return JSON only:
+{{
+  "same_video": true,
+  "replacement_headline": ""
+}}
+
+Use false for same_video and provide replacement_headline when correction
+is required.
+
+VIDEO TITLE:
+{title}
+
+CANDIDATE THUMBNAIL HEADLINE:
+{candidate}
+
+VIDEO CONTEXT:
+{context}
+""".strip()
+
+    try:
+        result = call_gemini(
+            review_prompt,
+            json_mode=True,
+        )
+        data = _extract_json_object(result.text)
+
+        verdict = data.get("same_video")
+        rejected = (
+            verdict is False
+            or str(verdict).strip().casefold() == "false"
+        )
+
+        if rejected or deterministic_drift:
+            replacement = _clean_headline(
+                data.get("replacement_headline")
+            )
+
+            if (
+                replacement
+                and not _headline_has_intent_drift(
+                    title,
+                    replacement,
+                )
+            ):
+                _validate_numeric_claims(
+                    f"{title}\n{context}",
+                    replacement,
+                )
+                return replacement
+
+            return _fallback_headline(title)
+
+        return candidate
+
+    except Exception:
+        # Never make thumbnail generation fragile because review failed.
+        if deterministic_drift:
+            return _fallback_headline(title)
+        return candidate
+
 
 
 def _external_thumbnail_prompt(title: str, headline: str, visual_prompt: str) -> str:
@@ -158,6 +317,15 @@ HEADLINE:
 - It may be different from the video title if a shorter phrase
   communicates the same truthful idea more strongly.
 - Never use misleading clickbait.
+- Preserve the SAME central idea, question or explanation as the video title.
+- Do not turn a WHY/WHAT explanatory video into a HOW-TO, advice video,
+  solution or tutorial unless the actual title/script genuinely promises that.
+- Do not choose a merely related subtopic while losing the video's main idea.
+- If the title names a specific place, event, object or subject, keep that
+  identity obvious unless the shorter wording is still completely unambiguous.
+- Avoid vague poetic wording that only makes sense after reading the title.
+- Before returning, silently compare the headline with the original title.
+  If a viewer could reasonably expect a different video, rewrite the headline.
 - Preserve important numbers, years, locations and factual claims.
 - Copy important numbers exactly from the supplied source.
 
@@ -260,6 +428,12 @@ Final script:
         str(data.get("visual_prompt") or "").split()
     )
 
+    headline = _ground_thumbnail_headline(
+        title,
+        headline,
+        _script_excerpt(script),
+    )
+
     _validate_numeric_claims(
         f"{title}\n{script}",
         headline,
@@ -285,7 +459,17 @@ Final script:
 def _local_thumbnail_concept(title: str, script: str) -> tuple[str, str, str]:
     """Return a text-free background contract with deterministic fallback."""
     try:
-        return _generate_thumbnail_concept(title=title, script=script)
+        headline, visual_prompt, provider = _generate_thumbnail_concept(
+            title=title,
+            script=script,
+        )
+
+        if _headline_has_intent_drift(title, headline):
+            headline = _fallback_headline(title)
+            provider = f"{provider}+headline-grounding-fallback"
+
+        return headline, visual_prompt, provider
+
     except Exception as error:
         headline = _fallback_headline(title)
         visual_prompt = (
@@ -774,7 +958,13 @@ STRICT RULES:
   or recognizable idea from the title/summary whenever appropriate.
 - A viewer who sees ONLY the thumbnail phrase should still understand
   the general topic.
-- Complement the title instead of becoming unrelated to it.
+- Complement the title without changing its central meaning.
+- Do not turn an explanatory WHY/WHAT topic into HOW-TO advice unless
+  the source title genuinely promises advice or instructions.
+- Do not replace the main topic with a merely related detail.
+- Avoid vague phrases that do not identify the video's real subject.
+- Silently compare the phrase with the source title before returning it;
+  if it could promise a different video, rewrite it.
 - Preserve important years, numbers, names and factual claims.
 - Benefit-driven wording is excellent when the video promises a result.
 - Curiosity is allowed only when the topic remains clear.
@@ -820,6 +1010,12 @@ VIDEO SUMMARY:
         raise ValueError(
             "Gemini returned an empty thumbnail headline."
         )
+
+    headline = _ground_thumbnail_headline(
+        title,
+        headline,
+        script_summary,
+    )
 
     creative_prompt = f"""
 Act as a world-class YouTube thumbnail designer and AI image-prompt

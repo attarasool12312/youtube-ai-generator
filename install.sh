@@ -693,6 +693,7 @@ import app.media_selector
 import app.provider_quota
 import app.youtube_metadata_generator
 import app.youtube_thumbnail_generator
+import app.title_research
 import app.voice_registry
 
 print("APPLICATION_IMPORTS_OK")

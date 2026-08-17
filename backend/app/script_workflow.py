@@ -158,8 +158,96 @@ def emit_progress(callback, status, progress):
         callback(status, progress)
 
 
+
+def conservative_script_cleanup(text):
+    """
+    Repair only obvious narration artifacts.
+
+    This deliberately does NOT reject a script for style preferences.
+    It removes clear generation leakage while preserving normal prose.
+    """
+    cleaned = str(text or "").strip()
+
+    # Remove leaked Markdown/code formatting but preserve its spoken text.
+    cleaned = re.sub(
+        r"```(?:[A-Za-z0-9_-]+)?",
+        " ",
+        cleaned,
+    )
+    cleaned = cleaned.replace("**", "")
+    cleaned = cleaned.replace("__", "")
+    cleaned = cleaned.replace("`", "")
+
+    # Keep heading/list content, but remove non-spoken formatting markers.
+    cleaned = re.sub(
+        r"(?im)^\s{0,3}#{1,6}\s*",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?im)^\s*(?:[-*•]+\s+|\d{1,2}[.)]\s+)",
+        "",
+        cleaned,
+    )
+
+    # Remove obvious leaked generation labels such as:
+    # "Additional Middle Section: The Role of Water in Baking"
+    cleaned = re.sub(
+        r"(?im)^\s*Additional\s+(?:Middle\s+)?Section"
+        r"(?:\s*:\s*[^\n]{0,120})?\s*$",
+        " ",
+        cleaned,
+    )
+
+    # Remove isolated CJK generation contamination from English narration.
+    # Do not reject the script and do not strip ordinary accented Latin names.
+    cleaned = re.sub(
+        r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF"
+        r"\u3040-\u30FF\uAC00-\uD7AF]+",
+        " ",
+        cleaned,
+    )
+
+    # Repair obvious broken transition leakage, e.g. "Yet. While..."
+    cleaned = re.sub(
+        r"\b(Yet|But|And|So)\.\s+"
+        r"(While|Although|Because|When|If)\b",
+        lambda match: f"{match.group(1)}, {match.group(2).lower()}",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove only EXACT consecutive repeated sentences.
+    # Similar/repeated ideas are left to the existing validator.
+    for sentence in narration_sentences(cleaned):
+        if word_count(sentence) < 3:
+            continue
+
+        duplicate_pattern = (
+            re.escape(sentence)
+            + r"\s+"
+            + re.escape(sentence)
+        )
+
+        cleaned = re.sub(
+            duplicate_pattern,
+            sentence,
+            cleaned,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]*\n[ \t]*", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"\s+([,.;!?])", r"\1", cleaned)
+
+    return cleaned.strip()
+
+
 def clean_script(text):
     text = text.strip()
+    text = conservative_script_cleanup(text)
     text = remove_sequential_word_markers(text)
 
     if text.startswith("```"):
@@ -181,6 +269,7 @@ def clean_script(text):
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = remove_sequential_word_markers(text)
     text = deduplicate_cta_intents(text)
+    text = conservative_script_cleanup(text)
 
     return text.strip()
 
@@ -841,7 +930,7 @@ def ensure_ending_requirements(script, duration, style="general_explainer"):
             duration,
         )
 
-    return candidate
+    return clean_script(candidate)
 
 def trim_script_to_max_words(script, maximum_words):
     """Deterministically remove excess middle sentences while

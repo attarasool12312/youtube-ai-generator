@@ -181,6 +181,89 @@ def _normalize_tags(value: Any) -> list[str]:
     return tags
 
 
+def _description_hashtags(
+    tags: list[str],
+    keywords: list[str] | None = None,
+    minimum: int = 10,
+    maximum: int = 15,
+) -> list[str]:
+    candidates = [
+        *(tags or []),
+        *((keywords or [])),
+    ]
+
+    hashtags: list[str] = []
+    seen: set[str] = set()
+
+    for candidate in candidates:
+        words = re.findall(
+            r"[A-Za-z0-9]+",
+            str(candidate or ""),
+        )
+
+        if not words:
+            continue
+
+        hashtag = "#" + "".join(
+            word[:1].upper() + word[1:]
+            for word in words
+        )
+
+        if len(hashtag) < 3 or len(hashtag) > 60:
+            continue
+
+        key = hashtag.casefold()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        hashtags.append(hashtag)
+
+        if len(hashtags) >= maximum:
+            break
+
+    return hashtags[:maximum]
+
+
+def _append_description_hashtags(
+    description: str,
+    tags: list[str],
+    keywords: list[str] | None = None,
+) -> str:
+    hashtags = _description_hashtags(
+        tags,
+        keywords,
+    )
+
+    if not hashtags:
+        return description.strip()
+
+    # Remove a trailing AI-generated hashtag block so the
+    # final system-generated block stays clean and predictable.
+    lines = description.strip().splitlines()
+
+    while lines and (
+        not lines[-1].strip()
+        or (
+            lines[-1].strip().startswith("#")
+            and all(
+                part.startswith("#")
+                for part in lines[-1].split()
+            )
+        )
+    ):
+        lines.pop()
+
+    clean_description = "\n".join(lines).strip()
+
+    return (
+        clean_description
+        + "\n\n"
+        + " ".join(hashtags)
+    )
+
+
 def _script_excerpt(script: str) -> str:
     script = script.strip()
 
@@ -579,6 +662,12 @@ def _fallback_metadata(
     if not tags:
         tags = [original_title]
 
+    description = _append_description_hashtags(
+        description,
+        tags,
+        _collect_keywords(scenes),
+    )
+
     description = merge_description_and_credits(
         description,
         compact_stock_credits,
@@ -660,16 +749,22 @@ Rules:
 - Avoid misleading clickbait, emojis, ALL CAPS, and excessive punctuation.
 - Description: 300-450 useful words, while remaining under the
   platform limit after compact media credits are added.
-- The first two sentences must clearly explain the video and naturally
-  include its primary search topic.
+- Make the description strongly SEO-friendly while still sounding natural.
+- The first two sentences must clearly explain the exact video topic and
+  naturally include the strongest primary search phrase.
+- Place the most important searchable topic wording near the beginning.
 - Include what viewers will learn, important subtopics covered,
   relevant context, and a natural reason to watch.
-- Use related search phrases naturally, without keyword stuffing.
-- Use readable paragraphs and relevant keyword variations naturally.
+- Naturally include closely related keyword variations and search phrases.
+- Do not keyword-stuff or repeat the same phrase unnaturally.
+- Do not add hashtags yourself; the system adds a verified hashtag block.
 - Do not add media credits; the system adds verified credits separately.
 - Do not add fake timestamps or chapter markers.
-- Tags: JSON array containing 8-18 relevant search phrases.
-- Avoid duplicates, unrelated trending terms, and keyword stuffing.
+- Tags: JSON array containing 12-18 highly relevant YouTube search phrases.
+- Include useful long-tail phrases as well as core topic terms.
+- Prefer terms closely connected to the actual video subject and script.
+- Do not add unrelated popular/trending terms merely for traffic.
+- Never claim a keyword is trending unless that is supported by supplied data.
 - category_id must be one of the allowed category IDs below.
 - language must be an ISO 639-1 code, normally "en".
 
@@ -714,9 +809,12 @@ Return one valid JSON object only:
 Rules:
 - Preserve every factual claim and every number exactly.
 - Do not invent facts, statistics, links, timestamps, or sources.
-- Keep the primary topic naturally in the first two sentences.
+- Keep the primary search topic naturally in the first two sentences.
+- Make the opening lines useful for YouTube search discovery.
 - Explain what viewers will learn and the important subtopics.
-- Use natural related search phrases without keyword stuffing.
+- Use natural related search phrases and semantic keyword variations.
+- Do not keyword-stuff.
+- Do not add hashtags; the system adds them separately.
 - Do not add media credits.
 - Do not use emojis or misleading clickbait.
 
@@ -774,6 +872,12 @@ Current description:
             generated_tags = _normalize_tags(
                 [title, *keywords]
             )
+
+        generated_description = _append_description_hashtags(
+            generated_description,
+            generated_tags,
+            keywords,
+        )
 
         final_description = merge_description_and_credits(
             generated_description,

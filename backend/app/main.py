@@ -33,6 +33,7 @@ from app.youtube_categories import YOUTUBE_CATEGORY_OPTIONS
 from app.youtube_thumbnail_generator import (
     generate_youtube_thumbnail_prompt,
 )
+from app.title_research import research_titles
 from app.youtube_publish_drafts import save_youtube_publish_draft
 from app.youtube_publish_files import (
     YouTubePublishFileError,
@@ -397,6 +398,65 @@ def home(request: Request, db: Session = Depends(get_db)):
     )
 
 
+
+@app.get("/title-research")
+def title_research_page(
+    request: Request,
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="title_research.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "title_research",
+            "project_info": get_project_info(),
+            "research": None,
+            "error": None,
+        },
+    )
+
+
+@app.post("/title-research")
+def run_title_research(
+    request: Request,
+    prompt: str = Form(""),
+    niche: str = Form(""),
+    competitor: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    research = None
+    error = None
+
+    try:
+        research = research_titles(
+            db=db,
+            prompt=prompt,
+            niche=niche,
+            competitor=competitor,
+        )
+    except Exception as exc:
+        logger.exception("Title research failed")
+        error = str(exc)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="title_research.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "title_research",
+            "project_info": get_project_info(),
+            "research": research,
+            "error": error,
+        },
+    )
+
+
 @app.get("/videos/create")
 def create_video_page(
     request: Request,
@@ -499,8 +559,8 @@ def add_jobs(
     captions_enabled_value = captions_enabled == "enabled"
     caption_background_value = caption_background == "on"
 
-    if media_source not in {"stock_only", "ai_only"}:
-        media_source = "stock_only"
+    # AI scene media is currently disabled.
+    media_source = "stock_only"
 
     if caption_font_size not in {36, 48, 60}:
         caption_font_size = 48
@@ -876,6 +936,63 @@ def delete_job(
 
     return RedirectResponse(
         "/videos?success=Job and all related files deleted.",
+        status_code=303,
+    )
+
+
+
+@app.post("/jobs/bulk-delete")
+def bulk_delete_jobs(
+    request: Request,
+    job_ids: list[int] = Form(default=[]),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    selected_ids = list(dict.fromkeys(job_ids))
+
+    if not selected_ids:
+        return RedirectResponse(
+            "/videos?success=No videos selected.",
+            status_code=303,
+        )
+
+    jobs = list(
+        db.scalars(
+            select(VideoJob).where(
+                VideoJob.id.in_(selected_ids)
+            )
+        ).all()
+    )
+
+    if not jobs:
+        return RedirectResponse(
+            "/videos?success=No matching videos found.",
+            status_code=303,
+        )
+
+    deleted_count = 0
+
+    for job in jobs:
+        cleanup_job_files(
+            worker_pid=job.worker_pid,
+            output_directory=job.output_directory,
+        )
+
+        db.execute(
+            delete(YouTubePublishJob).where(
+                YouTubePublishJob.video_job_id == job.id
+            )
+        )
+
+        db.delete(job)
+        deleted_count += 1
+
+    db.commit()
+
+    return RedirectResponse(
+        f"/videos?success={deleted_count} video(s) and related files deleted.",
         status_code=303,
     )
 

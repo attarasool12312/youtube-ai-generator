@@ -1,8 +1,84 @@
+
+<style>
+#video-queue-panel .queue-select-checkbox {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    max-width: 18px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    cursor: pointer;
+    vertical-align: middle;
+    accent-color: #6557e8;
+}
+
+#video-queue-panel thead th:first-child,
+#video-queue-panel .queue-job-row > td:first-child {
+    width: 48px;
+    min-width: 48px;
+    text-align: center;
+}
+
+#video-queue-panel .queue-empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 150px;
+    width: 100%;
+    padding: 30px 20px;
+    text-align: center;
+    color: #7b849a;
+}
+
+#video-queue-panel table {
+    width: 100%;
+}
+</style>
+
 <section class="crm-card" id="video-queue-panel">
-      <h2>Video Queue</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
+        <h2 style="margin:0;">Video Queue</h2>
+
+        {% if jobs %}
+        <form
+          id="bulk-delete-form"
+          method="post"
+          action="/jobs/bulk-delete"
+          onsubmit="
+            const count = document.querySelectorAll('.bulk-job-checkbox:checked').length;
+            if (!count) {
+              alert('Select at least one video first.');
+              return false;
+            }
+            return confirm(
+              'Permanently delete ' + count +
+              ' selected video(s) and all related generated files?'
+            );
+          "
+        >
+          <button type="submit" class="danger-button">
+            Delete Selected
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
       <table>
         <thead>
           <tr>
+            <th style="width:42px;text-align:center;">
+              <input
+                type="checkbox"
+                class="queue-select-checkbox"
+                aria-label="Select all videos"
+                title="Select all"
+                onclick="
+                  document.querySelectorAll('.bulk-job-checkbox').forEach(
+                    checkbox => checkbox.checked = this.checked
+                  );
+                "
+              >
+            </th>
             <th>Position</th>
             <th>Title</th>
             <th>Status</th>
@@ -19,6 +95,17 @@
             data-job-status="{{ job.pipeline_status | default(job.status) }}"
             data-job-progress="{{ job.pipeline_progress | default(job.progress) }}"
           >
+            <td style="text-align:center;">
+              <input
+                class="bulk-job-checkbox queue-select-checkbox"
+                type="checkbox"
+                name="job_ids"
+                value="{{ job.id }}"
+                form="bulk-delete-form"
+                aria-label="Select {{ job.title }}"
+              >
+            </td>
+
             <td>{{ job.queue_position }}</td>
 
             <td>
@@ -148,11 +235,13 @@
               </div>
             </td>
           </tr>
-          {% else %}
-          <tr>
-            <td colspan="5">No videos in queue yet.</td>
-          </tr>
           {% endfor %}
         </tbody>
       </table>
+
+      {% if not jobs %}
+      <div class="queue-empty-state">
+        No videos in queue yet.
+      </div>
+      {% endif %}
     </section>

@@ -1,0 +1,305 @@
+{% extends "base_app.html" %}
+
+{% block title %}Title Research · {{ app_name }}{% endblock %}
+{% block page_heading %}Title Research{% endblock %}
+{% block page_subheading %}Research real YouTube opportunities and turn them into ranked video ideas.{% endblock %}
+
+{% block content %}
+
+<style>
+.title-research-form,
+.research-summary,
+.title-result {
+  background:#fff;
+  border:1px solid #e6e8ee;
+  border-radius:18px;
+  padding:22px;
+  margin-bottom:18px;
+}
+.research-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.research-full { grid-column:1/-1; }
+.title-research-form label {
+  display:block;
+  font-weight:700;
+  margin-bottom:7px;
+}
+.title-research-form input,
+.title-research-form textarea {
+  width:100%;
+  border:1px solid #d9dde7;
+  border-radius:10px;
+  padding:12px 14px;
+  font:inherit;
+}
+.title-research-form textarea { min-height:110px; resize:vertical; }
+.research-button,
+.create-title-button {
+  border:0;
+  border-radius:10px;
+  padding:12px 18px;
+  font-weight:700;
+  cursor:pointer;
+}
+.research-button {
+  background:#111827;
+  color:#fff;
+}
+.create-title-button {
+  background:#111827;
+  color:#fff;
+}
+.research-actions {
+  margin-top:16px;
+  display:flex;
+  justify-content:flex-end;
+}
+.query-chip {
+  display:inline-block;
+  padding:7px 10px;
+  margin:4px 5px 4px 0;
+  background:#f2f4f8;
+  border-radius:999px;
+  font-size:13px;
+}
+.title-result-top {
+  display:flex;
+  gap:18px;
+  align-items:flex-start;
+}
+.score-box {
+  min-width:82px;
+  text-align:center;
+  padding:12px 8px;
+  border-radius:14px;
+  background:#f4f6fa;
+}
+.score-box strong {
+  display:block;
+  font-size:28px;
+}
+.score-box .potential-status {
+  display:block;
+  margin-top:6px;
+  font-size:10px;
+  font-weight:700;
+  color:#6b7280;
+  white-space:nowrap;
+}
+.title-result-main { flex:1; }
+.title-result h3 {
+  margin:0 0 8px;
+  font-size:20px;
+}
+.result-meta {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:10px 0;
+}
+.result-meta span {
+  font-size:12px;
+  background:#f2f4f8;
+  padding:6px 9px;
+  border-radius:999px;
+}
+.signal-grid {
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:8px;
+  margin:14px 0;
+}
+.signal-grid div {
+  padding:9px;
+  text-align:center;
+  background:#fafafa;
+  border:1px solid #eee;
+  border-radius:9px;
+  font-size:12px;
+}
+.signal-grid strong {
+  display:block;
+  font-size:16px;
+}
+.signal-grid small {
+  display:block;
+  margin-top:4px;
+  color:#6b7280;
+  font-size:10px;
+}
+.error-box {
+  background:#fff1f1;
+  border:1px solid #ffcaca;
+  padding:14px;
+  border-radius:10px;
+  margin-bottom:16px;
+}
+@media(max-width:800px){
+  .research-grid { grid-template-columns:1fr; }
+  .research-full { grid-column:auto; }
+  .title-result-top { flex-direction:column; }
+  .signal-grid { grid-template-columns:repeat(2,1fr); }
+}
+</style>
+
+<form class="title-research-form" method="post" action="/title-research">
+  <div class="research-grid">
+
+    <div class="research-full">
+      <label for="prompt">Research Prompt</label>
+      <textarea
+        id="prompt"
+        name="prompt"
+        placeholder="Example: Find documentary-style titles about strange things happening in space that have strong curiosity and evergreen potential."
+      >{{ research.prompt if research else '' }}</textarea>
+    </div>
+
+    <div>
+      <label for="niche">Niche / Topic</label>
+      <input
+        id="niche"
+        name="niche"
+        value="{{ research.niche if research else '' }}"
+        placeholder="Space, History, Finance..."
+      >
+    </div>
+
+    <div>
+      <label for="competitor">Competitor Channel</label>
+      <input
+        id="competitor"
+        name="competitor"
+        value=""
+        placeholder="Channel URL, @handle, channel ID or name"
+      >
+    </div>
+
+  </div>
+
+  <div class="research-actions">
+    <button class="research-button" type="submit">
+      Research Titles
+    </button>
+  </div>
+</form>
+
+{% if error %}
+<div class="error-box">{{ error }}</div>
+{% endif %}
+
+{% if research %}
+
+<div class="research-summary">
+  <strong>Research Queries</strong>
+  <div>
+    {% for query in research.queries %}
+      <span class="query-chip">{{ query }}</span>
+    {% endfor %}
+  </div>
+
+  {% if research.competitor %}
+    <p>
+      Competitor analyzed:
+      <strong>{{ research.competitor.channel_title }}</strong>
+    </p>
+  {% endif %}
+</div>
+
+{% for item in research.results %}
+
+<div class="title-result">
+
+  <div class="title-result-top">
+
+    <div class="score-box">
+      <strong>{{ item.opportunity_score }}</strong>
+      <span>Video Potential</span>
+      <small class="potential-status">
+        {{ item.potential_label }}
+      </small>
+    </div>
+
+    <div class="title-result-main">
+
+      <h3>{{ item.title }}</h3>
+
+      <div class="result-meta">
+        <span>{{ item.intent or 'General intent' }}</span>
+        <span>{{ item.recommended_profile | replace('_',' ') | title }}</span>
+        <span>{{ item.recommended_duration }} min</span>
+        <span>Source: {{ item.source_query }}</span>
+      </div>
+
+      {% if item.reason %}
+        <p>{{ item.reason }}</p>
+      {% endif %}
+
+      <div class="signal-grid">
+        <div>
+          <strong>{{ item.signals.audience_interest }}</strong>
+          Audience Interest
+          <small>{{ item.signal_labels.audience_interest }}</small>
+        </div>
+        <div>
+          <strong>{{ item.signals.viewer_response }}</strong>
+          Viewer Response
+          <small>{{ item.signal_labels.viewer_response }}</small>
+        </div>
+        <div>
+          <strong>{{ item.signals.trend_activity }}</strong>
+          Trend Activity
+          <small>{{ item.signal_labels.trend_activity }}</small>
+        </div>
+        <div>
+          <strong>{{ item.signals.ranking_chance }}</strong>
+          Ranking Chance
+          <small>
+            Higher is better · {{ item.signal_labels.ranking_chance }}
+          </small>
+        </div>
+        <div>
+          <strong>{{ item.signals.originality }}</strong>
+          Title Originality
+          <small>{{ item.signal_labels.originality }}</small>
+        </div>
+      </div>
+
+      <form method="get" action="/videos/create">
+        <input
+          type="hidden"
+          name="title"
+          value="{{ item.title }}"
+        >
+        <input
+          type="hidden"
+          name="duration_minutes"
+          value="{{ item.recommended_duration }}"
+        >
+        <input
+          type="hidden"
+          name="video_style"
+          value="{{ item.recommended_profile }}"
+        >
+        <input
+          type="hidden"
+          name="media_source"
+          value="stock_only"
+        >
+
+        <button class="create-title-button" type="submit">
+          Review & Create Video
+        </button>
+      </form>
+
+    </div>
+  </div>
+</div>
+
+{% endfor %}
+
+{% endif %}
+
+{% endblock %}

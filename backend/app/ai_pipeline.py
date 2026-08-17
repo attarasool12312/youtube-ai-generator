@@ -267,8 +267,8 @@ def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
         "Create media metadata for the supplied scenes.\n"
         "Do not rewrite narration.\n"
         "Return JSON with key scenes.\n"
-        "Each scene needs scene_number, search_query, stock_keywords, "
-        "image_prompt, video_prompt and media_type.\n"
+        "Each scene needs scene_number, search_query, stock_keywords "
+        "and media_type.\n"
         "search_query must be one concise search phrase describing the "
         "most visually important real subject in that scene.\n"
         "When a scene involves a named person, place, monument, event, "
@@ -313,8 +313,6 @@ def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
             **scene,
             "search_query": validation.final_query,
             "stock_keywords": item.get("stock_keywords", []),
-            "image_prompt": item.get("image_prompt", ""),
-            "video_prompt": item.get("video_prompt", ""),
             "media_type": item.get("media_type", "stock_video"),
         })
 

@@ -23,7 +23,8 @@ LICENSED_HISTORICAL_PROVIDERS = (
 
 
 def normalize_media_source(value):
-    return "ai_only" if value == "ai_only" else "stock_only"
+    # AI scene media is preserved for later but currently disabled.
+    return "stock_only"
 
 
 def provider_order(cycle, scene_number=None):

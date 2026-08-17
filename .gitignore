@@ -20,3 +20,11 @@ backend/data/
 logs/*.pid
 backend/app/static/voice-previews/*.mp3
 backend/app/static/youtube-channels/
+
+# Local development backups / runtime artifacts
+*.bak.*
+*.before-*
+backups/
+logs/
+backend/backend/
+scripts/__pycache__/

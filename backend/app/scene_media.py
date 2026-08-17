@@ -132,7 +132,7 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
                 result = select_media(
                     broad_query, media_dir, number, requested, orientation,
                     used_sources, broad_query, "stock_only",
-                    prefer_wikimedia=False, topic_context=None, history_sources=history_sources,
+                    prefer_wikimedia=False, topic_context=topic_context, history_sources=history_sources,
                 )
                 result["emergency"] = True
                 return result

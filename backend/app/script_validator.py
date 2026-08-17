@@ -151,13 +151,24 @@ def classify_cta_intents(sentence):
     text = " ".join(str(sentence or "").split()).casefold()
     intents = set()
     request_cue = bool(_CTA_REQUEST_CUES.search(text))
-    if re.search(r"\b(?:give (?:it|this|the video) a like|hit the like button|like (?:it|this|the video))\b", text) or (
-        request_cue and re.search(r"\blike\b", text)
+    if (
+        re.search(
+            r"\b(?:give (?:it|this|the video) a like|hit the like button|like (?:it|this|the video))\b",
+            text,
+        )
+        or re.search(r"^(?:please\s+)?like\s+and\s+subscribe\b", text)
+        or (request_cue and re.search(r"\blike\b", text))
     ):
         intents.add("LIKE")
-    if re.search(r"^(?:subscribe|follow)\b", text) or re.search(
-        r"\b(?:subscribe for|follow (?:for|this|the|our))\b", text
-    ) or (request_cue and re.search(r"\b(?:subscribe|follow)\b", text)):
+    if (
+        re.search(r"^(?:subscribe|follow)\b", text)
+        or re.search(
+            r"\b(?:subscribe for|follow (?:for|this|the|our))\b",
+            text,
+        )
+        or re.search(r"^(?:please\s+)?like\s+and\s+subscribe\b", text)
+        or (request_cue and re.search(r"\b(?:subscribe|follow)\b", text))
+    ):
         intents.add("SUBSCRIBE")
     if re.search(
         r"\b(?:comment below|in the comments|leave (?:a )?comment|share your (?:answer|thoughts)|"
