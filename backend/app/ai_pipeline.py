@@ -15,7 +15,10 @@ from app.media_relevance import (
     validate_scene_query,
 )
 from app.script_validator import validate_script
-from app.script_workflow import create_validated_script
+from app.script_workflow import (
+    conservative_script_cleanup,
+    create_validated_script,
+)
 from app.video_profiles import (
     MANUAL_PROFILE_KEYS,
     normalize_profile_key,
@@ -394,6 +397,72 @@ def assign_scene_durations(scenes, total_seconds):
         scene["duration_seconds"] = duration
 
     return scenes
+
+
+def generate_video_package_from_script(
+    title,
+    script,
+    duration_minutes,
+    video_style,
+    progress_callback=None,
+):
+    """Build the normal video package from a user-supplied script.
+
+    This deliberately skips AI script generation.
+    """
+    detected_style = detect_video_style(title, video_style)
+
+    cleaned_script = conservative_script_cleanup(script or "").strip()
+
+    if not cleaned_script:
+        raise ValueError("The supplied script is empty.")
+
+    if progress_callback:
+        progress_callback("script_validation", 22)
+
+    validation = validate_script(
+        cleaned_script,
+        duration_minutes,
+    )
+
+    if progress_callback:
+        progress_callback("scene_splitting", 30)
+
+    scenes = split_script_into_scenes(
+        cleaned_script,
+        duration_minutes,
+    )
+
+    if progress_callback:
+        progress_callback("scene_enrichment", 32)
+
+    scenes = enrich_scene_batch(
+        title,
+        detected_style,
+        scenes,
+    )
+
+    scenes = assign_scene_durations(
+        scenes,
+        duration_minutes * 60,
+    )
+
+    if progress_callback:
+        progress_callback("scene_planning", 35)
+
+    return {
+        "title": title,
+        "requested_style": video_style,
+        "detected_style": detected_style,
+        "duration_minutes": duration_minutes,
+        "script": cleaned_script,
+        "word_count": count_words(cleaned_script),
+        "script_initial_provider": "user_supplied",
+        "script_repair_providers": [],
+        "script_validation": validation,
+        "sections": [],
+        "scenes": scenes,
+    }
 
 
 def generate_video_package(title, duration_minutes, video_style, progress_callback=None):

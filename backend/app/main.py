@@ -490,6 +490,40 @@ def create_video_page(
     )
 
 
+@app.get("/script-to-video")
+def script_to_video_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    jobs = load_dashboard_jobs(db)
+
+    youtube_connections = db.scalars(
+        select(YouTubeConnection)
+        .where(
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+        .order_by(YouTubeConnection.channel_title)
+    ).all()
+
+    context = dashboard_context(
+        request,
+        jobs,
+        "script_to_video",
+    )
+    context["youtube_connections"] = youtube_connections
+    context["script_mode"] = True
+
+    return templates.TemplateResponse(
+        request=request,
+        name="script_to_video.html",
+        context=context,
+    )
+
+
 @app.get("/videos")
 def videos_page(
     request: Request,
@@ -718,6 +752,250 @@ def add_jobs(
     start_queue_worker()
     return RedirectResponse(
         f"/videos?success={len(title_list)} title(s) added to queue.",
+        status_code=303,
+    )
+
+
+@app.post("/jobs/script")
+def add_script_job(
+    request: Request,
+    title: str = Form(...),
+    source_script: str = Form(...),
+    video_style: str = Form("auto"),
+    orientation: str = Form("landscape"),
+    media_source: str = Form("stock_only"),
+    narrator_voice: str = Form(DEFAULT_NARRATOR_VOICE),
+    voice_pool: list[str] = Form(default=[]),
+    voice_speed: float = Form(1.0),
+    captions_enabled: str = Form("enabled"),
+    caption_font_size: int = Form(36),
+    caption_position: str = Form("bottom"),
+    caption_background: str = Form("on"),
+    caption_outline: int = Form(2),
+    auto_publish_connection_id: int = Form(0),
+    auto_publish_privacy: str = Form("private"),
+    auto_publish_scheduled_at_local: str = Form(""),
+    auto_publish_scheduled_at_utc: str = Form(""),
+    auto_publish_made_for_kids: str = Form("no"),
+    auto_publish_notify_subscribers: str = Form(""),
+    auto_publish_metadata: str = Form("on"),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    title = title.strip()
+    source_script = source_script.strip()
+
+    if not title:
+        return RedirectResponse(
+            "/script-to-video?success=Video title is required.",
+            status_code=303,
+        )
+
+    if len(title) > 500:
+        return RedirectResponse(
+            "/script-to-video?success=Video title is too long.",
+            status_code=303,
+        )
+
+    word_count = len(source_script.split())
+
+    if word_count == 0:
+        return RedirectResponse(
+            "/script-to-video?success=Paste a script first.",
+            status_code=303,
+        )
+
+    # Approximate narration duration at the project's 145 WPM baseline.
+    # Round to the nearest whole minute because VideoJob currently stores
+    # duration as an integer.
+    duration_minutes = max(
+        1,
+        (word_count + 72) // 145,
+    )
+
+    video_style = normalize_profile_key(video_style)
+
+    try:
+        selected_voices = validated_voice_pool(
+            [narrator_voice, *voice_pool]
+        )
+        narrator_voice = selected_voices[0]
+        voice_speed = validate_voice_speed(voice_speed)
+    except ValueError:
+        return RedirectResponse(
+            "/script-to-video?success=Invalid narrator voice or speed.",
+            status_code=303,
+        )
+
+    captions_enabled_value = captions_enabled == "enabled"
+    caption_background_value = caption_background == "on"
+
+    # AI scene media is intentionally disabled.
+    media_source = "stock_only"
+
+    if caption_font_size not in {36, 48, 60}:
+        caption_font_size = 48
+
+    if caption_position not in {"top", "middle", "bottom"}:
+        caption_position = "bottom"
+
+    if caption_outline not in {0, 1, 2, 4}:
+        caption_outline = 2
+
+    auto_publish_enabled = auto_publish_connection_id > 0
+    selected_youtube_connection = None
+
+    if auto_publish_enabled:
+        selected_youtube_connection = db.get(
+            YouTubeConnection,
+            auto_publish_connection_id,
+        )
+
+        if (
+            selected_youtube_connection is None
+            or not selected_youtube_connection.is_active
+            or not selected_youtube_connection.encrypted_refresh_token
+        ):
+            return RedirectResponse(
+                "/script-to-video?success=Selected YouTube channel is unavailable.",
+                status_code=303,
+            )
+
+    publish_mode = auto_publish_privacy.strip().lower()
+
+    if publish_mode not in {
+        "private",
+        "unlisted",
+        "public",
+        "scheduled",
+    }:
+        publish_mode = "private"
+
+    auto_publish_scheduled_at = None
+
+    if auto_publish_enabled and publish_mode == "scheduled":
+        if not auto_publish_scheduled_at_utc.strip():
+            return RedirectResponse(
+                "/script-to-video?success=Choose a future date and time for scheduled publishing.",
+                status_code=303,
+            )
+
+        try:
+            parsed_schedule = datetime.fromisoformat(
+                auto_publish_scheduled_at_utc.strip().replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            if parsed_schedule.tzinfo is None:
+                parsed_schedule = parsed_schedule.replace(
+                    tzinfo=timezone.utc
+                )
+
+            parsed_schedule = parsed_schedule.astimezone(
+                timezone.utc
+            )
+
+            if parsed_schedule <= datetime.now(timezone.utc):
+                return RedirectResponse(
+                    "/script-to-video?success=Scheduled publishing time must be in the future.",
+                    status_code=303,
+                )
+
+            auto_publish_scheduled_at = (
+                parsed_schedule.replace(tzinfo=None)
+            )
+
+        except ValueError:
+            return RedirectResponse(
+                "/script-to-video?success=Invalid scheduled publishing date and time.",
+                status_code=303,
+            )
+
+        auto_publish_privacy = "private"
+
+    elif publish_mode == "scheduled":
+        auto_publish_privacy = "private"
+
+    else:
+        auto_publish_privacy = publish_mode
+
+    made_for_kids_value = (
+        auto_publish_made_for_kids == "yes"
+    )
+    notify_subscribers_value = (
+        auto_publish_notify_subscribers == "on"
+    )
+    auto_metadata_value = auto_publish_metadata == "on"
+
+    # Same orphan cleanup used by the normal title workflow.
+    db.execute(
+        delete(YouTubePublishJob).where(
+            ~YouTubePublishJob.video_job_id.in_(
+                select(VideoJob.id)
+            )
+        )
+    )
+
+    last_job = db.scalar(
+        select(VideoJob)
+        .order_by(VideoJob.queue_position.desc())
+        .limit(1)
+    )
+
+    next_position = (
+        last_job.queue_position + 1
+        if last_job
+        else 1
+    )
+
+    job = VideoJob(
+        title=title,
+        duration_minutes=duration_minutes,
+        video_style=video_style,
+        orientation=orientation,
+        media_source=media_source,
+        voice_mode="multi",
+        narrator_voice=narrator_voice,
+        voice_pool=",".join(selected_voices),
+        voice_speed=voice_speed,
+        captions_enabled=captions_enabled_value,
+        caption_font_size=caption_font_size,
+        caption_position=caption_position,
+        caption_background=caption_background_value,
+        caption_outline=caption_outline,
+
+        input_mode="script",
+        source_script=source_script,
+
+        auto_publish_enabled=auto_publish_enabled,
+        auto_publish_connection_id=(
+            selected_youtube_connection.id
+            if selected_youtube_connection
+            else None
+        ),
+        auto_publish_privacy=auto_publish_privacy,
+        auto_publish_scheduled_at=auto_publish_scheduled_at,
+        auto_publish_made_for_kids=made_for_kids_value,
+        auto_publish_notify_subscribers=notify_subscribers_value,
+        auto_publish_metadata=auto_metadata_value,
+        auto_publish_thumbnail=False,
+
+        status="waiting",
+        progress=0,
+        queue_position=next_position,
+    )
+
+    db.add(job)
+    db.commit()
+
+    start_queue_worker()
+
+    return RedirectResponse(
+        f"/videos?success=Script video added to queue ({word_count} words, ~{duration_minutes} min).",
         status_code=303,
     )
 

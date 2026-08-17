@@ -1,0 +1,40 @@
+{% extends "base_app.html" %}
+
+{% block title %}Script to Video · {{ app_name }}{% endblock %}
+{% block page_heading %}Script to Video{% endblock %}
+{% block page_subheading %}
+Turn your finished script directly into a complete video.
+{% endblock %}
+
+{% block header_actions %}
+<a href="/videos" class="header-action-link">View Queue</a>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid">
+  <section class="create-page-intro">
+    <div>
+      <span class="overview-welcome-kicker">
+        Script Production
+      </span>
+      <h2>Your script. Our existing production pipeline.</h2>
+      <p>
+        Paste the narration, choose your production settings,
+        and the system will calculate duration automatically.
+      </p>
+    </div>
+
+    <div class="create-page-step">
+      <strong>Auto</strong>
+      <span>duration from words</span>
+    </div>
+  </section>
+
+  {% set script_mode = true %}
+  {% include "partials/create_video_form.html" %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/voice-preview.js" defer></script>
+{% endblock %}

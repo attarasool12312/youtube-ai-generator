@@ -58,6 +58,18 @@ class VideoJob(Base):
     queue_position: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     script: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Input source. Existing/title-generated jobs use "title".
+    # Script-to-video jobs preserve the user's original pasted script.
+    input_mode: Mapped[str] = mapped_column(
+        String(20),
+        default="title",
+    )
+    source_script: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     scene_plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_directory: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)

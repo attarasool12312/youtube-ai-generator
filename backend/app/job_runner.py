@@ -4,7 +4,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.ai_pipeline import generate_video_package
+from app.ai_pipeline import (
+    generate_video_package,
+    generate_video_package_from_script,
+)
 from app.audio_timing import sync_scenes_to_audio
 from app.caption_service import generate_caption_files
 from app.database import SessionLocal
@@ -40,7 +43,14 @@ def run_job(job_id: int) -> None:
             return
 
         job.output_directory = str(output_dir)
-        job.status = "outline_generation"
+        input_mode = job.input_mode or "title"
+        source_script = job.source_script
+
+        job.status = (
+            "scene_splitting"
+            if input_mode == "script"
+            else "outline_generation"
+        )
         job.progress = 3
         job.error_message = None
 
@@ -60,18 +70,29 @@ def run_job(job_id: int) -> None:
         db.commit()
 
     try:
-        package = generate_video_package(
-            title=title,
-            duration_minutes=duration_minutes,
-            video_style=video_style,
-            progress_callback=lambda status, progress: (
-                update_job_progress(
-                    job_id,
-                    status,
-                    progress,
-                )
-            ),
+        progress_callback = lambda status, progress: (
+            update_job_progress(
+                job_id,
+                status,
+                progress,
+            )
         )
+
+        if input_mode == "script":
+            package = generate_video_package_from_script(
+                title=title,
+                script=source_script or "",
+                duration_minutes=duration_minutes,
+                video_style=video_style,
+                progress_callback=progress_callback,
+            )
+        else:
+            package = generate_video_package(
+                title=title,
+                duration_minutes=duration_minutes,
+                video_style=video_style,
+                progress_callback=progress_callback,
+            )
 
 
         (output_dir / "script.txt").write_text(

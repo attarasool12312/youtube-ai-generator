@@ -1,17 +1,63 @@
 <section class="crm-card video-creation-panel">
+      {% if script_mode %}
+      <h2>Create Video From Script</h2>
+      <p>Paste your finished script. Video duration is calculated automatically from its word count.</p>
+      {% else %}
       <h2>Add Video Titles</h2>
       <p>Enter up to 20 titles, one title per line.</p>
+      {% endif %}
       {% if error %}
       <div class="error">{{ error }}</div>
       {% endif %}
       {% if success %}
       <div class="success">{{ success }}</div>
       {% endif %}
-      <form method="post" action="/jobs">
+      <form method="post" action="{% if script_mode %}/jobs/script{% else %}/jobs{% endif %}">
+        {% if script_mode %}
+        <label for="titles">Video Title</label>
+        <input
+          id="titles"
+          name="title"
+          type="text"
+          maxlength="500"
+          placeholder="Enter the video title"
+          required
+        >
+
+        <label for="source_script" style="margin-top:18px;">Full Script</label>
+        <textarea
+          id="source_script"
+          name="source_script"
+          rows="20"
+          placeholder="Paste the complete narration script here..."
+          required
+        ></textarea>
+
+        <div
+          style="display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 20px;color:#70778a;"
+        >
+          <span id="script-word-count">0 words</span>
+          <span id="script-duration-estimate">Estimated duration: 0 min</span>
+          <span id="script-scene-estimate">Estimated scenes: 0</span>
+        </div>
+        {% else %}
         <label for="titles">Video Titles</label>
         <textarea id="titles" name="titles" rows="12" required></textarea>
+        {% endif %}
+
         <div class="settings-grid">
+          {% if script_mode %}
+          <div>
+            <label>Duration</label>
+            <input
+              id="script-duration-display"
+              value="Auto — based on script"
+              disabled
+            >
+          </div>
+          {% else %}
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option></select></div>
+          {% endif %}
           <div><label>Language</label><input value="English" disabled></div>
           <div>
   <label>Video Profile</label>
@@ -313,7 +359,69 @@
           {% endif %}
         </section>
 
-        <button type="submit">Add Titles to Queue</button>
+        <button type="submit">
+          {% if script_mode %}
+          Create Video From Script
+          {% else %}
+          Add Titles to Queue
+          {% endif %}
+        </button>
+
+        {% if script_mode %}
+        <script>
+        (() => {
+          const script = document.getElementById("source_script");
+          const wordOutput = document.getElementById("script-word-count");
+          const durationOutput = document.getElementById("script-duration-estimate");
+          const sceneOutput = document.getElementById("script-scene-estimate");
+          const durationDisplay = document.getElementById("script-duration-display");
+
+          if (!script) return;
+
+          const updateScriptStats = () => {
+            const value = script.value.trim();
+            const words = value
+              ? value.split(/\s+/).filter(Boolean).length
+              : 0;
+
+            const exactMinutes = words / 145;
+            const totalSeconds = Math.round(exactMinutes * 60);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+
+            const pipelineMinutes = Math.max(
+              1,
+              Math.round(exactMinutes)
+            );
+
+            const scenes = words
+              ? Math.min(
+                  pipelineMinutes * 8,
+                  Math.max(1, Math.floor(words / 12))
+                )
+              : 0;
+
+            wordOutput.textContent =
+              words.toLocaleString() + " words";
+
+            durationOutput.textContent =
+              "Estimated duration: " +
+              minutes + "m " +
+              String(seconds).padStart(2, "0") + "s";
+
+            sceneOutput.textContent =
+              "Estimated scenes: " + scenes;
+
+            durationDisplay.value = words
+              ? "~" + pipelineMinutes + " min (auto)"
+              : "Auto — based on script";
+          };
+
+          script.addEventListener("input", updateScriptStats);
+          updateScriptStats();
+        })();
+        </script>
+        {% endif %}
 
         <script>
         (() => {
