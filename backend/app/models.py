@@ -53,6 +53,17 @@ class VideoJob(Base):
         Boolean, default=True
     )
     caption_outline: Mapped[int] = mapped_column(Integer, default=2)
+
+    avatar_id: Mapped[int | None] = mapped_column(
+        ForeignKey("avatars.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    avatar_position: Mapped[str] = mapped_column(
+        String(20),
+        default="bottom_right",
+    )
+
     status: Mapped[str] = mapped_column(String(50), default="waiting")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     queue_position: Mapped[int] = mapped_column(Integer, default=0)
@@ -215,6 +226,47 @@ class YouTubeConnection(Base):
         nullable=True,
     )
     connected_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class Avatar(Base):
+    __tablename__ = "avatars"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(String(255))
+    source_path: Mapped[str] = mapped_column(Text)
+    source_type: Mapped[str] = mapped_column(
+        String(20),
+        default="video",
+    )
+    cache_id: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="preparing",
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=utc_now,
     )

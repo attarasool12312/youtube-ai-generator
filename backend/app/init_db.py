@@ -16,6 +16,8 @@ VIDEO_JOB_COLUMN_MIGRATIONS = {
     "caption_position": "VARCHAR(20) NOT NULL DEFAULT 'bottom'",
     "caption_background": "BOOLEAN NOT NULL DEFAULT 1",
     "caption_outline": "INTEGER NOT NULL DEFAULT 2",
+    "avatar_id": "INTEGER",
+    "avatar_position": "VARCHAR(20) NOT NULL DEFAULT 'bottom_right'",
     "started_at": "DATETIME",
     "completed_at": "DATETIME",
     "auto_publish_enabled": "BOOLEAN NOT NULL DEFAULT 0",

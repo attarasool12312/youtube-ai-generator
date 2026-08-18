@@ -1,0 +1,278 @@
+diff --git a/scripts/realtime_inference.py b/scripts/realtime_inference.py
+index 579b050..f3c15ee 100644
+--- a/scripts/realtime_inference.py
++++ b/scripts/realtime_inference.py
+@@ -209,31 +209,138 @@ class Avatar:
+ 
+         torch.save(self.input_latent_list_cycle, os.path.join(self.latents_out_path))
+ 
+-    def process_frames(self, res_frame_queue, video_len, skip_save_images):
++    def process_frames(
++        self,
++        res_frame_queue,
++        video_len,
++        skip_save_images,
++        direct_video_path=None,
++        fps=25,
++    ):
+         print(video_len)
+-        while True:
+-            if self.idx >= video_len - 1:
+-                break
+-            try:
+-                start = time.time()
+-                res_frame = res_frame_queue.get(block=True, timeout=1)
+-            except queue.Empty:
+-                continue
+-
+-            bbox = self.coord_list_cycle[self.idx % (len(self.coord_list_cycle))]
+-            ori_frame = copy.deepcopy(self.frame_list_cycle[self.idx % (len(self.frame_list_cycle))])
+-            x1, y1, x2, y2 = bbox
+-            try:
+-                res_frame = cv2.resize(res_frame.astype(np.uint8), (x2 - x1, y2 - y1))
+-            except:
+-                continue
+-            mask = self.mask_list_cycle[self.idx % (len(self.mask_list_cycle))]
+-            mask_crop_box = self.mask_coords_list_cycle[self.idx % (len(self.mask_coords_list_cycle))]
+-            combine_frame = get_image_blending(ori_frame,res_frame,bbox,mask,mask_crop_box)
+-
+-            if skip_save_images is False:
+-                cv2.imwrite(f"{self.avatar_path}/tmp/{str(self.idx).zfill(8)}.png", combine_frame)
+-            self.idx = self.idx + 1
++        ffmpeg_process = None
++        self.process_error = None
++
++        try:
++            while True:
++                if self.idx >= video_len - 1:
++                    break
++
++                try:
++                    res_frame = res_frame_queue.get(
++                        block=True,
++                        timeout=1,
++                    )
++                except queue.Empty:
++                    continue
++
++                bbox = self.coord_list_cycle[
++                    self.idx % len(self.coord_list_cycle)
++                ]
++                ori_frame = copy.deepcopy(
++                    self.frame_list_cycle[
++                        self.idx % len(self.frame_list_cycle)
++                    ]
++                )
++
++                x1, y1, x2, y2 = bbox
++
++                try:
++                    res_frame = cv2.resize(
++                        res_frame.astype(np.uint8),
++                        (x2 - x1, y2 - y1),
++                    )
++                except Exception:
++                    continue
++
++                mask = self.mask_list_cycle[
++                    self.idx % len(self.mask_list_cycle)
++                ]
++                mask_crop_box = self.mask_coords_list_cycle[
++                    self.idx % len(self.mask_coords_list_cycle)
++                ]
++
++                combine_frame = get_image_blending(
++                    ori_frame,
++                    res_frame,
++                    bbox,
++                    mask,
++                    mask_crop_box,
++                )
++
++                if direct_video_path:
++                    if ffmpeg_process is None:
++                        frame_height, frame_width = (
++                            combine_frame.shape[:2]
++                        )
++
++                        ffmpeg_command = [
++                            "ffmpeg",
++                            "-hide_banner",
++                            "-loglevel",
++                            "error",
++                            "-nostdin",
++                            "-y",
++                            "-f",
++                            "rawvideo",
++                            "-pix_fmt",
++                            "bgr24",
++                            "-s",
++                            f"{frame_width}x{frame_height}",
++                            "-r",
++                            str(fps),
++                            "-i",
++                            "-",
++                            "-an",
++                            "-c:v",
++                            "libx264",
++                            "-preset",
++                            "ultrafast",
++                            "-crf",
++                            "18",
++                            "-pix_fmt",
++                            "yuv420p",
++                            str(direct_video_path),
++                        ]
++
++                        ffmpeg_process = subprocess.Popen(
++                            ffmpeg_command,
++                            stdin=subprocess.PIPE,
++                        )
++
++                    ffmpeg_process.stdin.write(
++                        combine_frame.astype(
++                            np.uint8
++                        ).tobytes()
++                    )
++
++                elif skip_save_images is False:
++                    cv2.imwrite(
++                        f"{self.avatar_path}/tmp/"
++                        f"{str(self.idx).zfill(8)}.png",
++                        combine_frame,
++                    )
++
++                self.idx += 1
++
++        except Exception as error:
++            self.process_error = error
++
++        finally:
++            if ffmpeg_process is not None:
++                try:
++                    ffmpeg_process.stdin.close()
++                    return_code = ffmpeg_process.wait()
++
++                    if return_code != 0:
++                        raise RuntimeError(
++                            "Direct FFmpeg avatar encoding failed."
++                        )
++
++                except Exception as error:
++                    self.process_error = (
++                        self.process_error or error
++                    )
+ 
+     @torch.no_grad()
+     def inference(self, audio_path, out_vid_name, fps, skip_save_images):
+@@ -259,7 +366,27 @@ class Avatar:
+         res_frame_queue = queue.Queue()
+         self.idx = 0
+         # Create a sub-thread and start it
+-        process_thread = threading.Thread(target=self.process_frames, args=(res_frame_queue, video_num, skip_save_images))
++        direct_video_path = None
++
++        if args.direct_video and out_vid_name is not None:
++            direct_video_path = os.path.join(
++                self.avatar_path,
++                "temp-direct.mp4",
++            )
++
++            if os.path.exists(direct_video_path):
++                os.remove(direct_video_path)
++
++        process_thread = threading.Thread(
++            target=self.process_frames,
++            args=(
++                res_frame_queue,
++                video_num,
++                skip_save_images,
++                direct_video_path,
++                fps,
++            ),
++        )
+         process_thread.start()
+ 
+         gen = datagen(whisper_chunks,
+@@ -282,7 +409,17 @@ class Avatar:
+         # Close the queue and sub-thread after all tasks are completed
+         process_thread.join()
+ 
+-        if args.skip_save_images is True:
++        if self.process_error is not None:
++            raise self.process_error
++
++        if args.direct_video:
++            print(
++                'Total process time of {} frames with direct video output = {}s'.format(
++                    video_num,
++                    time.time() - start_time,
++                )
++            )
++        elif args.skip_save_images is True:
+             print('Total process time of {} frames without saving images = {}s'.format(
+                 video_num,
+                 time.time() - start_time))
+@@ -291,7 +428,49 @@ class Avatar:
+                 video_num,
+                 time.time() - start_time))
+ 
+-        if out_vid_name is not None and args.skip_save_images is False:
++        if out_vid_name is not None and args.direct_video:
++            output_vid = os.path.join(
++                self.video_out_path,
++                out_vid_name + ".mp4",
++            )
++
++            subprocess.run(
++                [
++                    "ffmpeg",
++                    "-hide_banner",
++                    "-loglevel",
++                    "error",
++                    "-nostdin",
++                    "-y",
++                    "-i",
++                    direct_video_path,
++                    "-i",
++                    audio_path,
++                    "-map",
++                    "0:v:0",
++                    "-map",
++                    "1:a:0",
++                    "-c:v",
++                    "copy",
++                    "-c:a",
++                    "aac",
++                    "-b:a",
++                    "192k",
++                    "-shortest",
++                    output_vid,
++                ],
++                check=True,
++            )
++
++            os.remove(direct_video_path)
++            shutil.rmtree(
++                f"{self.avatar_path}/tmp",
++                ignore_errors=True,
++            )
++
++            print(f"result is save to {output_vid}")
++
++        elif out_vid_name is not None and args.skip_save_images is False:
+             # optional
+             cmd_img2video = f"ffmpeg -y -v warning -r {fps} -f image2 -i {self.avatar_path}/tmp/%08d.png -vcodec libx264 -vf format=yuv420p -crf 18 {self.avatar_path}/temp.mp4"
+             print(cmd_img2video)
+@@ -339,6 +518,11 @@ if __name__ == "__main__":
+                        action="store_true",
+                        help="Whether skip saving images for better generation speed calculation",
+                        )
++    parser.add_argument(
++        "--direct_video",
++        action="store_true",
++        help="Stream generated avatar frames directly to FFmpeg instead of saving PNG files.",
++    )
+ 
+     args = parser.parse_args()
+ 

@@ -627,3 +627,199 @@ def render_video(
         )
 
     return str(output_path)
+
+
+def overlay_avatar_video(
+    base_video,
+    avatar_video,
+    output_path,
+    position="bottom_right",
+    orientation="landscape",
+):
+    """
+    Overlay a lip-synced avatar over the already completed video.
+
+    The base video's original audio is preserved. The avatar video's
+    audio stream is intentionally ignored.
+    """
+    sizes = {
+        "landscape": (1920, 1080),
+        "portrait": (1080, 1920),
+        "square": (1080, 1080),
+    }
+
+    width, height = sizes.get(
+        orientation,
+        sizes["landscape"],
+    )
+
+    position = (
+        position
+        if position in {
+            "top_left",
+            "top_right",
+            "bottom_left",
+            "bottom_right",
+        }
+        else "bottom_right"
+    )
+
+    # Fixed-size circular presenter avatar.
+    avatar_width = 220
+    margin = 28
+
+
+    coordinates = {
+        "top_left": (
+            str(margin),
+            str(margin),
+        ),
+        "top_right": (
+            f"W-w-{margin}",
+            str(margin),
+        ),
+        "bottom_left": (
+            str(margin),
+            f"H-h-{margin}",
+        ),
+        "bottom_right": (
+            f"W-w-{margin}",
+            f"H-h-{margin}",
+        ),
+    }
+
+    x, y = coordinates[position]
+
+    base_video = Path(base_video).resolve()
+    avatar_video = Path(avatar_video).resolve()
+    output_path = Path(output_path).resolve()
+
+    if not base_video.is_file():
+        raise RuntimeError(
+            "Base video for avatar overlay is missing."
+        )
+
+    if not avatar_video.is_file():
+        raise RuntimeError(
+            "Generated avatar video is missing."
+        )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_output = output_path.with_name(
+        f".{output_path.stem}.avatar-rendering.mp4"
+    )
+
+    temporary_output.unlink(
+        missing_ok=True,
+    )
+
+    # "Cover" crop with a slight upward bias for portrait
+    # sources so the presenter's face remains centered.
+    filter_complex = (
+        "[1:v]"
+        "crop="
+        "'min(iw,ih)':"
+        "'min(iw,ih)':"
+        "'(iw-min(iw,ih))/2':"
+        "'max(0,(ih-min(iw,ih))*0.28)',"
+        f"scale={avatar_width}:{avatar_width},"
+        "format=rgba,"
+        "geq="
+        "r='r(X,Y)':"
+        "g='g(X,Y)':"
+        "b='b(X,Y)':"
+        "a='if(lte("
+        "(X-W/2)*(X-W/2)+"
+        "(Y-H/2)*(Y-H/2),"
+        "(W/2)*(W/2)"
+        "),255,0)'"
+        "[avatar];"
+        "[0:v][avatar]"
+        f"overlay={x}:{y}:"
+        "eof_action=pass:"
+        "shortest=0"
+        "[video]"
+    )
+
+
+    base_command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(base_video),
+        "-i",
+        str(avatar_video),
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[video]",
+        "-map",
+        "0:a?",
+    ]
+
+    common_tail = [
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        str(temporary_output),
+    ]
+
+    if _nvenc_available():
+        command = (
+            base_command
+            + _nvenc_encoder_arguments()
+            + common_tail
+        )
+
+        try:
+            _run(command)
+            _validate_video(
+                temporary_output,
+                width,
+                height,
+            )
+
+            temporary_output.replace(
+                output_path
+            )
+
+            return "h264_nvenc"
+
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            RuntimeError,
+            OSError,
+        ):
+            temporary_output.unlink(
+                missing_ok=True,
+            )
+
+    command = (
+        base_command
+        + _cpu_encoder_arguments()
+        + common_tail
+    )
+
+    _run(command)
+
+    _validate_video(
+        temporary_output,
+        width,
+        height,
+    )
+
+    temporary_output.replace(
+        output_path
+    )
+
+    return "libx264"

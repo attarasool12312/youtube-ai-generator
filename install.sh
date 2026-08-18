@@ -627,6 +627,21 @@ fi
 [[ -f "$FLUX_DIR/model_index.json" ]] || \
     fail "FLUX model download is incomplete."
 
+log "Installing MuseTalk avatar engine"
+
+run_as_user bash \
+    "$PROJECT_ROOT/scripts/setup_musetalk.sh" \
+    "$APP_HOME/avatar-engine"
+
+MUSETALK_ROOT="$APP_HOME/avatar-engine/MuseTalk"
+MUSETALK_CONDA="$APP_HOME/avatar-engine/miniforge3/bin/conda"
+
+[[ -d "$MUSETALK_ROOT" ]] || \
+    fail "MuseTalk installation is missing."
+
+[[ -x "$MUSETALK_CONDA" ]] || \
+    fail "MuseTalk conda runtime is missing."
+
 log "Installing permanent dashboard service"
 
 cat > "$SERVICE_FILE" <<SERVICE
@@ -644,6 +659,9 @@ Environment=PYTHONPATH=$PROJECT_ROOT/backend
 Environment=YOUTUBE_AI_PROJECT_ROOT=$PROJECT_ROOT
 Environment=YOUTUBE_AI_MODEL_ROOT=$MODEL_ROOT
 Environment=HF_TOKEN_PATH=$APP_HOME/.cache/huggingface/token
+Environment=MUSETALK_ROOT=$APP_HOME/avatar-engine/MuseTalk
+Environment=MUSETALK_CONDA=$APP_HOME/avatar-engine/miniforge3/bin/conda
+Environment=MUSETALK_ENV=musetalk
 Environment=LD_LIBRARY_PATH=$VENV/lib/python3.12/site-packages/nvidia/cublas/lib:$VENV/lib/python3.12/site-packages/nvidia/cudnn/lib
 ExecStart=$VENV/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
@@ -695,8 +713,10 @@ import app.youtube_metadata_generator
 import app.youtube_thumbnail_generator
 import app.title_research
 import app.voice_registry
+import app.avatar_service
 
 print("APPLICATION_IMPORTS_OK")
+print("AVATAR_SERVICE_IMPORT_OK")
 PYAPP
 
 ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \

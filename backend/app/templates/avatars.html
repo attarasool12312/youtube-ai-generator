@@ -1,0 +1,221 @@
+{% extends "base_app.html" %}
+
+{% block title %}Avatars · {{ app_name }}{% endblock %}
+
+{% block page_heading %}Avatars{% endblock %}
+{% block page_subheading %}
+Create reusable lip-synced avatars for your videos.
+{% endblock %}
+
+{% block content %}
+
+<style>
+.avatar-library-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 16px;
+  margin-top: 20px;
+  width: 100%;
+}
+
+.avatar-library-grid > article {
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 10px !important;
+  margin: 0 !important;
+}
+
+.avatar-library-grid > article > div:first-child {
+  width: 100% !important;
+  aspect-ratio: 1 / 1 !important;
+  max-height: 220px !important;
+}
+
+.avatar-library-grid img,
+.avatar-library-grid video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+@media (max-width: 1200px) {
+  .avatar-library-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 800px) {
+  .avatar-library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .avatar-library-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+</style>
+
+<div class="crm-page-grid">
+
+  {% if request.query_params.get("success") %}
+  <div class="success">
+    {{ request.query_params.get("success") }}
+  </div>
+  {% endif %}
+
+  <section class="crm-card video-creation-panel">
+    <h2>Create Reusable Avatar</h2>
+    <p>
+      Upload a clear portrait photo or short source video.
+      Preparation happens once; future videos reuse the saved avatar.
+    </p>
+
+    <form
+      method="post"
+      action="/avatars"
+      enctype="multipart/form-data"
+    >
+      <div class="settings-grid">
+        <div>
+          <label for="avatar-name">Avatar Name</label>
+          <input
+            id="avatar-name"
+            name="name"
+            type="text"
+            maxlength="255"
+            placeholder="e.g. History Presenter"
+            required
+          >
+        </div>
+
+        <div>
+          <label for="avatar-source">Photo or Video</label>
+          <input
+            id="avatar-source"
+            name="source_file"
+            type="file"
+            accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mkv,.webm"
+            required
+          >
+        </div>
+      </div>
+
+      <p style="margin-top:14px;color:#70778a;">
+        Best results: front-facing subject, clearly visible face,
+        good lighting, minimal obstruction around the mouth.
+      </p>
+
+      <button
+        type="submit"
+        class="primary-button"
+        style="margin-top:12px;"
+      >
+        Prepare & Save Avatar
+      </button>
+    </form>
+  </section>
+
+  <section class="crm-card">
+    <div class="caption-settings-heading">
+      <div>
+        <h2>Saved Avatars</h2>
+        <p>
+          Ready avatars become available automatically in
+          Title to Video and Script to Video.
+        </p>
+      </div>
+    </div>
+
+    {% if avatars %}
+    <div class="avatar-library-grid">
+      {% for avatar in avatars %}
+      <article
+        style="
+          border:1px solid rgba(120,130,160,.18);
+          border-radius:16px;
+          padding:14px;
+          overflow:hidden;
+        "
+      >
+        <div
+          style="
+            aspect-ratio:16/10;
+            overflow:hidden;
+            border-radius:12px;
+            background:#111827;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+          "
+        >
+          {% if avatar.source_type == "image" %}
+          <img
+            src="/avatars/{{ avatar.id }}/source"
+            alt="{{ avatar.name }}"
+            style="width:100%;height:100%;object-fit:cover;"
+          >
+          {% else %}
+          <video
+            src="/avatars/{{ avatar.id }}/source"
+            muted
+            playsinline
+            preload="metadata"
+            style="width:100%;height:100%;object-fit:cover;"
+          ></video>
+          {% endif %}
+        </div>
+
+        <div style="margin-top:13px;">
+          <strong>{{ avatar.name }}</strong>
+          <div
+            style="
+              margin-top:5px;
+              font-size:13px;
+              color:#70778a;
+            "
+          >
+            {{ avatar.source_type|capitalize }}
+            ·
+            {{ avatar.status|capitalize }}
+          </div>
+
+          {% if avatar.status == "failed" %}
+          <p
+            style="
+              color:#b42318;
+              font-size:13px;
+              margin-top:8px;
+            "
+          >
+            Preparation failed.
+          </p>
+          {% endif %}
+
+          <form
+            method="post"
+            action="/avatars/{{ avatar.id }}/delete"
+            style="margin-top:12px;"
+            onsubmit="return confirm('Delete this avatar?');"
+          >
+            <button
+              type="submit"
+              class="header-action-link"
+            >
+              Delete
+            </button>
+          </form>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="margin-top:18px;color:#70778a;">
+      No saved avatars yet.
+    </p>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

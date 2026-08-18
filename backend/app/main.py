@@ -2,7 +2,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 import logging
-from fastapi import Depends, FastAPI, Form, Request
+import shutil
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +13,14 @@ from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.paths import OUTPUT_ROOT
+from app.avatar_service import (
+    AVATAR_STORAGE_ROOT,
+    create_cache_id,
+    delete_avatar_files,
+    ensure_avatar_storage,
+    prepare_avatar,
+    source_type_for_path,
+)
 from app.download_filenames import content_disposition_for_video
 from app.config import settings
 from app.database import get_db
@@ -53,6 +62,7 @@ from app.models import (
     YouTubeConnection,
     YouTubePublishJob,
     TitleResearchProfile,
+    Avatar,
 )
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
@@ -677,6 +687,229 @@ def delete_title_research_profile(
     )
 
 
+@app.get("/avatars")
+def avatars_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    avatars = db.scalars(
+        select(Avatar)
+        .where(
+            Avatar.user_id == int(
+                request.session["user_id"]
+            )
+        )
+        .order_by(Avatar.created_at.desc())
+    ).all()
+
+    context = dashboard_context(
+        request,
+        load_dashboard_jobs(db),
+        "avatars",
+    )
+    context["avatars"] = avatars
+
+    return templates.TemplateResponse(
+        request=request,
+        name="avatars.html",
+        context=context,
+    )
+
+
+@app.post("/avatars")
+def create_avatar(
+    request: Request,
+    name: str = Form(...),
+    source_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+        return RedirectResponse("/login", status_code=303)
+
+    name = name.strip()
+
+    if not name:
+        return RedirectResponse(
+            "/avatars?success=Avatar name is required.",
+            status_code=303,
+        )
+
+    original_name = (
+        source_file.filename or ""
+    ).strip()
+
+    suffix = Path(original_name).suffix.lower()
+
+    try:
+        source_type = source_type_for_path(
+            Path(f"avatar{suffix}")
+        )
+    except ValueError as error:
+        return RedirectResponse(
+            f"/avatars?success={str(error)}",
+            status_code=303,
+        )
+
+    ensure_avatar_storage()
+
+    cache_id = create_cache_id(user_id)
+
+    source_path = (
+        AVATAR_STORAGE_ROOT
+        / f"{cache_id}{suffix}"
+    )
+
+    avatar = Avatar(
+        user_id=int(user_id),
+        name=name[:255],
+        source_path=str(source_path),
+        source_type=source_type,
+        cache_id=cache_id,
+        status="preparing",
+    )
+
+    db.add(avatar)
+    db.commit()
+    db.refresh(avatar)
+
+    try:
+        with source_path.open("wb") as destination:
+            shutil.copyfileobj(
+                source_file.file,
+                destination,
+            )
+
+        if source_path.stat().st_size <= 0:
+            raise RuntimeError(
+                "Uploaded avatar file is empty."
+            )
+
+        prepare_avatar(
+            cache_id=cache_id,
+            source_path=source_path,
+        )
+
+        avatar.status = "ready"
+        avatar.error_message = None
+        db.commit()
+
+        return RedirectResponse(
+            "/avatars?success=Avatar prepared and ready to use.",
+            status_code=303,
+        )
+
+    except Exception as error:
+        avatar.status = "failed"
+        avatar.error_message = str(error)[-6000:]
+        db.commit()
+
+        # Preserve the uploaded source file so failed avatars
+        # can be inspected and diagnosed.
+        from app.avatar_service import avatar_cache_path
+
+        cache_path = avatar_cache_path(cache_id)
+        if cache_path.exists():
+            shutil.rmtree(
+                cache_path,
+                ignore_errors=True,
+            )
+
+        return RedirectResponse(
+            "/avatars?success=Avatar preparation failed. Check the source image/video and try again.",
+            status_code=303,
+        )
+
+    finally:
+        try:
+            source_file.file.close()
+        except Exception:
+            pass
+
+
+@app.get("/avatars/{avatar_id}/source")
+def avatar_source(
+    avatar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+        return RedirectResponse("/login", status_code=303)
+
+    avatar = db.scalar(
+        select(Avatar).where(
+            Avatar.id == avatar_id,
+            Avatar.user_id == int(user_id),
+        )
+    )
+
+    if avatar is None:
+        return RedirectResponse(
+            "/avatars",
+            status_code=303,
+        )
+
+    source_path = Path(
+        avatar.source_path
+    ).resolve()
+
+    try:
+        source_path.relative_to(
+            AVATAR_STORAGE_ROOT.resolve()
+        )
+    except ValueError:
+        return RedirectResponse(
+            "/avatars",
+            status_code=303,
+        )
+
+    if not source_path.is_file():
+        return RedirectResponse(
+            "/avatars",
+            status_code=303,
+        )
+
+    return FileResponse(source_path)
+
+
+@app.post("/avatars/{avatar_id}/delete")
+def delete_avatar(
+    avatar_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+
+    if not user_id:
+        return RedirectResponse("/login", status_code=303)
+
+    avatar = db.scalar(
+        select(Avatar).where(
+            Avatar.id == avatar_id,
+            Avatar.user_id == int(user_id),
+        )
+    )
+
+    if avatar is not None:
+        delete_avatar_files(
+            avatar.cache_id,
+            avatar.source_path,
+        )
+        db.delete(avatar)
+        db.commit()
+
+    return RedirectResponse(
+        "/avatars?success=Avatar deleted.",
+        status_code=303,
+    )
+
+
 @app.get("/videos/create")
 def create_video_page(
     request: Request,
@@ -702,6 +935,16 @@ def create_video_page(
         "create",
     )
     context["youtube_connections"] = youtube_connections
+
+    avatars = db.scalars(
+        select(Avatar)
+        .where(
+            Avatar.user_id == int(request.session["user_id"]),
+            Avatar.status == "ready",
+        )
+        .order_by(Avatar.name)
+    ).all()
+    context["avatars"] = avatars
 
     return templates.TemplateResponse(
         request=request,
@@ -735,6 +978,16 @@ def script_to_video_page(
         "script_to_video",
     )
     context["youtube_connections"] = youtube_connections
+
+    avatars = db.scalars(
+        select(Avatar)
+        .where(
+            Avatar.user_id == int(request.session["user_id"]),
+            Avatar.status == "ready",
+        )
+        .order_by(Avatar.name)
+    ).all()
+    context["avatars"] = avatars
     context["script_mode"] = True
 
     return templates.TemplateResponse(
@@ -784,6 +1037,8 @@ def add_jobs(
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
+    avatar_id: int = Form(0),
+    avatar_position: str = Form("bottom_right"),
     auto_publish_connection_id: int = Form(0),
     auto_publish_privacy: str = Form("private"),
     auto_publish_scheduled_at_local: str = Form(""),
@@ -824,6 +1079,33 @@ def add_jobs(
 
     if caption_outline not in {0, 1, 2, 4}:
         caption_outline = 2
+
+    if avatar_position not in {
+        "top_left",
+        "top_right",
+        "bottom_left",
+        "bottom_right",
+    }:
+        avatar_position = "bottom_right"
+
+    selected_avatar = None
+
+    if avatar_id > 0:
+        selected_avatar = db.scalar(
+            select(Avatar).where(
+                Avatar.id == avatar_id,
+                Avatar.user_id == int(
+                    request.session["user_id"]
+                ),
+                Avatar.status == "ready",
+            )
+        )
+
+        if selected_avatar is None:
+            return RedirectResponse(
+                "/videos/create?success=Selected avatar is unavailable.",
+                status_code=303,
+            )
 
     auto_publish_enabled = auto_publish_connection_id > 0
     selected_youtube_connection = None
@@ -949,6 +1231,12 @@ def add_jobs(
             caption_position=caption_position,
             caption_background=caption_background_value,
             caption_outline=caption_outline,
+            avatar_id=(
+                selected_avatar.id
+                if selected_avatar
+                else None
+            ),
+            avatar_position=avatar_position,
             auto_publish_enabled=auto_publish_enabled,
             auto_publish_connection_id=(
                 selected_youtube_connection.id
@@ -992,6 +1280,8 @@ def add_script_job(
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
+    avatar_id: int = Form(0),
+    avatar_position: str = Form("bottom_right"),
     auto_publish_connection_id: int = Form(0),
     auto_publish_privacy: str = Form("private"),
     auto_publish_scheduled_at_local: str = Form(""),
@@ -1063,6 +1353,33 @@ def add_script_job(
 
     if caption_outline not in {0, 1, 2, 4}:
         caption_outline = 2
+
+    if avatar_position not in {
+        "top_left",
+        "top_right",
+        "bottom_left",
+        "bottom_right",
+    }:
+        avatar_position = "bottom_right"
+
+    selected_avatar = None
+
+    if avatar_id > 0:
+        selected_avatar = db.scalar(
+            select(Avatar).where(
+                Avatar.id == avatar_id,
+                Avatar.user_id == int(
+                    request.session["user_id"]
+                ),
+                Avatar.status == "ready",
+            )
+        )
+
+        if selected_avatar is None:
+            return RedirectResponse(
+                "/script-to-video?success=Selected avatar is unavailable.",
+                status_code=303,
+            )
 
     auto_publish_enabled = auto_publish_connection_id > 0
     selected_youtube_connection = None
@@ -1187,6 +1504,12 @@ def add_script_job(
         caption_position=caption_position,
         caption_background=caption_background_value,
         caption_outline=caption_outline,
+        avatar_id=(
+            selected_avatar.id
+            if selected_avatar
+            else None
+        ),
+        avatar_position=avatar_position,
 
         input_mode="script",
         source_script=source_script,

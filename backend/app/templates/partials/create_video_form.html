@@ -120,6 +120,44 @@
     <option value="stock_only" selected>Stock Only</option>
   </select>
 </div>
+
+<div>
+  <label for="avatar_id">Avatar</label>
+  <select
+    id="avatar_id"
+    name="avatar_id"
+    data-avatar-select
+  >
+    <option value="0" selected>Off — No Avatar</option>
+    {% for avatar in avatars | default([]) %}
+    <option value="{{ avatar.id }}">
+      {{ avatar.name }}
+    </option>
+    {% endfor %}
+  </select>
+
+  {% if not avatars | default([]) %}
+  <small>
+    No saved avatars yet.
+    <a href="/avatars">Create one</a>
+  </small>
+  {% endif %}
+</div>
+
+<div data-avatar-position-wrap hidden>
+  <label for="avatar_position">Avatar Position</label>
+  <select
+    id="avatar_position"
+    name="avatar_position"
+  >
+    <option value="top_left">Top Left</option>
+    <option value="top_right">Top Right</option>
+    <option value="bottom_left">Bottom Left</option>
+    <option value="bottom_right" selected>
+      Bottom Right
+    </option>
+  </select>
+</div>
 </div>
         <div class="voice-pool">
           <label>Additional Voices</label>
@@ -586,4 +624,28 @@
     media
   );
 })();
+</script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const avatarSelect = document.querySelector("[data-avatar-select]");
+  const positionWrap = document.querySelector(
+    "[data-avatar-position-wrap]"
+  );
+
+  if (!avatarSelect || !positionWrap) return;
+
+  function updateAvatarPosition() {
+    positionWrap.hidden =
+      !avatarSelect.value ||
+      avatarSelect.value === "0";
+  }
+
+  avatarSelect.addEventListener(
+    "change",
+    updateAvatarPosition
+  );
+
+  updateAvatarPosition();
+});
 </script>

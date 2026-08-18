@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,15 +12,50 @@ from app.ai_pipeline import (
 from app.audio_timing import sync_scenes_to_audio
 from app.caption_service import generate_caption_files
 from app.database import SessionLocal
-from app.models import VideoJob
+from app.models import Avatar, VideoJob
 from app.kokoro_service import generate_narration
 from app.scene_media import download_scene_images
-from app.video_renderer import render_video
+from app.video_renderer import render_video, overlay_avatar_video
 from app.paths import OUTPUT_ROOT
+from app.avatar_service import generate_avatar_video
 
 from app.audio_export import create_narration_mp3
 
 logger = logging.getLogger(__name__)
+
+
+def _save_job_timings(output_dir, timings):
+    timing_path = Path(output_dir) / "timings.json"
+    timing_path.write_text(
+        json.dumps(timings, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _record_timing(
+    output_dir,
+    timings,
+    stage,
+    started,
+):
+    seconds = round(
+        time.perf_counter() - started,
+        3,
+    )
+
+    timings["stages"][stage] = seconds
+
+    _save_job_timings(
+        output_dir,
+        timings,
+    )
+
+    print(
+        f"JOB_TIMING {stage}={seconds:.3f}s",
+        flush=True,
+    )
+
+    return seconds
 
 
 def update_job_progress(job_id, status, progress):
@@ -36,6 +72,21 @@ def update_job_progress(job_id, status, progress):
 def run_job(job_id: int) -> None:
     output_dir = OUTPUT_ROOT / str(job_id)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    total_started = time.perf_counter()
+
+    timings = {
+        "job_id": job_id,
+        "started_at_utc": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "stages": {},
+    }
+
+    _save_job_timings(
+        output_dir,
+        timings,
+    )
 
     with SessionLocal() as db:
         job = db.get(VideoJob, job_id)
@@ -67,6 +118,11 @@ def run_job(job_id: int) -> None:
         caption_position = job.caption_position or "bottom"
         caption_background = bool(job.caption_background)
         caption_outline = job.caption_outline
+        avatar_id = job.avatar_id
+        avatar_position = (
+            job.avatar_position
+            or "bottom_right"
+        )
         db.commit()
 
     try:
@@ -77,6 +133,8 @@ def run_job(job_id: int) -> None:
                 progress,
             )
         )
+
+        stage_started = time.perf_counter()
 
         if input_mode == "script":
             package = generate_video_package_from_script(
@@ -94,6 +152,12 @@ def run_job(job_id: int) -> None:
                 progress_callback=progress_callback,
             )
 
+        _record_timing(
+            output_dir,
+            timings,
+            "script_and_scene_generation",
+            stage_started,
+        )
 
         (output_dir / "script.txt").write_text(
             package["script"], encoding="utf-8"
@@ -112,6 +176,8 @@ def run_job(job_id: int) -> None:
                 job.progress = 40
                 db.commit()
 
+        stage_started = time.perf_counter()
+
         generate_narration(
             package["script"],
             narrator_voice,
@@ -124,6 +190,13 @@ def run_job(job_id: int) -> None:
             output_dir / "narration.mp3",
         )
 
+        _record_timing(
+            output_dir,
+            timings,
+            "narration_tts",
+            stage_started,
+        )
+
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:
@@ -131,10 +204,19 @@ def run_job(job_id: int) -> None:
                 job.progress = 55
                 db.commit()
 
+        stage_started = time.perf_counter()
+
         package["audio_duration_seconds"] = sync_scenes_to_audio(
             package["scenes"],
             output_dir / "narration.wav",
         )
+        _record_timing(
+            output_dir,
+            timings,
+            "audio_scene_sync",
+            stage_started,
+        )
+
         actual_seconds = package["audio_duration_seconds"]
         words = int(package.get("word_count") or 0)
         wpm = words / (actual_seconds / 60) if actual_seconds > 0 else 0.0
@@ -152,6 +234,8 @@ def run_job(job_id: int) -> None:
         captions = None
 
         if captions_enabled:
+            stage_started = time.perf_counter()
+
             with SessionLocal() as db:
                 job = db.get(VideoJob, job_id)
                 if job:
@@ -167,6 +251,13 @@ def run_job(job_id: int) -> None:
                 position=caption_position,
                 background=caption_background,
                 outline=caption_outline,
+            )
+
+            _record_timing(
+                output_dir,
+                timings,
+                "captions",
+                stage_started,
             )
 
         package["captions"] = captions
@@ -185,6 +276,8 @@ def run_job(job_id: int) -> None:
                 job.progress = 68
                 db.commit()
 
+        stage_started = time.perf_counter()
+
         package["scenes"] = download_scene_images(
             package["scenes"],
             output_dir,
@@ -193,6 +286,13 @@ def run_job(job_id: int) -> None:
             package.get("detected_style", video_style),
             package.get("title", title),
             duration_minutes,
+        )
+
+        _record_timing(
+            output_dir,
+            timings,
+            "stock_media_collection",
+            stage_started,
         )
 
         with SessionLocal() as db:
@@ -209,6 +309,8 @@ def run_job(job_id: int) -> None:
                 job.progress = 90
                 db.commit()
 
+        stage_started = time.perf_counter()
+
         package["video_file"] = render_video(
             package["scenes"],
             output_dir / "narration.wav",
@@ -221,6 +323,133 @@ def run_job(job_id: int) -> None:
             ),
         )
 
+        _record_timing(
+            output_dir,
+            timings,
+            "base_video_render",
+            stage_started,
+        )
+
+        # Avatar is an optional post-render layer.
+        # Any avatar failure must leave the normal completed
+        # Stock Only video intact.
+        if avatar_id:
+            try:
+                with SessionLocal() as db:
+                    avatar = db.get(
+                        Avatar,
+                        avatar_id,
+                    )
+
+                    if (
+                        avatar is None
+                        or avatar.status != "ready"
+                    ):
+                        raise RuntimeError(
+                            "Selected avatar is unavailable "
+                            "or not ready."
+                        )
+
+                    avatar_cache_id = avatar.cache_id
+                    avatar_source_path = avatar.source_path
+
+                update_job_progress(
+                    job_id,
+                    "avatar_generation",
+                    93,
+                )
+
+                avatar_generation_started = (
+                    time.perf_counter()
+                )
+
+                talking_avatar = generate_avatar_video(
+                    cache_id=avatar_cache_id,
+                    source_path=avatar_source_path,
+                    narration_path=(
+                        output_dir / "narration.wav"
+                    ),
+                    output_name=f"job_{job_id}",
+                )
+
+                _record_timing(
+                    output_dir,
+                    timings,
+                    "avatar_generation",
+                    avatar_generation_started,
+                )
+
+                update_job_progress(
+                    job_id,
+                    "avatar_overlay",
+                    97,
+                )
+
+                avatar_composite = (
+                    output_dir
+                    / "final-video-avatar.mp4"
+                )
+
+                avatar_overlay_started = (
+                    time.perf_counter()
+                )
+
+                overlay_avatar_video(
+                    base_video=(
+                        output_dir
+                        / "final-video.mp4"
+                    ),
+                    avatar_video=talking_avatar,
+                    output_path=avatar_composite,
+                    position=avatar_position,
+                    orientation=orientation,
+                )
+
+                _record_timing(
+                    output_dir,
+                    timings,
+                    "avatar_overlay",
+                    avatar_overlay_started,
+                )
+
+                avatar_composite.replace(
+                    output_dir
+                    / "final-video.mp4"
+                )
+
+                package["video_file"] = str(
+                    output_dir
+                    / "final-video.mp4"
+                )
+                package["avatar"] = {
+                    "enabled": True,
+                    "avatar_id": avatar_id,
+                    "position": avatar_position,
+                }
+
+                print(
+                    "AVATAR_OVERLAY_READY:",
+                    job_id,
+                    avatar_id,
+                    avatar_position,
+                    flush=True,
+                )
+
+            except Exception as avatar_error:
+                package["avatar"] = {
+                    "enabled": False,
+                    "avatar_id": avatar_id,
+                    "position": avatar_position,
+                    "error": str(avatar_error),
+                }
+
+                print(
+                    "AVATAR_OVERLAY_FAILED:",
+                    str(avatar_error),
+                    file=sys.stderr,
+                    flush=True,
+                )
+
         (output_dir / "scenes.json").write_text(
             json.dumps(package["scenes"], indent=2),
             encoding="utf-8",
@@ -229,6 +458,27 @@ def run_job(job_id: int) -> None:
             json.dumps(package, indent=2),
             encoding="utf-8",
         )
+
+        timings["video_ready_total_seconds"] = round(
+            time.perf_counter() - total_started,
+            3,
+        )
+        timings["video_ready_at_utc"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        _save_job_timings(
+            output_dir,
+            timings,
+        )
+
+        print(
+            "JOB_TIMING video_ready_total="
+            f"{timings['video_ready_total_seconds']:.3f}s",
+            flush=True,
+        )
+
+        package["timings"] = timings
 
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
