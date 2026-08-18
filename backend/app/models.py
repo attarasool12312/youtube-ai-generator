@@ -225,6 +225,40 @@ class YouTubeConnection(Base):
     )
 
 
+class TitleResearchProfile(Base):
+    __tablename__ = "title_research_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(String(255))
+
+    youtube_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("youtube_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    niche: Mapped[str] = mapped_column(Text, default="")
+    competitor: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
 class YouTubePublishJob(Base):
     __tablename__ = "youtube_publish_jobs"
     __table_args__ = (

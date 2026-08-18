@@ -52,6 +52,7 @@ from app.models import (
     VideoJob,
     YouTubeConnection,
     YouTubePublishJob,
+    TitleResearchProfile,
 )
 from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
@@ -399,12 +400,80 @@ def home(request: Request, db: Session = Depends(get_db)):
 
 
 
+def _title_research_page_data(
+    db: Session,
+    user_id: int,
+):
+    profiles = db.scalars(
+        select(TitleResearchProfile)
+        .where(
+            TitleResearchProfile.user_id == user_id
+        )
+        .order_by(
+            TitleResearchProfile.name.asc()
+        )
+    ).all()
+
+    youtube_connections = db.scalars(
+        select(YouTubeConnection)
+        .where(
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+        .order_by(
+            YouTubeConnection.channel_title.asc()
+        )
+    ).all()
+
+    profile_payload = [
+        {
+            "id": profile.id,
+            "name": profile.name,
+            "youtube_connection_id": (
+                profile.youtube_connection_id or 0
+            ),
+            "prompt": profile.prompt or "",
+            "niche": profile.niche or "",
+            "competitor": profile.competitor or "",
+        }
+        for profile in profiles
+    ]
+
+    return (
+        profiles,
+        youtube_connections,
+        profile_payload,
+    )
+
+
 @app.get("/title-research")
 def title_research_page(
     request: Request,
+    success: str = "",
+    db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    user_id = int(request.session["user_id"])
+
+    (
+        profiles,
+        youtube_connections,
+        profile_payload,
+    ) = _title_research_page_data(
+        db,
+        user_id,
+    )
+
+    default_connection_id = (
+        youtube_connections[0].id
+        if youtube_connections
+        else 0
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -415,6 +484,18 @@ def title_research_page(
             "project_info": get_project_info(),
             "research": None,
             "error": None,
+            "success": success,
+            "saved_profiles": profiles,
+            "saved_profile_payload": profile_payload,
+            "youtube_connections": youtube_connections,
+            "form_values": {
+                "profile_id": 0,
+                "profile_name": "",
+                "youtube_connection_id": default_connection_id,
+                "prompt": "",
+                "niche": "",
+                "competitor": "",
+            },
         },
     )
 
@@ -422,13 +503,21 @@ def title_research_page(
 @app.post("/title-research")
 def run_title_research(
     request: Request,
+    profile_id: int = Form(0),
+    profile_name: str = Form(""),
+    youtube_connection_id: int = Form(0),
     prompt: str = Form(""),
     niche: str = Form(""),
     competitor: str = Form(""),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    user_id = int(request.session["user_id"])
 
     research = None
     error = None
@@ -439,10 +528,22 @@ def run_title_research(
             prompt=prompt,
             niche=niche,
             competitor=competitor,
+            youtube_connection_id=(
+                youtube_connection_id or None
+            ),
         )
     except Exception as exc:
         logger.exception("Title research failed")
         error = str(exc)
+
+    (
+        profiles,
+        youtube_connections,
+        profile_payload,
+    ) = _title_research_page_data(
+        db,
+        user_id,
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -453,7 +554,126 @@ def run_title_research(
             "project_info": get_project_info(),
             "research": research,
             "error": error,
+            "success": "",
+            "saved_profiles": profiles,
+            "saved_profile_payload": profile_payload,
+            "youtube_connections": youtube_connections,
+            "form_values": {
+                "profile_id": profile_id,
+                "profile_name": profile_name,
+                "youtube_connection_id": youtube_connection_id,
+                "prompt": prompt,
+                "niche": niche,
+                "competitor": competitor,
+            },
         },
+    )
+
+
+@app.post("/title-research/profiles/save")
+def save_title_research_profile(
+    request: Request,
+    profile_id: int = Form(0),
+    profile_name: str = Form(""),
+    youtube_connection_id: int = Form(0),
+    prompt: str = Form(""),
+    niche: str = Form(""),
+    competitor: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    user_id = int(request.session["user_id"])
+    profile_name = profile_name.strip()
+
+    if not profile_name:
+        return RedirectResponse(
+            "/title-research?success=Enter a profile name before saving.",
+            status_code=303,
+        )
+
+    connection = db.get(
+        YouTubeConnection,
+        youtube_connection_id,
+    )
+
+    if (
+        connection is None
+        or not connection.is_active
+        or not connection.encrypted_refresh_token
+    ):
+        return RedirectResponse(
+            "/title-research?success=Select an active YouTube channel.",
+            status_code=303,
+        )
+
+    profile = None
+
+    if profile_id:
+        profile = db.scalar(
+            select(TitleResearchProfile)
+            .where(
+                TitleResearchProfile.id == profile_id,
+                TitleResearchProfile.user_id == user_id,
+            )
+        )
+
+    if profile is None:
+        profile = TitleResearchProfile(
+            user_id=user_id,
+            name=profile_name,
+        )
+        db.add(profile)
+
+    profile.name = profile_name
+    profile.youtube_connection_id = (
+        youtube_connection_id
+    )
+    profile.prompt = prompt.strip()
+    profile.niche = niche.strip()
+    profile.competitor = competitor.strip()
+
+    db.commit()
+
+    return RedirectResponse(
+        "/title-research?success=Research profile saved.",
+        status_code=303,
+    )
+
+
+@app.post("/title-research/profiles/delete")
+def delete_title_research_profile(
+    request: Request,
+    profile_id: int = Form(0),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    user_id = int(request.session["user_id"])
+
+    profile = db.scalar(
+        select(TitleResearchProfile)
+        .where(
+            TitleResearchProfile.id == profile_id,
+            TitleResearchProfile.user_id == user_id,
+        )
+    )
+
+    if profile is not None:
+        db.delete(profile)
+        db.commit()
+
+    return RedirectResponse(
+        "/title-research?success=Research profile deleted.",
+        status_code=303,
     )
 
 

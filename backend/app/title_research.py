@@ -85,25 +85,52 @@ MALFORMED JSON:
     return data
 
 
-def _youtube(db: Session):
-    connection = db.scalar(
-        select(YouTubeConnection)
-        .where(
-            YouTubeConnection.is_active.is_(True),
-            YouTubeConnection.encrypted_refresh_token.is_not(None),
+def _youtube(
+    db: Session,
+    connection_id: int | None = None,
+):
+    connection = None
+
+    if connection_id:
+        connection = db.get(
+            YouTubeConnection,
+            int(connection_id),
         )
-        .order_by(YouTubeConnection.id.asc())
-    )
+
+        if (
+            connection is None
+            or not connection.is_active
+            or not connection.encrypted_refresh_token
+        ):
+            raise RuntimeError(
+                "Selected YouTube channel is unavailable."
+            )
+
+    if connection is None:
+        connection = db.scalar(
+            select(YouTubeConnection)
+            .where(
+                YouTubeConnection.is_active.is_(True),
+                YouTubeConnection.encrypted_refresh_token.is_not(None),
+            )
+            .order_by(YouTubeConnection.id.asc())
+        )
+
     if not connection:
         raise RuntimeError("Connect a YouTube channel first.")
 
-    credentials = refresh_channel_credentials(db, connection)
+    credentials = refresh_channel_credentials(
+        db,
+        connection,
+    )
+
     return build(
         "youtube",
         "v3",
         credentials=credentials,
         cache_discovery=False,
     )
+
 
 
 def _num(value) -> int:
@@ -755,6 +782,7 @@ def research_titles(
     prompt: str,
     niche: str = "",
     competitor: str = "",
+    youtube_connection_id: int | None = None,
 ) -> dict:
     prompt = " ".join((prompt or "").split()).strip()
     niche = " ".join((niche or "").split()).strip()
@@ -765,7 +793,7 @@ def research_titles(
             "Enter a research prompt, niche/topic, or competitor."
         )
 
-    youtube = _youtube(db)
+    youtube = _youtube(db, youtube_connection_id)
     competitor_data = _resolve_competitor(
         youtube,
         competitor,

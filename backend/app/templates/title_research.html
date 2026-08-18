@@ -1,5 +1,67 @@
 {% extends "base_app.html" %}
 
+<style>
+.title-research-form .research-actions {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:space-between !important;
+    gap:14px !important;
+    margin-top:20px !important;
+}
+
+.title-research-form .profile-action-group {
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    flex-wrap:wrap;
+}
+
+.title-research-form .profile-button,
+.title-research-form .research-button {
+    width:auto !important;
+    min-width:0 !important;
+    flex:none !important;
+    height:auto !important;
+    padding:12px 20px !important;
+    border-radius:10px !important;
+    font-weight:700 !important;
+    cursor:pointer;
+}
+
+.title-research-form .profile-button {
+    background:#fff !important;
+    color:#111827 !important;
+    border:1px solid #d9dde7 !important;
+}
+
+.title-research-form .profile-delete-button {
+    color:#b42318 !important;
+}
+
+.title-research-form .profile-button:disabled {
+    opacity:.45;
+    cursor:not-allowed;
+}
+
+.title-research-form .research-button {
+    background:#111827 !important;
+    color:#fff !important;
+    border:1px solid #111827 !important;
+}
+
+@media(max-width:700px) {
+    .title-research-form .research-actions {
+        align-items:stretch !important;
+        flex-direction:column !important;
+    }
+
+    .title-research-form .research-button {
+        width:100% !important;
+    }
+}
+</style>
+
+
 {% block title %}Title Research · {{ app_name }}{% endblock %}
 {% block page_heading %}Title Research{% endblock %}
 {% block page_subheading %}Research real YouTube opportunities and turn them into ranked video ideas.{% endblock %}
@@ -22,12 +84,42 @@
   gap:16px;
 }
 .research-full { grid-column:1/-1; }
+
+.saved-profile-bar {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  padding-bottom:18px;
+  margin-bottom:18px;
+  border-bottom:1px solid #e6e8ee;
+}
+
+.profile-action-group {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.profile-button {
+  border:1px solid #d9dde7;
+  background:#fff;
+  border-radius:10px;
+  padding:12px 18px;
+  font-weight:700;
+  cursor:pointer;
+}
+
+.profile-delete-button {
+  color:#b42318;
+}
+
 .title-research-form label {
   display:block;
   font-weight:700;
   margin-bottom:7px;
 }
 .title-research-form input,
+.title-research-form select,
 .title-research-form textarea {
   width:100%;
   border:1px solid #d9dde7;
@@ -143,36 +235,176 @@
   .title-result-top { flex-direction:column; }
   .signal-grid { grid-template-columns:repeat(2,1fr); }
 }
+
+/* Final Title Research action layout */
+.title-research-form .research-actions {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:space-between !important;
+    gap:14px !important;
+    margin-top:20px !important;
+}
+
+.title-research-form .profile-action-group {
+    display:flex !important;
+    align-items:center !important;
+    gap:10px !important;
+    flex-wrap:nowrap !important;
+}
+
+.title-research-form .research-actions button {
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:auto !important;
+    min-width:130px !important;
+    max-width:none !important;
+    height:46px !important;
+    min-height:46px !important;
+    padding:0 20px !important;
+    margin:0 !important;
+    flex:0 0 auto !important;
+}
+
+.title-research-form .research-button {
+    background:#111827 !important;
+    color:#fff !important;
+}
+
+.title-research-form .profile-button {
+    background:#fff !important;
+    color:#111827 !important;
+    border:1px solid #d9dde7 !important;
+}
+
+.title-research-form .profile-delete-button {
+    color:#b42318 !important;
+}
+
+.title-research-form .profile-button:disabled {
+    opacity:.45 !important;
+    cursor:not-allowed !important;
+}
+
+@media(max-width:700px) {
+    .title-research-form .research-actions {
+        flex-direction:column !important;
+        align-items:stretch !important;
+    }
+
+    .title-research-form .profile-action-group {
+        flex-wrap:wrap !important;
+    }
+
+    .title-research-form .research-actions button {
+        width:100% !important;
+    }
+}
+
 </style>
 
 <form class="title-research-form" method="post" action="/title-research">
+
+  <div class="saved-profile-bar">
+
+    <div>
+      <label for="saved_profile">
+        Saved Research Profile
+      </label>
+
+      <select
+        id="saved_profile"
+        name="profile_id"
+      >
+        <option value="0">
+          New / Unsaved Setup
+        </option>
+
+        {% for profile in saved_profiles %}
+        <option
+          value="{{ profile.id }}"
+          {% if form_values.profile_id == profile.id %}selected{% endif %}
+        >
+          {{ profile.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div>
+      <label for="profile_name">
+        Profile Name
+      </label>
+
+      <input
+        id="profile_name"
+        name="profile_name"
+        value="{{ form_values.profile_name }}"
+        placeholder="Example: British History Channel"
+      >
+    </div>
+
+  </div>
+
   <div class="research-grid">
 
     <div class="research-full">
+      <label for="youtube_connection_id">
+        Connected YouTube Channel
+      </label>
+
+      <select
+        id="youtube_connection_id"
+        name="youtube_connection_id"
+        required
+      >
+        {% if youtube_connections %}
+          {% for connection in youtube_connections %}
+          <option
+            value="{{ connection.id }}"
+            {% if form_values.youtube_connection_id == connection.id %}selected{% endif %}
+          >
+            {{ connection.channel_title }}
+          </option>
+          {% endfor %}
+        {% else %}
+          <option value="0">
+            Connect a YouTube channel first
+          </option>
+        {% endif %}
+      </select>
+    </div>
+
+    <div class="research-full">
       <label for="prompt">Research Prompt</label>
+
       <textarea
         id="prompt"
         name="prompt"
-        placeholder="Example: Find documentary-style titles about strange things happening in space that have strong curiosity and evergreen potential."
-      >{{ research.prompt if research else '' }}</textarea>
+        placeholder="Describe exactly what kinds of titles you want..."
+      >{{ form_values.prompt }}</textarea>
     </div>
 
     <div>
       <label for="niche">Niche / Topic</label>
+
       <input
         id="niche"
         name="niche"
-        value="{{ research.niche if research else '' }}"
+        value="{{ form_values.niche }}"
         placeholder="Space, History, Finance..."
       >
     </div>
 
     <div>
-      <label for="competitor">Competitor Channel</label>
+      <label for="competitor">
+        Competitor Channel
+      </label>
+
       <input
         id="competitor"
         name="competitor"
-        value=""
+        value="{{ form_values.competitor }}"
         placeholder="Channel URL, @handle, channel ID or name"
       >
     </div>
@@ -180,11 +412,110 @@
   </div>
 
   <div class="research-actions">
-    <button class="research-button" type="submit">
+
+    <div class="profile-action-group">
+
+      <button
+        class="profile-button"
+        type="submit"
+        formaction="/title-research/profiles/save"
+      >
+        Save Setup
+      </button>
+
+      <button
+        id="delete-research-profile"
+        class="profile-button profile-delete-button"
+        type="submit"
+        formaction="/title-research/profiles/delete"
+        {% if not form_values.profile_id %}disabled{% endif %}
+        onclick="return confirm('Delete this saved research profile?');"
+      >
+        Delete Saved
+      </button>
+
+    </div>
+
+    <button
+      class="research-button"
+      type="submit"
+    >
       Research Titles
     </button>
+
   </div>
+
 </form>
+
+{% if success %}
+<div class="success">{{ success }}</div>
+{% endif %}
+
+<script>
+(() => {
+  const profiles = {{ saved_profile_payload | tojson }};
+
+  const profileSelect =
+    document.getElementById("saved_profile");
+
+  const profileName =
+    document.getElementById("profile_name");
+
+  const channelSelect =
+    document.getElementById("youtube_connection_id");
+
+  const prompt =
+    document.getElementById("prompt");
+
+  const niche =
+    document.getElementById("niche");
+
+  const competitor =
+    document.getElementById("competitor");
+
+  const deleteButton =
+    document.getElementById("delete-research-profile");
+
+  if (!profileSelect) return;
+
+  const applyProfile = () => {
+    const id = Number(profileSelect.value || 0);
+
+    if (deleteButton) {
+      deleteButton.disabled = !id;
+    }
+
+    if (!id) {
+      profileName.value = "";
+      return;
+    }
+
+    const profile = profiles.find(
+      item => Number(item.id) === id
+    );
+
+    if (!profile) return;
+
+    profileName.value = profile.name || "";
+    prompt.value = profile.prompt || "";
+    niche.value = profile.niche || "";
+    competitor.value = profile.competitor || "";
+
+    if (
+      channelSelect &&
+      profile.youtube_connection_id
+    ) {
+      channelSelect.value =
+        String(profile.youtube_connection_id);
+    }
+  };
+
+  profileSelect.addEventListener(
+    "change",
+    applyProfile
+  );
+})();
+</script>
 
 {% if error %}
 <div class="error-box">{{ error }}</div>
