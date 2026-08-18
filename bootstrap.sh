@@ -32,11 +32,21 @@ fi
 
 log "Preparing NVIDIA driver detection"
 
+# Use the main Ubuntu mirror instead of the sometimes-slow EC2 regional mirror.
+for source_file in \
+    /etc/apt/sources.list.d/ubuntu.sources \
+    /etc/apt/sources.list
+do
+    [[ -f "$source_file" ]] || continue
+
+    sed -Ei         's#https?://([a-z0-9-]+\.)?ec2\.archive\.ubuntu\.com/ubuntu/?#http://archive.ubuntu.com/ubuntu/#g'         "$source_file"
+done
+
+apt-get clean
 apt-get update
 
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    pciutils \
-    ubuntu-drivers-common
+    pciutils
 
 if ! lspci 2>/dev/null | grep -qi NVIDIA; then
     fail "No NVIDIA GPU was detected. Use an NVIDIA GPU-enabled VM."
@@ -49,42 +59,20 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     exit 20
 fi
 
-log "Installing Ubuntu-recommended NVIDIA compute driver"
+log "Installing pinned NVIDIA 595 Server driver"
 
-available_drivers="$(ubuntu-drivers list --gpgpu 2>/dev/null || true)"
+NVIDIA_DRIVER_PACKAGE="nvidia-driver-595-server"
+NVIDIA_UTILS_PACKAGE="nvidia-utils-595-server"
 
-[[ -n "$available_drivers" ]] || \
-    fail "Ubuntu could not find a compatible NVIDIA compute driver."
+apt-cache show "$NVIDIA_DRIVER_PACKAGE" >/dev/null 2>&1 || \
+    fail "Required NVIDIA package is unavailable: $NVIDIA_DRIVER_PACKAGE"
 
-DEBIAN_FRONTEND=noninteractive ubuntu-drivers install --gpgpu
+apt-cache show "$NVIDIA_UTILS_PACKAGE" >/dev/null 2>&1 || \
+    fail "Required NVIDIA package is unavailable: $NVIDIA_UTILS_PACKAGE"
 
-# ubuntu-drivers may install the kernel/compute driver without
-# the matching nvidia-smi userspace package on some GPU images.
-# Detect the installed compute-driver branch and ensure its
-# matching nvidia-utils package is installed before reboot.
-compute_package="$(
-    dpkg-query -W         -f='${Package}|${Status}\n'         'libnvidia-compute-*'         2>/dev/null |
-    awk -F'|'         '$2 == "install ok installed" {print $1}' |
-    sort -V |
-    tail -n 1 ||
-    true
-)"
-
-if [[ -n "$compute_package" ]]; then
-    driver_series="${compute_package#libnvidia-compute-}"
-    utils_package="nvidia-utils-${driver_series}"
-
-    if apt-cache show "$utils_package" >/dev/null 2>&1; then
-        if ! dpkg-query -W             -f='${Status}'             "$utils_package"             2>/dev/null |
-            grep -Fx 'install ok installed' >/dev/null
-        then
-            log "Installing matching NVIDIA utilities: $utils_package"
-            DEBIAN_FRONTEND=noninteractive apt-get install -y                 "$utils_package"
-        fi
-    else
-        echo             "WARNING: Matching NVIDIA utility package $utils_package was not found."             >&2
-    fi
-fi
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    "$NVIDIA_DRIVER_PACKAGE" \
+    "$NVIDIA_UTILS_PACKAGE"
 
 if command -v nvidia-smi >/dev/null 2>&1 &&
     nvidia-smi >/dev/null 2>&1

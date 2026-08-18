@@ -746,6 +746,24 @@ PYURL
 )"
 
 echo
+echo "==> Public dashboard setup"
+
+DEFAULT_DOMAIN="attavideoai.site"
+DEFAULT_CERTBOT_EMAIL="attarasool2000@gmail.com"
+
+read -r -p "Domain [$DEFAULT_DOMAIN]: " INSTALL_DOMAIN
+INSTALL_DOMAIN="${INSTALL_DOMAIN:-$DEFAULT_DOMAIN}"
+
+read -r -p "Certbot email [$DEFAULT_CERTBOT_EMAIL]: " INSTALL_CERTBOT_EMAIL
+INSTALL_CERTBOT_EMAIL="${INSTALL_CERTBOT_EMAIL:-$DEFAULT_CERTBOT_EMAIL}"
+
+if [[ -n "$INSTALL_DOMAIN" && -n "$INSTALL_CERTBOT_EMAIL" ]]; then
+    bash "$PROJECT_ROOT/scripts/setup_domain.sh" \
+        "$INSTALL_DOMAIN" \
+        "$INSTALL_CERTBOT_EMAIL"
+fi
+
+echo
 echo "INSTALLATION_COMPLETE"
 echo "Dashboard: $APP_URL_DISPLAY"
 echo "Service: $SERVICE_NAME"
