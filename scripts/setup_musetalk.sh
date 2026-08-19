@@ -217,7 +217,10 @@ else
     # Preserve the known-working versions after OpenMIM resolves
     # its own utility dependencies.
     "$PIP" install \
-        rich==13.4.2 \
+        rich==13.4.2
+
+    "$PIP" install \
+        --no-deps \
         typer==0.27.1
 
     environment_ready || \
