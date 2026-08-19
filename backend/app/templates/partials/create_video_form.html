@@ -397,6 +397,96 @@
           {% endif %}
         </section>
 
+
+        <section class="caption-settings">
+          <div class="caption-settings-heading">
+            <div>
+              <h3>Automatic Facebook Publishing</h3>
+              <p>
+                Publish the completed video to a connected Facebook Page.
+                YouTube and Facebook publishing work independently.
+              </p>
+            </div>
+          </div>
+
+          <div class="caption-controls-grid">
+            <div>
+              <label for="facebook_auto_publish_connection_id">
+                Facebook Page
+              </label>
+
+              <select
+                id="facebook_auto_publish_connection_id"
+                name="facebook_auto_publish_connection_id"
+              >
+                <option value="0" selected>
+                  Do not publish automatically
+                </option>
+
+                {% for connection in facebook_connections | default([]) %}
+                <option value="{{ connection.id }}">
+                  {{ connection.display_name or connection.username }}
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div
+              data-facebook-auto-publish-option
+              hidden
+            >
+              <label for="facebook_auto_publish_mode">
+                Publishing
+              </label>
+
+              <select
+                id="facebook_auto_publish_mode"
+                name="facebook_auto_publish_mode"
+              >
+                <option value="now" selected>
+                  Publish when video is ready
+                </option>
+                <option value="scheduled">
+                  Schedule
+                </option>
+              </select>
+            </div>
+
+            <div
+              data-facebook-auto-publish-schedule
+              hidden
+            >
+              <label for="facebook_auto_publish_scheduled_at_local">
+                Publish Date & Time
+              </label>
+
+              <input
+                id="facebook_auto_publish_scheduled_at_local"
+                type="datetime-local"
+                name="facebook_auto_publish_scheduled_at_local"
+              >
+
+              <input
+                id="facebook_auto_publish_scheduled_at_utc"
+                type="hidden"
+                name="facebook_auto_publish_scheduled_at_utc"
+              >
+
+              <small>
+                Uses your current browser timezone.
+              </small>
+            </div>
+          </div>
+
+          {% if not facebook_connections | default([]) %}
+          <p>
+            No active Facebook Page is connected.
+            <a href="/publishing">Connect a Facebook Page</a>
+            before enabling automatic Facebook publishing.
+          </p>
+          {% endif %}
+        </section>
+
         <button type="submit">
           {% if script_mode %}
           Create Video From Script
@@ -561,6 +651,113 @@
           updatePublishingFields();
         })();
         </script>
+
+        <script>
+        (() => {
+          const pageSelect = document.getElementById(
+            "facebook_auto_publish_connection_id"
+          );
+          const modeSelect = document.getElementById(
+            "facebook_auto_publish_mode"
+          );
+          const scheduleField = document.querySelector(
+            "[data-facebook-auto-publish-schedule]"
+          );
+          const localSchedule = document.getElementById(
+            "facebook_auto_publish_scheduled_at_local"
+          );
+          const utcSchedule = document.getElementById(
+            "facebook_auto_publish_scheduled_at_utc"
+          );
+
+          if (!pageSelect) {
+            return;
+          }
+
+          const dependentFields = document.querySelectorAll(
+            "[data-facebook-auto-publish-option]"
+          );
+
+          const syncFacebookSchedule = () => {
+            const enabled = pageSelect.value !== "0";
+            const scheduled = (
+              enabled &&
+              modeSelect &&
+              modeSelect.value === "scheduled"
+            );
+
+            if (scheduleField) {
+              scheduleField.hidden = !scheduled;
+            }
+
+            if (localSchedule) {
+              localSchedule.required = scheduled;
+            }
+
+            if (!utcSchedule) {
+              return;
+            }
+
+            if (
+              !scheduled ||
+              !localSchedule ||
+              !localSchedule.value
+            ) {
+              utcSchedule.value = "";
+              return;
+            }
+
+            const localDate = new Date(
+              localSchedule.value
+            );
+
+            if (!Number.isNaN(localDate.getTime())) {
+              utcSchedule.value = localDate.toISOString();
+            }
+          };
+
+          const updateFacebookPublishingFields = () => {
+            const enabled = pageSelect.value !== "0";
+
+            dependentFields.forEach((field) => {
+              field.hidden = !enabled;
+            });
+
+            syncFacebookSchedule();
+          };
+
+          pageSelect.addEventListener(
+            "change",
+            updateFacebookPublishingFields
+          );
+
+          if (modeSelect) {
+            modeSelect.addEventListener(
+              "change",
+              syncFacebookSchedule
+            );
+          }
+
+          if (localSchedule) {
+            localSchedule.addEventListener(
+              "change",
+              syncFacebookSchedule
+            );
+          }
+
+          const formElement = pageSelect.closest("form");
+
+          if (formElement) {
+            formElement.addEventListener(
+              "submit",
+              syncFacebookSchedule
+            );
+          }
+
+          updateFacebookPublishingFields();
+        })();
+        </script>
+
       </form>
     </section>
 

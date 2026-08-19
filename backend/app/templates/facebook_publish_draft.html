@@ -1,0 +1,211 @@
+{% extends "base_app.html" %}
+
+{% block title %}Facebook Upload · {{ app_name }}{% endblock %}
+{% block page_heading %}Prepare Facebook Upload{% endblock %}
+{% block page_subheading %}
+Publish this completed video to a connected Facebook Page.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid">
+
+  {% set error_code = request.query_params.get("error") %}
+
+  {% if error_code %}
+  <div class="error">
+    {% if error_code == "page_unavailable" %}
+      Selected Facebook Page is unavailable.
+    {% elif error_code == "schedule_required" %}
+      Choose a publish date and time.
+    {% elif error_code == "schedule_past" %}
+      Scheduled time must be in the future.
+    {% elif error_code == "schedule_invalid" %}
+      Invalid scheduled date and time.
+    {% else %}
+      Facebook publishing settings could not be saved.
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Facebook Publishing
+        </span>
+
+        <h2>{{ job.title }}</h2>
+
+        <p>
+          Choose the destination Page and publish immediately
+          or schedule the completed video.
+        </p>
+      </div>
+
+      <a href="/publishing" class="crm-secondary-button">
+        Back to Publishing
+      </a>
+    </div>
+
+    <form
+      method="post"
+      action="/publishing/jobs/{{ job.id }}/facebook"
+    >
+      <div class="api-fields-grid">
+
+        <div>
+          <label for="facebook_connection_id">
+            Facebook Page
+          </label>
+
+          <select
+            id="facebook_connection_id"
+            name="facebook_connection_id"
+            required
+          >
+            {% for connection in facebook_connections %}
+            <option value="{{ connection.id }}">
+              {{ connection.display_name or connection.username }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="publish_mode">
+            Publishing
+          </label>
+
+          <select
+            id="publish_mode"
+            name="publish_mode"
+          >
+            <option value="now">
+              Publish Now
+            </option>
+
+            <option value="scheduled">
+              Schedule
+            </option>
+          </select>
+        </div>
+
+        <div
+          id="facebook-schedule-wrap"
+          hidden
+        >
+          <label for="scheduled_at_local">
+            Publish Date & Time
+          </label>
+
+          <input
+            id="scheduled_at_local"
+            type="datetime-local"
+            name="scheduled_at_local"
+          >
+
+          <input
+            id="scheduled_at_utc"
+            type="hidden"
+            name="scheduled_at_utc"
+          >
+
+          <small>
+            Uses your current browser timezone.
+          </small>
+        </div>
+
+        <div>
+          <label for="title">
+            Title
+          </label>
+
+          <input
+            id="title"
+            type="text"
+            name="title"
+            maxlength="255"
+            value="{{ job.youtube_title or job.title }}"
+          >
+        </div>
+      </div>
+
+      <div style="margin-top:20px;">
+        <label for="description">
+          Caption / Description
+        </label>
+
+        <textarea
+          id="description"
+          name="description"
+          rows="8"
+        >{{ job.youtube_description or "" }}</textarea>
+      </div>
+
+      <div style="margin-top:24px;">
+        <button
+          type="submit"
+          class="crm-primary-button"
+        >
+          Queue Facebook Upload
+        </button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<script>
+(() => {
+  const mode = document.getElementById(
+    "publish_mode"
+  );
+  const wrap = document.getElementById(
+    "facebook-schedule-wrap"
+  );
+  const local = document.getElementById(
+    "scheduled_at_local"
+  );
+  const utc = document.getElementById(
+    "scheduled_at_utc"
+  );
+
+  const sync = () => {
+    const scheduled =
+      mode.value === "scheduled";
+
+    wrap.hidden = !scheduled;
+    local.required = scheduled;
+
+    if (
+      scheduled &&
+      local.value
+    ) {
+      const date = new Date(local.value);
+
+      if (!Number.isNaN(date.getTime())) {
+        utc.value = date.toISOString();
+      }
+    } else {
+      utc.value = "";
+    }
+  };
+
+  mode.addEventListener(
+    "change",
+    sync
+  );
+
+  local.addEventListener(
+    "change",
+    sync
+  );
+
+  mode.closest("form").addEventListener(
+    "submit",
+    sync
+  );
+
+  sync();
+})();
+</script>
+{% endblock %}

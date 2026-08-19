@@ -28,6 +28,23 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    zernio_profile_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
+    recovery_code_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
+    recovery_code_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
@@ -174,6 +191,19 @@ class VideoJob(Base):
         default=False,
     )
 
+    facebook_auto_publish_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+    facebook_auto_publish_connection_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    facebook_auto_publish_scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
@@ -225,6 +255,51 @@ class YouTubeConnection(Base):
         DateTime,
         nullable=True,
     )
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class FacebookConnection(Base):
+    __tablename__ = "facebook_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    zernio_account_id: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+    )
+    zernio_profile_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    username: Mapped[str] = mapped_column(String(255), default="")
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    profile_picture_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     connected_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=utc_now,
@@ -410,6 +485,94 @@ class YouTubePublishJob(Base):
         DateTime,
         nullable=True,
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+
+class FacebookPublishJob(Base):
+    __tablename__ = "facebook_publish_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "video_job_id",
+            "facebook_connection_id",
+            name="uq_facebook_publish_video_page",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    video_job_id: Mapped[int] = mapped_column(
+        ForeignKey("video_jobs.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    facebook_connection_id: Mapped[int] = mapped_column(
+        ForeignKey("facebook_connections.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(50),
+        default="draft",
+    )
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+
+    title: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+
+    scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    request_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
+    bytes_uploaded: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+    zernio_post_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+    platform_post_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    facebook_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=utc_now,

@@ -7,6 +7,13 @@ from app.security import hash_password
 
 
 
+USER_COLUMN_MIGRATIONS = {
+    "zernio_profile_id": "VARCHAR(100)",
+    "recovery_code_hash": "VARCHAR(64)",
+    "recovery_code_created_at": "DATETIME",
+}
+
+
 VIDEO_JOB_COLUMN_MIGRATIONS = {
     "input_mode": "VARCHAR(20) NOT NULL DEFAULT 'title'",
     "source_script": "TEXT",
@@ -40,6 +47,9 @@ VIDEO_JOB_COLUMN_MIGRATIONS = {
     "auto_publish_scheduled_at": "DATETIME",
     "manual_thumbnail_path": "TEXT",
     "manual_thumbnail_uploaded_at": "DATETIME",
+    "facebook_auto_publish_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "facebook_auto_publish_connection_id": "INTEGER",
+    "facebook_auto_publish_scheduled_at": "DATETIME",
 }
 
 
@@ -93,6 +103,26 @@ def migrate_youtube_publish_jobs():
             )
 
 
+def migrate_users():
+    with engine.begin() as connection:
+        columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("users")
+        }
+
+        for column_name, definition in USER_COLUMN_MIGRATIONS.items():
+            if column_name in columns:
+                continue
+
+            connection.execute(
+                text(
+                    f"ALTER TABLE users "
+                    f"ADD COLUMN {column_name} {definition}"
+                )
+            )
+            print(f"Added users.{column_name}")
+
+
 def migrate_video_jobs():
     with engine.begin() as connection:
         columns = {
@@ -115,6 +145,7 @@ def migrate_video_jobs():
 
 def initialize_database():
     Base.metadata.create_all(bind=engine)
+    migrate_users()
     migrate_video_jobs()
     migrate_youtube_publish_jobs()
 

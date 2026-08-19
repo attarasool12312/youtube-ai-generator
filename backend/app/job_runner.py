@@ -609,6 +609,33 @@ def run_job(job_id: int) -> None:
                 flush=True,
             )
 
+        # Facebook publishing is an independent post-render layer.
+        # Failure here must never change an already completed VideoJob.
+        try:
+            from app.facebook_auto_publish import (
+                prepare_and_queue_facebook_auto_publish,
+            )
+
+            facebook_publish_result = (
+                prepare_and_queue_facebook_auto_publish(
+                    job_id
+                )
+            )
+
+            print(
+                "FACEBOOK_AUTO_PUBLISH_RESULT:",
+                facebook_publish_result,
+                flush=True,
+            )
+
+        except Exception as facebook_publish_error:
+            print(
+                "FACEBOOK_AUTO_PUBLISH_FAILED:",
+                str(facebook_publish_error),
+                file=sys.stderr,
+                flush=True,
+            )
+
     except Exception as error:
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)

@@ -296,6 +296,19 @@
                 >YouTube</a>
                 {% endif %}
 
+                {% if job.facebook_url %}
+                <a
+                  class="download-button"
+                  href="{{ job.facebook_url }}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Facebook</a>
+                {% elif job.facebook_publish_status %}
+                <span class="download-button">
+                  Facebook {{ job.facebook_publish_status | replace("_", " ") | title }}
+                </span>
+                {% endif %}
+
 
                 <a
                   class="download-button"

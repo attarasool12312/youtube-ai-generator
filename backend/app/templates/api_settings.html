@@ -430,6 +430,45 @@ Manage AI providers, stock-media services, and external integrations.
       </div>
     </section>
 
+    <section class="crm-card api-provider-section">
+      <div class="crm-card-header">
+        <div>
+          <span class="developer-section-label">
+            Facebook Publishing
+          </span>
+          <h2>Zernio Social Publishing API</h2>
+          <p>
+            Connect Facebook Pages through Zernio and publish completed
+            videos without storing social access tokens directly in this app.
+          </p>
+        </div>
+
+        <span class="api-state {% if zernio_ready %}is-ready{% endif %}">
+          {{ "Configured" if zernio_ready else "Not configured" }}
+        </span>
+      </div>
+
+      <div class="api-fields-grid">
+        <div>
+          <label for="zernio_api_key">
+            Zernio API Key
+          </label>
+
+          <input
+            id="zernio_api_key"
+            type="password"
+            name="zernio_api_key"
+            autocomplete="new-password"
+            placeholder="{{ 'Saved securely — enter to replace' if zernio_ready else 'Enter Zernio API key' }}"
+          >
+
+          <small>
+            Stored encrypted. Leave blank to keep the currently saved key.
+          </small>
+        </div>
+      </div>
+    </section>
+
     <div class="api-save-bar">
       <div>
         <strong>Secure credential storage</strong>
@@ -523,6 +562,12 @@ Manage AI providers, stock-media services, and external integrations.
           {% if youtube_client_secret_ready %}
           <option value="youtube_client_secret">
             YouTube OAuth Client Secret
+          </option>
+          {% endif %}
+
+          {% if zernio_ready %}
+          <option value="zernio_api_key">
+            Zernio API Key
           </option>
           {% endif %}
 

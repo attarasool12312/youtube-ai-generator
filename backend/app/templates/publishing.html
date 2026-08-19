@@ -15,12 +15,11 @@ Prepare completed videos for publishing and monitor integration readiness.
         Distribution Workspace
       </span>
 
-      <h2>YouTube publishing center</h2>
+      <h2>Social publishing center</h2>
 
       <p>
-        Review completed videos and confirm that the required
-        YouTube OAuth credentials and client libraries are available
-        on the current deployment.
+        Manage YouTube and Facebook connections, publish completed
+        videos, schedule releases and monitor publishing activity.
       </p>
     </div>
 
@@ -106,6 +105,38 @@ Prepare completed videos for publishing and monitor integration readiness.
   </div>
   {% endif %}
 
+  {% set facebook_message = request.query_params.get("facebook") %}
+
+  {% if facebook_message == "connected" %}
+  <div class="success">
+    Facebook Page connected successfully.
+  </div>
+  {% elif facebook_message == "disconnected" %}
+  <div class="success">
+    Facebook Page disconnected successfully.
+  </div>
+  {% elif facebook_message == "connection_failed" %}
+  <div class="error">
+    Facebook connection could not be started.
+  </div>
+  {% elif facebook_message == "sync_failed" %}
+  <div class="error">
+    Facebook Page connection completed, but syncing failed.
+  </div>
+  {% elif facebook_message == "access_denied" %}
+  <div class="error">
+    Facebook connection was cancelled or denied.
+  </div>
+  {% elif facebook_message == "disconnect_failed" %}
+  <div class="error">
+    Facebook Page could not be disconnected.
+  </div>
+  {% elif facebook_message == "not_found" %}
+  <div class="error">
+    Facebook connection was not found.
+  </div>
+  {% endif %}
+
   <section class="crm-card">
     <div class="crm-card-header">
       <div>
@@ -188,6 +219,95 @@ Prepare completed videos for publishing and monitor integration readiness.
 
       <p>
         Configure OAuth credentials, then connect the first channel.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
+          Facebook Connections
+        </span>
+
+        <h2>Connected Facebook Pages</h2>
+
+        <p>
+          Connect Facebook Pages through Zernio and choose a Page
+          independently for each video.
+        </p>
+      </div>
+
+      {% if zernio_ready %}
+      <a href="/facebook/connect" class="crm-primary-button">
+        Connect Facebook Page
+      </a>
+      {% else %}
+      <a href="/settings" class="crm-primary-button">
+        Configure Zernio
+      </a>
+      {% endif %}
+    </div>
+
+    {% if facebook_connections %}
+    <div class="publishing-video-list">
+      {% for connection in facebook_connections %}
+      <article class="publishing-video-card">
+        <div class="publishing-video-main">
+          {% if connection.profile_picture_url %}
+          <img
+            src="{{ connection.profile_picture_url }}"
+            alt=""
+            width="48"
+            height="48"
+            style="border-radius:50%;object-fit:cover;"
+          >
+          {% else %}
+          <span class="overview-video-icon">FB</span>
+          {% endif %}
+
+          <div>
+            <strong>
+              {{ connection.display_name or connection.username }}
+            </strong>
+
+            <small>
+              {{ connection.username }}
+            </small>
+          </div>
+        </div>
+
+        <span class="job-status {% if connection.is_active %}job-status-completed{% endif %}">
+          {{ "Connected" if connection.is_active else "Disconnected" }}
+        </span>
+
+        <div class="publishing-video-actions">
+          {% if connection.is_active %}
+          <form
+            method="post"
+            action="/facebook/connections/{{ connection.id }}/disconnect"
+            onsubmit="return confirm('Disconnect this Facebook Page?');"
+          >
+            <button type="submit" class="api-danger-button">
+              Disconnect
+            </button>
+          </form>
+          {% else %}
+          <a href="/facebook/connect">
+            Connect Again
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No Facebook Page connected</h3>
+
+      <p>
+        Connect a Facebook Page to enable automatic and manual publishing.
       </p>
     </div>
     {% endif %}
@@ -442,6 +562,112 @@ Prepare completed videos for publishing and monitor integration readiness.
     <div class="crm-card-header">
       <div>
         <span class="developer-section-label">
+          Facebook Publishing Activity
+        </span>
+
+        <h2>Facebook upload queue and history</h2>
+
+        <p>
+          Monitor Facebook uploads, processing, scheduling,
+          failures and published destinations.
+        </p>
+      </div>
+    </div>
+
+    {% if facebook_publishing_items %}
+    <div class="publishing-video-list">
+      {% for item in facebook_publishing_items %}
+      {% set publish_job = item.publish_job %}
+      {% set video_job = item.video_job %}
+      {% set connection = item.connection %}
+
+      <article class="publishing-video-card">
+        <div class="publishing-video-main">
+          <span class="overview-video-icon">FB</span>
+
+          <div>
+            <strong>{{ publish_job.title or (video_job.title if video_job else "Facebook Video") }}</strong>
+
+            <small>
+              {{ connection.display_name if connection else "Unknown Page" }}
+              · Attempt {{ publish_job.attempt_count }}
+            </small>
+
+            {% if publish_job.status in ["queued", "uploading", "publishing"] %}
+            <div style="margin-top:10px;">
+              <progress
+                value="{{ publish_job.progress }}"
+                max="100"
+                style="width:100%;"
+              ></progress>
+
+              <small>
+                {{ publish_job.progress }}%
+                {% if publish_job.total_bytes %}
+                · {{ publish_job.bytes_uploaded }} /
+                {{ publish_job.total_bytes }} bytes
+                {% endif %}
+              </small>
+            </div>
+            {% endif %}
+
+            {% if publish_job.last_error %}
+            <small style="display:block;margin-top:8px;">
+              {{ publish_job.last_error }}
+            </small>
+            {% endif %}
+          </div>
+        </div>
+
+        <span class="job-status {% if publish_job.status in ['published', 'scheduled'] %}job-status-completed{% endif %}">
+          {{ publish_job.status | replace("_", " ") | title }}
+        </span>
+
+        <div class="publishing-video-actions">
+          {% if publish_job.facebook_url %}
+          <a
+            href="{{ publish_job.facebook_url }}"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open on Facebook
+          </a>
+          {% elif publish_job.status == "published" %}
+          <span>
+            Facebook Published
+          </span>
+          {% endif %}
+
+          {% if publish_job.status == "failed" and video_job %}
+          <a href="/publishing/jobs/{{ video_job.id }}/facebook">
+            Retry Facebook
+          </a>
+          {% endif %}
+
+          {% if video_job %}
+          <a href="/jobs/{{ video_job.id }}/download">
+            Download Video
+          </a>
+          {% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="crm-empty-state">
+      <h3>No Facebook publishing jobs yet</h3>
+
+      <p>
+        Facebook uploads will appear here after they are queued.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">
           Ready Videos
         </span>
 
@@ -489,7 +715,11 @@ Prepare completed videos for publishing and monitor integration readiness.
           </a>
 
           <a href="/publishing/jobs/{{ job.id }}/draft">
-            Prepare Upload
+            YouTube Upload
+          </a>
+
+          <a href="/publishing/jobs/{{ job.id }}/facebook">
+            Facebook Upload
           </a>
         </div>
       </article>

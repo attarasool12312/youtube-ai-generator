@@ -61,6 +61,8 @@ from app.models import (
     VideoJob,
     YouTubeConnection,
     YouTubePublishJob,
+    FacebookConnection,
+    FacebookPublishJob,
     TitleResearchProfile,
     Avatar,
 )
@@ -68,6 +70,22 @@ from app.job_cleanup import cleanup_job_files
 from app.queue_launcher import start_queue_worker
 from app.youtube_publish_launcher import (
     start_youtube_publish_worker,
+)
+from app.facebook_publish_launcher import (
+    start_facebook_publish_worker,
+)
+from app.facebook_connections import (
+    ensure_user_zernio_profile,
+    sync_user_facebook_connections,
+)
+from app.facebook_publish_queue import (
+    FacebookPublishQueueError,
+    queue_facebook_publish_job,
+)
+from app.zernio_client import (
+    ZernioError,
+    disconnect_account,
+    get_facebook_connect_url,
 )
 from app.api_settings import (
     has_api_key,
@@ -77,7 +95,7 @@ from app.api_settings import (
 from app.provider_quota import clear_quota_cache, get_provider_quotas
 from app.api_health import get_test_results, test_provider
 from app.audio_export import create_narration_mp3
-from app.security import verify_password
+from app.security import hash_password, verify_password
 from app.voice_registry import (
     DEFAULT_NARRATOR_VOICE,
     validate_voice_speed, validated_voice_pool, voice_template_context,
@@ -89,6 +107,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     start_queue_worker()
     start_youtube_publish_worker()
+    start_facebook_publish_worker()
     yield
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -153,10 +172,286 @@ def login(
     return RedirectResponse("/", status_code=303)
 
 
+
+def _normalize_recovery_code(value: str) -> str:
+    return (
+        value.strip()
+        .upper()
+        .replace("-", "")
+        .replace(" ", "")
+    )
+
+
+def _recovery_code_digest(value: str) -> str:
+    import hashlib
+
+    normalized = _normalize_recovery_code(value)
+
+    return hashlib.sha256(
+        normalized.encode("utf-8")
+    ).hexdigest()
+
+
+@app.get("/forgot-password")
+def forgot_password_page(request: Request):
+    if request.session.get("user_id"):
+        return RedirectResponse(
+            "/profile",
+            status_code=303,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="forgot_password.html",
+        context={
+            "error": None,
+            "success": None,
+        },
+    )
+
+
+@app.post("/forgot-password")
+def forgot_password(
+    request: Request,
+    identifier: str = Form(...),
+    recovery_code: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    import hmac
+
+    identifier = identifier.strip()
+
+    error = None
+
+    if len(new_password) < 8:
+        error = "New password must be at least 8 characters."
+
+    elif new_password != confirm_password:
+        error = "New passwords do not match."
+
+    user = None
+
+    if error is None:
+        user = db.scalar(
+            select(User).where(
+                User.username == identifier
+            )
+        )
+
+        if user is None:
+            user = db.scalar(
+                select(User).where(
+                    User.email == identifier
+                )
+            )
+
+        supplied_hash = _recovery_code_digest(
+            recovery_code
+        )
+
+        valid_code = bool(
+            user
+            and user.is_active
+            and user.recovery_code_hash
+            and hmac.compare_digest(
+                user.recovery_code_hash,
+                supplied_hash,
+            )
+        )
+
+        if not valid_code:
+            error = (
+                "The account or recovery code is invalid."
+            )
+
+    if error:
+        return templates.TemplateResponse(
+            request=request,
+            name="forgot_password.html",
+            context={
+                "error": error,
+                "success": None,
+            },
+            status_code=400,
+        )
+
+    user.password_hash = hash_password(new_password)
+
+    # Recovery codes are one-time use.
+    user.recovery_code_hash = None
+    user.recovery_code_created_at = None
+
+    db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="forgot_password.html",
+        context={
+            "error": None,
+            "success": (
+                "Password reset successfully. "
+                "You can now sign in."
+            ),
+        },
+    )
+
+
 @app.post("/logout")
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/profile")
+def profile_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    user = db.get(
+        User,
+        int(request.session["user_id"]),
+    )
+
+    if user is None:
+        request.session.clear()
+        return RedirectResponse("/login", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="profile.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "profile",
+            "project_info": get_project_info(),
+            "user": user,
+            "error": (
+                "Current password is incorrect."
+                if request.query_params.get("recovery")
+                == "invalid_password"
+                else None
+            ),
+            "success": (
+                "Profile updated successfully."
+                if request.query_params.get("saved") == "1"
+                else None
+            ),
+        },
+    )
+
+
+@app.post("/profile")
+def update_profile(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(...),
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+    confirm_password: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    user = db.get(
+        User,
+        int(request.session["user_id"]),
+    )
+
+    if user is None:
+        request.session.clear()
+        return RedirectResponse("/login", status_code=303)
+
+    username = username.strip()
+    email = email.strip()
+
+    error = None
+
+    if len(username) < 3 or len(username) > 100:
+        error = "Username must be between 3 and 100 characters."
+
+    elif not email or "@" not in email or len(email) > 255:
+        error = "Enter a valid email address."
+
+    else:
+        existing_username = db.scalar(
+            select(User).where(
+                User.username == username,
+                User.id != user.id,
+            )
+        )
+
+        existing_email = db.scalar(
+            select(User).where(
+                User.email == email,
+                User.id != user.id,
+            )
+        )
+
+        if existing_username is not None:
+            error = "That username is already in use."
+
+        elif existing_email is not None:
+            error = "That email address is already in use."
+
+    changing_password = bool(
+        current_password
+        or new_password
+        or confirm_password
+    )
+
+    if error is None and changing_password:
+        if not current_password:
+            error = "Enter your current password."
+
+        elif not verify_password(
+            current_password,
+            user.password_hash,
+        ):
+            error = "Current password is incorrect."
+
+        elif len(new_password) < 8:
+            error = "New password must be at least 8 characters."
+
+        elif new_password != confirm_password:
+            error = "New password confirmation does not match."
+
+    if error is not None:
+        return templates.TemplateResponse(
+            request=request,
+            name="profile.html",
+            context={
+                "app_name": settings.app_name,
+                "active_page": "profile",
+                "project_info": get_project_info(),
+                "user": user,
+                "error": error,
+                "success": None,
+                "form_username": username,
+                "form_email": email,
+            },
+            status_code=400,
+        )
+
+    user.username = username
+    user.email = email
+
+    if changing_password:
+        user.password_hash = hash_password(
+            new_password
+        )
+
+    db.commit()
+
+    return RedirectResponse(
+        "/profile?saved=1",
+        status_code=303,
+    )
+
 
 JOB_STATUS_LABELS = {
     "waiting": "Waiting",
@@ -188,14 +483,24 @@ JOB_STATUS_LABELS = {
 }
 
 
-def prepare_job_display(job, publish_job=None):
+def prepare_job_display(job, publish_job=None, facebook_publish_job=None):
     job.pipeline_status = job.status
     job.pipeline_css_status = job.status
     job.pipeline_progress = job.progress
     job.youtube_url = None
+    job.facebook_url = None
+    job.facebook_publish_status = None
+    job.facebook_publish_progress = 0
 
     if publish_job is not None:
         job.youtube_url = publish_job.youtube_url
+
+    if facebook_publish_job is not None:
+        job.facebook_url = facebook_publish_job.facebook_url
+        job.facebook_publish_status = facebook_publish_job.status
+        job.facebook_publish_progress = (
+            facebook_publish_job.progress or 0
+        )
 
     if (
         job.status == "completed"
@@ -327,10 +632,23 @@ def load_dashboard_jobs(db):
         )
     ).all()
 
+    facebook_publish_jobs = db.scalars(
+        select(FacebookPublishJob).order_by(
+            FacebookPublishJob.id.desc()
+        )
+    ).all()
+
     latest_publish_by_video = {}
+    latest_facebook_publish_by_video = {}
 
     for publish_job in publish_jobs:
         latest_publish_by_video.setdefault(
+            publish_job.video_job_id,
+            publish_job,
+        )
+
+    for publish_job in facebook_publish_jobs:
+        latest_facebook_publish_by_video.setdefault(
             publish_job.video_job_id,
             publish_job,
         )
@@ -339,6 +657,7 @@ def load_dashboard_jobs(db):
         prepare_job_display(
             job,
             latest_publish_by_video.get(job.id),
+            latest_facebook_publish_by_video.get(job.id),
         )
         for job in jobs
     ]
@@ -920,6 +1239,18 @@ def create_video_page(
 
     jobs = load_dashboard_jobs(db)
 
+    user_id = int(request.session["user_id"])
+
+    facebook_connections = db.scalars(
+        select(FacebookConnection)
+        .where(
+            FacebookConnection.user_id == user_id,
+        )
+        .order_by(
+            FacebookConnection.connected_at.desc()
+        )
+    ).all()
+
     youtube_connections = db.scalars(
         select(YouTubeConnection)
         .where(
@@ -935,6 +1266,17 @@ def create_video_page(
         "create",
     )
     context["youtube_connections"] = youtube_connections
+
+    user_id = int(request.session["user_id"])
+    facebook_connections = db.scalars(
+        select(FacebookConnection)
+        .where(
+            FacebookConnection.user_id == user_id,
+            FacebookConnection.is_active.is_(True),
+        )
+        .order_by(FacebookConnection.display_name)
+    ).all()
+    context["facebook_connections"] = facebook_connections
 
     avatars = db.scalars(
         select(Avatar)
@@ -978,6 +1320,17 @@ def script_to_video_page(
         "script_to_video",
     )
     context["youtube_connections"] = youtube_connections
+
+    user_id = int(request.session["user_id"])
+    facebook_connections = db.scalars(
+        select(FacebookConnection)
+        .where(
+            FacebookConnection.user_id == user_id,
+            FacebookConnection.is_active.is_(True),
+        )
+        .order_by(FacebookConnection.display_name)
+    ).all()
+    context["facebook_connections"] = facebook_connections
 
     avatars = db.scalars(
         select(Avatar)
@@ -1046,6 +1399,10 @@ def add_jobs(
     auto_publish_made_for_kids: str = Form("no"),
     auto_publish_notify_subscribers: str = Form(""),
     auto_publish_metadata: str = Form("on"),
+    facebook_auto_publish_connection_id: int = Form(0),
+    facebook_auto_publish_mode: str = Form("now"),
+    facebook_auto_publish_scheduled_at_local: str = Form(""),
+    facebook_auto_publish_scheduled_at_utc: str = Form(""),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
@@ -1195,6 +1552,89 @@ def add_jobs(
     )
     auto_metadata_value = auto_publish_metadata == "on"
 
+    facebook_auto_publish_enabled = (
+        facebook_auto_publish_connection_id > 0
+    )
+    selected_facebook_connection = None
+    facebook_auto_publish_scheduled_at = None
+
+    if facebook_auto_publish_enabled:
+        selected_facebook_connection = db.scalar(
+            select(FacebookConnection).where(
+                FacebookConnection.id
+                == facebook_auto_publish_connection_id,
+                FacebookConnection.user_id
+                == int(request.session["user_id"]),
+                FacebookConnection.is_active.is_(True),
+            )
+        )
+
+        if selected_facebook_connection is None:
+            return RedirectResponse(
+                "/videos/create?success=Selected Facebook Page is unavailable.",
+                status_code=303,
+            )
+
+        facebook_publish_mode = (
+            facebook_auto_publish_mode
+            .strip()
+            .lower()
+        )
+
+        if facebook_publish_mode not in {
+            "now",
+            "scheduled",
+        }:
+            facebook_publish_mode = "now"
+
+        if facebook_publish_mode == "scheduled":
+            if not facebook_auto_publish_scheduled_at_utc.strip():
+                return RedirectResponse(
+                    "/videos/create?success=Choose a future Facebook publishing date and time.",
+                    status_code=303,
+                )
+
+            try:
+                parsed_facebook_schedule = datetime.fromisoformat(
+                    facebook_auto_publish_scheduled_at_utc
+                    .strip()
+                    .replace("Z", "+00:00")
+                )
+
+                if parsed_facebook_schedule.tzinfo is None:
+                    parsed_facebook_schedule = (
+                        parsed_facebook_schedule.replace(
+                            tzinfo=timezone.utc
+                        )
+                    )
+
+                parsed_facebook_schedule = (
+                    parsed_facebook_schedule.astimezone(
+                        timezone.utc
+                    )
+                )
+
+                if (
+                    parsed_facebook_schedule
+                    <= datetime.now(timezone.utc)
+                ):
+                    return RedirectResponse(
+                        "/videos/create?success=Facebook publishing time must be in the future.",
+                        status_code=303,
+                    )
+
+                facebook_auto_publish_scheduled_at = (
+                    parsed_facebook_schedule.replace(
+                        tzinfo=None
+                    )
+                )
+
+            except ValueError:
+                return RedirectResponse(
+                    "/videos/create?success=Invalid Facebook publishing date and time.",
+                    status_code=303,
+                )
+
     if not title_list:
         return RedirectResponse("/videos/create?success=No valid titles entered.", status_code=303)
     if len(title_list) > 20:
@@ -1251,6 +1691,17 @@ def add_jobs(
             ),
             auto_publish_metadata=auto_metadata_value,
             auto_publish_thumbnail=False,
+            facebook_auto_publish_enabled=(
+                facebook_auto_publish_enabled
+            ),
+            facebook_auto_publish_connection_id=(
+                selected_facebook_connection.id
+                if selected_facebook_connection
+                else None
+            ),
+            facebook_auto_publish_scheduled_at=(
+                facebook_auto_publish_scheduled_at
+            ),
             status="waiting",
             progress=0,
             queue_position=next_position + index,
@@ -1289,6 +1740,10 @@ def add_script_job(
     auto_publish_made_for_kids: str = Form("no"),
     auto_publish_notify_subscribers: str = Form(""),
     auto_publish_metadata: str = Form("on"),
+    facebook_auto_publish_connection_id: int = Form(0),
+    facebook_auto_publish_mode: str = Form("now"),
+    facebook_auto_publish_scheduled_at_local: str = Form(""),
+    facebook_auto_publish_scheduled_at_utc: str = Form(""),
     db: Session = Depends(get_db),
 ):
     if not request.session.get("user_id"):
@@ -1468,6 +1923,89 @@ def add_script_job(
     )
     auto_metadata_value = auto_publish_metadata == "on"
 
+    facebook_auto_publish_enabled = (
+        facebook_auto_publish_connection_id > 0
+    )
+    selected_facebook_connection = None
+    facebook_auto_publish_scheduled_at = None
+
+    if facebook_auto_publish_enabled:
+        selected_facebook_connection = db.scalar(
+            select(FacebookConnection).where(
+                FacebookConnection.id
+                == facebook_auto_publish_connection_id,
+                FacebookConnection.user_id
+                == int(request.session["user_id"]),
+                FacebookConnection.is_active.is_(True),
+            )
+        )
+
+        if selected_facebook_connection is None:
+            return RedirectResponse(
+                "/script-to-video?success=Selected Facebook Page is unavailable.",
+                status_code=303,
+            )
+
+        facebook_publish_mode = (
+            facebook_auto_publish_mode
+            .strip()
+            .lower()
+        )
+
+        if facebook_publish_mode not in {
+            "now",
+            "scheduled",
+        }:
+            facebook_publish_mode = "now"
+
+        if facebook_publish_mode == "scheduled":
+            if not facebook_auto_publish_scheduled_at_utc.strip():
+                return RedirectResponse(
+                    "/script-to-video?success=Choose a future Facebook publishing date and time.",
+                    status_code=303,
+                )
+
+            try:
+                parsed_facebook_schedule = datetime.fromisoformat(
+                    facebook_auto_publish_scheduled_at_utc
+                    .strip()
+                    .replace("Z", "+00:00")
+                )
+
+                if parsed_facebook_schedule.tzinfo is None:
+                    parsed_facebook_schedule = (
+                        parsed_facebook_schedule.replace(
+                            tzinfo=timezone.utc
+                        )
+                    )
+
+                parsed_facebook_schedule = (
+                    parsed_facebook_schedule.astimezone(
+                        timezone.utc
+                    )
+                )
+
+                if (
+                    parsed_facebook_schedule
+                    <= datetime.now(timezone.utc)
+                ):
+                    return RedirectResponse(
+                        "/script-to-video?success=Facebook publishing time must be in the future.",
+                        status_code=303,
+                    )
+
+                facebook_auto_publish_scheduled_at = (
+                    parsed_facebook_schedule.replace(
+                        tzinfo=None
+                    )
+                )
+
+            except ValueError:
+                return RedirectResponse(
+                    "/script-to-video?success=Invalid Facebook publishing date and time.",
+                    status_code=303,
+                )
+
     # Same orphan cleanup used by the normal title workflow.
     db.execute(
         delete(YouTubePublishJob).where(
@@ -1526,6 +2064,17 @@ def add_script_job(
         auto_publish_notify_subscribers=notify_subscribers_value,
         auto_publish_metadata=auto_metadata_value,
         auto_publish_thumbnail=False,
+        facebook_auto_publish_enabled=(
+            facebook_auto_publish_enabled
+        ),
+        facebook_auto_publish_connection_id=(
+            selected_facebook_connection.id
+            if selected_facebook_connection
+            else None
+        ),
+        facebook_auto_publish_scheduled_at=(
+            facebook_auto_publish_scheduled_at
+        ),
 
         status="waiting",
         progress=0,
@@ -1988,6 +2537,150 @@ def scene_media_preview(
     )
 
 
+
+@app.get("/facebook/connect")
+def facebook_connect(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    if not has_api_key("zernio_api_key"):
+        return RedirectResponse(
+            "/settings?facebook=zernio_required",
+            status_code=303,
+        )
+
+    user = db.get(
+        User,
+        int(request.session["user_id"]),
+    )
+
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        profile_id = ensure_user_zernio_profile(
+            db,
+            user,
+        )
+
+        callback_url = (
+            get_public_app_url().rstrip("/")
+            + "/facebook/sync"
+        )
+
+        auth_url = get_facebook_connect_url(
+            profile_id,
+            redirect_url=callback_url,
+        )
+
+        return RedirectResponse(
+            auth_url,
+            status_code=302,
+        )
+
+    except Exception:
+        logger.exception(
+            "Could not start Facebook connection"
+        )
+        return RedirectResponse(
+            "/publishing?facebook=connection_failed",
+            status_code=303,
+        )
+
+
+@app.get("/facebook/sync")
+def facebook_sync(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    if request.query_params.get("error"):
+        return RedirectResponse(
+            "/publishing?facebook=access_denied",
+            status_code=303,
+        )
+
+    user = db.get(
+        User,
+        int(request.session["user_id"]),
+    )
+
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        sync_user_facebook_connections(
+            db,
+            user,
+        )
+    except Exception:
+        logger.exception(
+            "Could not sync Facebook connections"
+        )
+        return RedirectResponse(
+            "/publishing?facebook=sync_failed",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        "/publishing?facebook=connected",
+        status_code=303,
+    )
+
+
+@app.post(
+    "/facebook/connections/{connection_id}/disconnect"
+)
+def facebook_disconnect(
+    connection_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    user_id = int(request.session["user_id"])
+
+    connection = db.scalar(
+        select(FacebookConnection).where(
+            FacebookConnection.id == connection_id,
+            FacebookConnection.user_id == user_id,
+        )
+    )
+
+    if connection is None:
+        return RedirectResponse(
+            "/publishing?facebook=not_found",
+            status_code=303,
+        )
+
+    try:
+        disconnect_account(
+            connection.zernio_account_id,
+        )
+    except ZernioError:
+        logger.exception(
+            "Could not disconnect Facebook account"
+        )
+        return RedirectResponse(
+            "/publishing?facebook=disconnect_failed",
+            status_code=303,
+        )
+
+    connection.is_active = False
+    db.commit()
+
+    return RedirectResponse(
+        "/publishing?facebook=disconnected",
+        status_code=303,
+    )
+
+
 @app.get("/publishing")
 def publishing_page(
     request: Request,
@@ -1997,6 +2690,18 @@ def publishing_page(
         return RedirectResponse("/login", status_code=303)
 
     jobs = load_dashboard_jobs(db)
+
+    user_id = int(request.session["user_id"])
+
+    facebook_connections = db.scalars(
+        select(FacebookConnection)
+        .where(
+            FacebookConnection.user_id == user_id,
+        )
+        .order_by(
+            FacebookConnection.connected_at.desc()
+        )
+    ).all()
 
     youtube_connections = db.scalars(
         select(YouTubeConnection).order_by(
@@ -2054,6 +2759,27 @@ def publishing_page(
 
     publishing_items = []
 
+    facebook_publish_jobs = db.scalars(
+        select(FacebookPublishJob)
+        .order_by(FacebookPublishJob.id.desc())
+        .limit(50)
+    ).all()
+
+    facebook_publishing_items = []
+
+    for publish_job in facebook_publish_jobs:
+        facebook_publishing_items.append({
+            "publish_job": publish_job,
+            "video_job": db.get(
+                VideoJob,
+                publish_job.video_job_id,
+            ),
+            "connection": db.get(
+                FacebookConnection,
+                publish_job.facebook_connection_id,
+            ),
+        })
+
     for publish_job in youtube_publish_jobs:
         publishing_items.append({
             "publish_job": publish_job,
@@ -2076,7 +2802,10 @@ def publishing_page(
             "project_info": get_project_info(),
             "publishing_status": collect_publishing_status(),
             "youtube_connections": youtube_connections,
+            "facebook_connections": facebook_connections,
+            "zernio_ready": has_api_key("zernio_api_key"),
             "publishing_items": publishing_items,
+            "facebook_publishing_items": facebook_publishing_items,
             "publishing_page": publishing_page,
             "publishing_has_older": publishing_has_older,
             "publishing_has_newer": publishing_has_newer,
@@ -2117,6 +2846,230 @@ def youtube_publishing_status(
             for publish_job in publish_jobs
         ],
     }
+
+
+
+@app.get("/publishing/jobs/{job_id}/facebook")
+def facebook_publish_draft_page(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    user_id = int(request.session["user_id"])
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/publishing?facebook=video_not_found",
+            status_code=303,
+        )
+
+    try:
+        resolve_final_video_path(job)
+    except YouTubePublishFileError:
+        return RedirectResponse(
+            "/publishing?facebook=video_not_ready",
+            status_code=303,
+        )
+
+    facebook_connections = db.scalars(
+        select(FacebookConnection)
+        .where(
+            FacebookConnection.user_id == user_id,
+            FacebookConnection.is_active.is_(True),
+        )
+        .order_by(FacebookConnection.display_name)
+    ).all()
+
+    if not facebook_connections:
+        return RedirectResponse(
+            "/publishing?facebook=no_pages",
+            status_code=303,
+        )
+
+    existing = db.scalar(
+        select(FacebookPublishJob)
+        .where(
+            FacebookPublishJob.video_job_id == job.id,
+            FacebookPublishJob.user_id == user_id,
+        )
+        .order_by(FacebookPublishJob.id.desc())
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="facebook_publish_draft.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "publishing",
+            "project_info": get_project_info(),
+            "job": job,
+            "facebook_connections": facebook_connections,
+            "existing": existing,
+            "error": None,
+        },
+    )
+
+
+@app.post("/publishing/jobs/{job_id}/facebook")
+def save_facebook_publish_draft_route(
+    job_id: int,
+    request: Request,
+    facebook_connection_id: int = Form(...),
+    title: str = Form(""),
+    description: str = Form(""),
+    publish_mode: str = Form("now"),
+    scheduled_at_local: str = Form(""),
+    scheduled_at_utc: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    user_id = int(request.session["user_id"])
+    job = db.get(VideoJob, job_id)
+
+    if job is None:
+        return RedirectResponse(
+            "/publishing?facebook=video_not_found",
+            status_code=303,
+        )
+
+    try:
+        resolve_final_video_path(job)
+    except YouTubePublishFileError:
+        return RedirectResponse(
+            "/publishing?facebook=video_not_ready",
+            status_code=303,
+        )
+
+    connection = db.scalar(
+        select(FacebookConnection).where(
+            FacebookConnection.id == facebook_connection_id,
+            FacebookConnection.user_id == user_id,
+            FacebookConnection.is_active.is_(True),
+        )
+    )
+
+    if connection is None:
+        return RedirectResponse(
+            f"/publishing/jobs/{job_id}/facebook?error=page_unavailable",
+            status_code=303,
+        )
+
+    publish_mode = publish_mode.strip().lower()
+
+    if publish_mode not in {"now", "scheduled"}:
+        publish_mode = "now"
+
+    scheduled_at = None
+
+    if publish_mode == "scheduled":
+        if not scheduled_at_utc.strip():
+            return RedirectResponse(
+                f"/publishing/jobs/{job_id}/facebook?error=schedule_required",
+                status_code=303,
+            )
+
+        try:
+            parsed = datetime.fromisoformat(
+                scheduled_at_utc.strip().replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(
+                    tzinfo=timezone.utc
+                )
+
+            parsed = parsed.astimezone(
+                timezone.utc
+            )
+
+            if parsed <= datetime.now(timezone.utc):
+                return RedirectResponse(
+                    f"/publishing/jobs/{job_id}/facebook?error=schedule_past",
+                    status_code=303,
+                )
+
+            scheduled_at = parsed.replace(
+                tzinfo=None
+            )
+
+        except ValueError:
+            return RedirectResponse(
+                f"/publishing/jobs/{job_id}/facebook?error=schedule_invalid",
+                status_code=303,
+            )
+
+    publish_job = db.scalar(
+        select(FacebookPublishJob).where(
+            FacebookPublishJob.video_job_id == job.id,
+            FacebookPublishJob.facebook_connection_id
+            == connection.id,
+        )
+    )
+
+    if publish_job is None:
+        publish_job = FacebookPublishJob(
+            user_id=user_id,
+            video_job_id=job.id,
+            facebook_connection_id=connection.id,
+            status="draft",
+        )
+        db.add(publish_job)
+
+    elif publish_job.status in {
+        "queued",
+        "uploading",
+        "publishing",
+        "published",
+        "scheduled",
+    }:
+        return RedirectResponse(
+            "/publishing?facebook=already_queued",
+            status_code=303,
+        )
+
+    publish_job.title = (
+        title.strip()
+        or job.youtube_title
+        or job.title
+        or "Video"
+    )[:255]
+
+    publish_job.description = (
+        description.strip()
+        or job.youtube_description
+        or ""
+    )
+    publish_job.scheduled_at = scheduled_at
+    publish_job.status = "draft"
+    publish_job.last_error = None
+
+    db.commit()
+    db.refresh(publish_job)
+
+    try:
+        queue_facebook_publish_job(
+            db,
+            publish_job,
+        )
+    except FacebookPublishQueueError as error:
+        return RedirectResponse(
+            f"/publishing?facebook={error.code}",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        "/publishing?facebook=upload_queued",
+        status_code=303,
+    )
 
 
 @app.get("/publishing/jobs/{job_id}/draft")
@@ -2609,6 +3562,7 @@ def api_settings_page(request: Request):
     youtube_client_secret_ready = has_api_key(
         "youtube_client_secret"
     )
+    zernio_ready = has_api_key("zernio_api_key")
     force_limits_refresh = request.query_params.get("limits_refreshed") == "1"
     provider_quotas = get_provider_quotas(
         force_refresh=force_limits_refresh
@@ -2622,6 +3576,7 @@ def api_settings_page(request: Request):
         gemini_ready,
         together_ready,
         youtube_client_id_ready and youtube_client_secret_ready,
+        zernio_ready,
     ])
 
     return templates.TemplateResponse(
@@ -2641,8 +3596,9 @@ def api_settings_page(request: Request):
             "public_app_url": get_public_app_url(),
             "youtube_client_id_ready": youtube_client_id_ready,
             "youtube_client_secret_ready": youtube_client_secret_ready,
+            "zernio_ready": zernio_ready,
             "configured_count": configured_count,
-            "total_integrations": 7,
+            "total_integrations": 8,
             "provider_quotas": provider_quotas,
             "limits_checked_at": (
                 provider_quotas[0]["checked_at"]
@@ -2689,6 +3645,7 @@ def save_api_settings(
     public_app_url: str = Form(""),
     youtube_client_id: str = Form(""),
     youtube_client_secret: str = Form(""),
+    zernio_api_key: str = Form(""),
 ):
     if not request.session.get("user_id"):
         return RedirectResponse("/login", status_code=303)
@@ -2715,6 +3672,7 @@ def save_api_settings(
         "youtube_client_secret",
         youtube_client_secret.strip(),
     )
+    save_api_key("zernio_api_key", zernio_api_key.strip())
     clear_quota_cache()
 
     return RedirectResponse("/settings?saved=1", status_code=303)
@@ -2731,6 +3689,7 @@ ALLOWED_API_SETTINGS = {
     "public_app_url",
     "youtube_client_id",
     "youtube_client_secret",
+    "zernio_api_key",
 }
 
 
@@ -2871,4 +3830,83 @@ def download_job_captions_vtt(
         str(subtitle),
         media_type="text/vtt",
         filename=f"captions-job-{job_id}.vtt",
+    )
+
+
+
+@app.post("/profile/recovery-code")
+def generate_profile_recovery_code(
+    request: Request,
+    current_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    import secrets
+    from datetime import datetime, timezone
+
+    if not request.session.get("user_id"):
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    user = db.get(
+        User,
+        int(request.session["user_id"]),
+    )
+
+    if user is None:
+        request.session.clear()
+
+        return RedirectResponse(
+            "/login",
+            status_code=303,
+        )
+
+    if not verify_password(
+        current_password,
+        user.password_hash,
+    ):
+        return RedirectResponse(
+            "/profile?recovery=invalid_password",
+            status_code=303,
+        )
+
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+    raw_code = "".join(
+        secrets.choice(alphabet)
+        for _ in range(16)
+    )
+
+    display_code = "-".join(
+        raw_code[i:i + 4]
+        for i in range(0, 16, 4)
+    )
+
+    user.recovery_code_hash = (
+        _recovery_code_digest(raw_code)
+    )
+
+    user.recovery_code_created_at = (
+        datetime.now(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    db.commit()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="profile.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "profile",
+            "project_info": get_project_info(),
+            "user": user,
+            "error": None,
+            "success": (
+                "New recovery code generated. "
+                "Save it somewhere safe."
+            ),
+            "recovery_code": display_code,
+        },
     )
