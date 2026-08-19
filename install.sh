@@ -296,6 +296,7 @@ mkdir -p \
     "$MODEL_ROOT/huggingface" \
     "$PROJECT_ROOT/backend/data" \
     "$PROJECT_ROOT/logs/youtube-publishing" \
+    "$PROJECT_ROOT/logs/facebook-publishing" \
     "$PROJECT_ROOT/outputs/jobs" \
     "$PROJECT_ROOT/logs"
 
@@ -564,6 +565,107 @@ run_as_user env \
 chown "$APP_USER:$APP_GROUP" \
     "$PROJECT_ROOT/backend/data/app.db"
 
+log "Verifying Facebook and profile database schema"
+
+run_as_user env \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    "$PYTHON" - <<'PYSCHEMA'
+import sqlite3
+from pathlib import Path
+
+from app.config import settings
+
+database_url = settings.database_url
+
+prefix = "sqlite:///"
+
+if not database_url.startswith(prefix):
+    print("DATABASE_SCHEMA_CHECK_SKIPPED: non-SQLite database")
+    raise SystemExit(0)
+
+db_path = Path(database_url[len(prefix):])
+
+connection = sqlite3.connect(db_path)
+
+try:
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+
+    required_tables = {
+        "users",
+        "video_jobs",
+        "facebook_connections",
+        "facebook_publish_jobs",
+    }
+
+    missing_tables = required_tables - tables
+
+    if missing_tables:
+        raise SystemExit(
+            "Missing required database tables: "
+            + ", ".join(sorted(missing_tables))
+        )
+
+    user_columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(users)"
+        )
+    }
+
+    required_user_columns = {
+        "zernio_profile_id",
+        "recovery_code_hash",
+        "recovery_code_created_at",
+    }
+
+    missing_user_columns = (
+        required_user_columns - user_columns
+    )
+
+    if missing_user_columns:
+        raise SystemExit(
+            "Missing users columns: "
+            + ", ".join(sorted(missing_user_columns))
+        )
+
+    video_columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(video_jobs)"
+        )
+    }
+
+    required_video_columns = {
+        "facebook_auto_publish_enabled",
+        "facebook_auto_publish_connection_id",
+        "facebook_auto_publish_scheduled_at",
+    }
+
+    missing_video_columns = (
+        required_video_columns - video_columns
+    )
+
+    if missing_video_columns:
+        raise SystemExit(
+            "Missing video_jobs columns: "
+            + ", ".join(sorted(missing_video_columns))
+        )
+
+finally:
+    connection.close()
+
+print("FACEBOOK_PROFILE_DATABASE_SCHEMA_OK")
+PYSCHEMA
+
+[[ -x "$PROJECT_ROOT/scripts/reset_user_password.py" ]] || \
+    chmod +x "$PROJECT_ROOT/scripts/reset_user_password.py"
+
 ENV_FILE="$ENV_FILE" "$PYTHON" - <<'PYCLEAR'
 import os
 from pathlib import Path
@@ -714,9 +816,17 @@ import app.youtube_thumbnail_generator
 import app.title_research
 import app.voice_registry
 import app.avatar_service
+import app.zernio_client
+import app.facebook_connections
+import app.facebook_auto_publish
+import app.facebook_publish_queue
+import app.facebook_publish_launcher
+import app.facebook_publish_worker
+import app.facebook_upload_runner
 
 print("APPLICATION_IMPORTS_OK")
 print("AVATAR_SERVICE_IMPORT_OK")
+print("FACEBOOK_PUBLISHING_IMPORTS_OK")
 PYAPP
 
 ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
