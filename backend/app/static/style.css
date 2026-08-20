@@ -38,7 +38,7 @@ button {
   padding: 13px;
   border: 0;
   border-radius: 9px;
-  background: #2563eb;
+  background: #e85d40;
   color: white;
   font-weight: 700;
   cursor: pointer;
@@ -562,7 +562,7 @@ tbody td:last-child form,
   height: 100%;
   min-width: 0;
   border-radius: inherit;
-  background: #2563eb;
+  background: #e85d40;
   transition: width 0.4s ease;
 }
 
@@ -580,7 +580,7 @@ tbody td:last-child form,
 }
 
 .retry-button {
-  background: #2563eb;
+  background: #e85d40;
 }
 
 .retry-button:hover {
@@ -651,7 +651,7 @@ tbody td:last-child form,
   padding: 9px 14px;
   border: 0;
   border-radius: 7px;
-  background: #2563eb;
+  background: #e85d40;
   color: #fff;
   font-size: 13px;
   font-weight: 700;
@@ -761,7 +761,7 @@ tbody td:last-child form,
   gap: 4px;
   padding: 15px 42px 15px 16px;
   border: 1px solid #dbeafe;
-  border-left: 4px solid #2563eb;
+  border-left: 4px solid #e85d40;
   border-radius: 10px;
   background: #ffffff;
   box-shadow: 0 14px 35px rgba(15, 23, 42, 0.18);
@@ -840,7 +840,7 @@ tbody td:last-child form,
 .dashboard-toast {
   background: #0f172a !important;
   border: 1px solid #334155 !important;
-  border-left: 5px solid #2563eb !important;
+  border-left: 5px solid #e85d40 !important;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35) !important;
 }
 
@@ -885,7 +885,7 @@ tbody td:last-child form,
   --dash-text: #0f172a;
   --dash-muted: #64748b;
   --dash-primary: #6d5dfc;
-  --dash-primary-dark: #5145cd;
+  --dash-primary-dark: #c9442e;
   --dash-success: #16a34a;
   --dash-danger: #dc2626;
   --dash-warning: #d97706;
