@@ -1,166 +1,89 @@
-{% extends "base_app.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy - Atta Video AI</title>
+<link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;color:#111827;background:#fff;line-height:1.7;-webkit-font-smoothing:antialiased}
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid #e5e7eb}
+.nav-inner{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:60px}
+.n-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#111827;font-weight:800;font-size:17px}
+.n-brand img{width:34px;height:34px;border-radius:8px}
+.n-links{display:flex;gap:16px;list-style:none}
+.n-links a{font-size:14px;font-weight:500;color:#4b5563;text-decoration:none;padding:8px 16px;border-radius:7px;transition:all .2s}
+.n-links a:hover{color:#111827;background:#f9fafb}
+.n-links .n-cta{background:#111827;color:#fff!important}
+.n-links .n-cta:hover{opacity:.88}
+.legal-wrap{max-width:760px;margin:0 auto;padding:120px 24px 80px}
+.legal-wrap h1{font-size:36px;font-weight:800;margin-bottom:6px}
+.legal-sub{font-size:16px;color:#4b5563;margin-bottom:8px}
+.legal-meta{font-size:12px;color:#9ca3af;margin-bottom:40px}
+.legal-wrap h2{font-size:18px;font-weight:700;margin:32px 0 8px;color:#111827}
+.legal-wrap p{font-size:15px;color:#4b5563;margin-bottom:12px}
+.legal-wrap a{color:#e85d40;text-decoration:none;font-weight:500}
+.legal-wrap a:hover{text-decoration:underline}
+.legal-notice{margin-top:40px;padding:16px 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;color:#9ca3af;font-style:italic}
+.footer{border-top:1px solid #e5e7eb;padding:32px 0;margin-top:60px}
+.footer-inner{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.footer-inner p{font-size:13px;color:#9ca3af}
+.footer-links{display:flex;gap:20px;list-style:none}
+.footer-links a{font-size:13px;color:#9ca3af;text-decoration:none}
+.footer-links a:hover{color:#111827}
+</style>
+</head>
+<body>
+<nav class="nav"><div class="nav-inner">
+<a href="/" class="n-brand"><img src="/static/images/logo.svg" alt="Atta Video AI">Atta Video AI</a>
+<ul class="n-links"><li><a href="/#features">Features</a></li><li><a href="/#pricing">Pricing</a></li><li><a href="/login" class="n-cta">Sign In</a></li></ul>
+</div></nav>
 
-{% block title %}Privacy Policy · {{ app_name }}{% endblock %}
-{% block page_heading %}Privacy Policy{% endblock %}
-{% block page_subheading %}
-How this application handles account, configuration, and production data.
-{% endblock %}
+<div class="legal-wrap">
+<h1>Privacy Policy</h1>
+<p class="legal-sub">How Atta Video AI handles your data, credentials, and content.</p>
+<p class="legal-meta">Last updated: August 2026</p>
 
-{% block content %}
-<div class="legal-page">
-  <section class="legal-hero">
-    <span class="overview-welcome-kicker">Legal Information</span>
-    <h2>Privacy Policy</h2>
-    <p>
-      This policy describes how {{ project_info.application_name }}
-      processes information within the active deployment.
-    </p>
+<h2>1. What We Store</h2>
+<p>Atta Video AI stores account credentials, video job settings, scripts, scene plans, generated media references, and output file locations needed to operate your video production workflow.</p>
 
-    <div class="legal-meta">
-      <span>Version: {{ project_info.version }}</span>
-      <span>Environment: {{ project_info.environment }}</span>
-    </div>
-  </section>
+<h2>2. Credential Security</h2>
+<p>All API keys and OAuth tokens entered through the dashboard are encrypted using Fernet symmetric encryption before storage. Credentials are never displayed in readable form and are never included in logs.</p>
 
-  <section class="crm-card legal-content">
-    <article>
-      <h2>1. Application Data</h2>
-      <p>
-        The application stores information required to operate the
-        video-production workflow, including administrator account
-        details, video-job settings, scripts, scene plans, progress
-        records, generated media references, and output-file
-        locations.
-      </p>
-    </article>
+<h2>3. Your Generated Content</h2>
+<p>Scripts, narration audio, captions, scene media, and rendered videos are stored on your dedicated server. You have full control over retention, deletion, and backups. We do not access your generated content.</p>
 
-    <article>
-      <h2>2. API Credentials</h2>
-      <p>
-        API credentials entered through the integrations page are
-        encrypted before being saved. Existing credentials are not
-        displayed in readable form through the dashboard.
-      </p>
-    </article>
+<h2>4. External Services</h2>
+<p>When configured, the platform sends requests to external AI providers (Gemini, Together AI), stock media services (Pexels, Pixabay, Coverr, Openverse), and publishing platforms (YouTube, Facebook via Zernio). These services process data according to their own privacy policies.</p>
 
-    <article>
-      <h2>3. Generated Content</h2>
-      <p>
-        Scripts, narration, captions, scene assets, and rendered
-        videos are stored within the configured deployment storage.
-        Their retention depends on the server administrator's backup,
-        deletion, and storage policies.
-      </p>
-    </article>
+<h2>5. YouTube and Google Data</h2>
+<p>Atta Video AI uses Google OAuth to connect YouTube channels. We request only the permissions needed for channel identification and video uploading. OAuth tokens are encrypted before storage.</p>
+<p>Google user data is used solely for the YouTube publishing features you request. It is never sold, used for advertising, shared with data brokers, or used to train AI models. Google data is not disclosed to third parties except as needed to provide the functionality you requested or comply with applicable law.</p>
+<p>When you disconnect a YouTube channel, stored OAuth tokens are removed. You can also revoke access through your Google Account settings.</p>
 
-    <article>
-      <h2>4. External Providers</h2>
-      <p>
-        When configured, the application may send production-related
-        requests to external AI, media, publishing, or infrastructure
-        providers. Those services process information according to
-        their own terms and privacy policies.
-      </p>
-    </article>
+<h2>6. Facebook and Zernio Data</h2>
+<p>Facebook publishing uses the Zernio API as an intermediary. Your Zernio API key is encrypted before storage. Connected Facebook page information is synced from Zernio and stored locally for publishing functionality.</p>
 
-    <article>
-      <h2>5. Authentication and Sessions</h2>
-      <p>
-        Access to protected dashboard pages requires an authenticated
-        administrator session. Session information is used to maintain
-        secure access to the application.
-      </p>
-    </article>
+<h2>7. Sessions and Authentication</h2>
+<p>Access to the dashboard requires an authenticated session. Session cookies are HTTP-only, secure, and expire after 7 days of inactivity.</p>
 
-    <article>
-      <h2>6. Server Logs</h2>
-      <p>
-        The operating system, application service, and supporting
-        infrastructure may record technical logs such as request
-        details, errors, service status, and processing events for
-        monitoring and troubleshooting.
-      </p>
-    </article>
+<h2>8. Server Logs</h2>
+<p>The server may record technical logs including request details, errors, and processing events for monitoring and troubleshooting. Logs are stored on your dedicated server.</p>
 
-    <article>
-      <h2>7. Data Control</h2>
-      <p>
-        The deployment administrator is responsible for controlling
-        user access, server security, backups, retention periods,
-        generated files, and configured third-party integrations.
-      </p>
-    </article>
+<h2>9. Your Control</h2>
+<p>As a dedicated instance user, you control all data on your server including user access, backups, retention periods, and third-party integrations. We do not have access to your server unless you explicitly grant it for support purposes.</p>
 
-    <article>
-      <h2>8. Google and YouTube User Data</h2>
+<h2>10. Contact</h2>
+<p>Questions about privacy can be directed to <a href="https://attarasool.com" target="_blank">attarasool.com</a> or via <a href="https://wa.me/923104852406" target="_blank">WhatsApp</a>.</p>
 
-      <p>
-        Atta Video AI uses Google OAuth to allow users to connect their
-        own YouTube channels. The application requests only the Google
-        permissions required for its YouTube publishing features.
-      </p>
-
-      <p>
-        The YouTube read-only permission is used to identify and display
-        information about the connected YouTube channel. The YouTube
-        upload permission is used to upload videos to that channel when
-        the authorized user requests or configures a publishing action.
-      </p>
-
-      <p>
-        The application may store the connected channel identifier,
-        channel information required by the application, and OAuth
-        credentials required to maintain the connection. OAuth access
-        and refresh tokens are encrypted before being stored.
-      </p>
-
-      <p>
-        Google user data is used only to provide the user-facing YouTube
-        connection and publishing functionality requested by the user.
-        Google user data is not sold, used for advertising, transferred
-        to data brokers, used for credit decisions, or used to train
-        artificial-intelligence models.
-      </p>
-
-      <p>
-        Google user data is not disclosed to third parties except where
-        necessary to provide the requested application functionality,
-        maintain security, comply with applicable law, or where the user
-        has explicitly authorized the disclosure.
-      </p>
-
-      <p>
-        The application uses HTTPS for network communication and
-        encryption for stored OAuth credentials. Access to administrative
-        application functions is protected by authentication.
-      </p>
-
-      <p>
-        OAuth credentials are retained while a YouTube connection remains
-        active and is required for the requested functionality. When a
-        channel is disconnected through Atta Video AI, its stored access
-        and refresh tokens are removed from the active connection.
-        Users may also revoke access through their Google Account.
-      </p>
-    </article>
-
-    <article>
-      <h2>9. Contact</h2>
-      <p>
-        Questions about this application can be submitted through
-        <a
-          href="https://attarasool.com"
-          target="_blank"
-          rel="noopener"
-        >attarasool.com</a>.
-      </p>
-    </article>
-
-    <div class="legal-notice">
-      This page provides general application information and should be
-      reviewed and adapted by the deployment owner for applicable
-      legal and business requirements.
-    </div>
-  </section>
+<div class="legal-notice">This privacy policy applies to the Atta Video AI platform. Dedicated instance operators should review and adapt this policy for their specific legal and business requirements.</div>
 </div>
-{% endblock %}
+
+<footer class="footer"><div class="footer-inner">
+<p>&copy; 2026 Atta Video AI. All rights reserved.</p>
+<ul class="footer-links"><li><a href="/privacy-policy">Privacy</a></li><li><a href="/terms">Terms</a></li><li><a href="https://attarasool.com" target="_blank">attarasool.com</a></li></ul>
+</div></footer>
+</body>
+</html>

@@ -1,118 +1,93 @@
-{% extends "base_app.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms & Conditions - Atta Video AI</title>
+<link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;color:#111827;background:#fff;line-height:1.7;-webkit-font-smoothing:antialiased}
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid #e5e7eb}
+.nav-inner{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:60px}
+.n-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:#111827;font-weight:800;font-size:17px}
+.n-brand img{width:34px;height:34px;border-radius:8px}
+.n-links{display:flex;gap:16px;list-style:none}
+.n-links a{font-size:14px;font-weight:500;color:#4b5563;text-decoration:none;padding:8px 16px;border-radius:7px;transition:all .2s}
+.n-links a:hover{color:#111827;background:#f9fafb}
+.n-links .n-cta{background:#111827;color:#fff!important}
+.n-links .n-cta:hover{opacity:.88}
+.legal-wrap{max-width:760px;margin:0 auto;padding:120px 24px 80px}
+.legal-wrap h1{font-size:36px;font-weight:800;margin-bottom:6px}
+.legal-sub{font-size:16px;color:#4b5563;margin-bottom:8px}
+.legal-meta{font-size:12px;color:#9ca3af;margin-bottom:40px}
+.legal-wrap h2{font-size:18px;font-weight:700;margin:32px 0 8px;color:#111827}
+.legal-wrap p{font-size:15px;color:#4b5563;margin-bottom:12px}
+.legal-wrap a{color:#e85d40;text-decoration:none;font-weight:500}
+.legal-wrap a:hover{text-decoration:underline}
+.legal-notice{margin-top:40px;padding:16px 20px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;color:#9ca3af;font-style:italic}
+.footer{border-top:1px solid #e5e7eb;padding:32px 0;margin-top:60px}
+.footer-inner{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.footer-inner p{font-size:13px;color:#9ca3af}
+.footer-links{display:flex;gap:20px;list-style:none}
+.footer-links a{font-size:13px;color:#9ca3af;text-decoration:none}
+.footer-links a:hover{color:#111827}
+</style>
+</head>
+<body>
+<nav class="nav"><div class="nav-inner">
+<a href="/" class="n-brand"><img src="/static/images/logo.svg" alt="Atta Video AI">Atta Video AI</a>
+<ul class="n-links"><li><a href="/#features">Features</a></li><li><a href="/#pricing">Pricing</a></li><li><a href="/login" class="n-cta">Sign In</a></li></ul>
+</div></nav>
 
-{% block title %}Terms & Conditions · {{ app_name }}{% endblock %}
-{% block page_heading %}Terms & Conditions{% endblock %}
-{% block page_subheading %}
-Conditions for using the AI video-production application.
-{% endblock %}
+<div class="legal-wrap">
+<h1>Terms &amp; Conditions</h1>
+<p class="legal-sub">Terms of use for the Atta Video AI platform.</p>
+<p class="legal-meta">Last updated: August 2026</p>
 
-{% block content %}
-<div class="legal-page">
-  <section class="legal-hero">
-    <span class="overview-welcome-kicker">Legal Information</span>
-    <h2>Terms & Conditions</h2>
-    <p>
-      These terms apply to use of
-      {{ project_info.application_name }} within this deployment.
-    </p>
+<h2>1. Service Description</h2>
+<p>Atta Video AI is an AI-powered video production platform delivered as a dedicated server instance. The service includes automated script generation, narration, visual media collection, caption creation, avatar overlay, video rendering, and publishing to YouTube and Facebook.</p>
 
-    <div class="legal-meta">
-      <span>Version: {{ project_info.version }}</span>
-      <span>Environment: {{ project_info.environment }}</span>
-    </div>
-  </section>
+<h2>2. Subscription and Payment</h2>
+<p>Access to Atta Video AI requires an active monthly subscription. Plans and pricing are listed on the website. Subscriptions are billed monthly and may be cancelled at any time. Refunds are handled on a case-by-case basis.</p>
 
-  <section class="crm-card legal-content">
-    <article>
-      <h2>1. Authorized Use</h2>
-      <p>
-        The application may only be accessed by authorized users of
-        the deployment. Login credentials must not be shared with
-        unauthorized individuals.
-      </p>
-    </article>
+<h2>3. Authorized Use</h2>
+<p>Each dedicated instance is licensed to the subscribing individual or organization. Login credentials must not be shared with unauthorized individuals. You are responsible for all activity on your instance.</p>
 
-    <article>
-      <h2>2. Content Responsibility</h2>
-      <p>
-        The user is responsible for reviewing generated scripts,
-        narration, media, captions, attributions, and final videos
-        before publication or distribution.
-      </p>
-    </article>
+<h2>4. Content Responsibility</h2>
+<p>You are responsible for reviewing all generated content including scripts, narration, media, captions, and final videos before publication or distribution. AI-generated content may contain errors, inaccuracies, or unsuitable material that requires human review.</p>
 
-    <article>
-      <h2>3. Third-Party Services</h2>
-      <p>
-        AI providers, stock-media services, publishing platforms, and
-        other integrations are independent services. Their
-        availability, accuracy, licensing conditions, limits, and
-        pricing remain subject to their own policies.
-      </p>
-    </article>
+<h2>5. Media and Licensing</h2>
+<p>The platform sources stock media from third-party providers (Pexels, Pixabay, Coverr, Openverse, Wikimedia). You must verify that media used in your videos complies with the licensing terms of each provider for your intended use.</p>
 
-    <article>
-      <h2>4. Media and Licensing</h2>
-      <p>
-        Users must verify that selected media, generated assets,
-        music, images, footage, and other materials are suitable and
-        properly licensed for the intended use.
-      </p>
-    </article>
+<h2>6. Third-Party Services</h2>
+<p>AI providers, stock media services, publishing platforms (YouTube, Facebook), and other integrations are independent services. Their availability, accuracy, licensing terms, rate limits, and pricing are governed by their own policies and may change without notice.</p>
 
-    <article>
-      <h2>5. AI-Generated Output</h2>
-      <p>
-        Artificial-intelligence output may contain mistakes,
-        incomplete information, or unsuitable material. Human review
-        is required before relying on or publishing generated output.
-      </p>
-    </article>
+<h2>7. Server and Availability</h2>
+<p>Video production depends on server resources, GPU availability, storage, network connectivity, and external API availability. While we strive for high uptime, continuous or uninterrupted operation is not guaranteed. Fully Managed plan subscribers receive monitoring and maintenance support.</p>
 
-    <article>
-      <h2>6. System Availability</h2>
-      <p>
-        Video production depends on server resources, GPU
-        availability, storage, local services, external APIs, and
-        network connectivity. Continuous or uninterrupted operation
-        is not guaranteed.
-      </p>
-    </article>
+<h2>8. Security</h2>
+<p>Personal Dedicated plan subscribers are responsible for their server security, access controls, backups, and software updates. Fully Managed plan subscribers receive these services as part of their plan.</p>
 
-    <article>
-      <h2>7. Security and Backups</h2>
-      <p>
-        The deployment owner is responsible for server security,
-        credential management, access controls, backups, recovery
-        testing, software updates, and infrastructure availability.
-      </p>
-    </article>
+<h2>9. Intellectual Property</h2>
+<p>You retain full ownership of all content you create using Atta Video AI, including scripts, videos, and published materials. The Atta Video AI software and its underlying technology remain the property of the developer.</p>
 
-    <article>
-      <h2>8. Changes</h2>
-      <p>
-        Application functionality and these terms may be updated as
-        the system, integrations, or deployment requirements change.
-      </p>
-    </article>
+<h2>10. Limitation of Liability</h2>
+<p>Atta Video AI is provided "as is" without warranties of any kind. We are not liable for losses resulting from AI-generated content, publishing errors, service interruptions, third-party service changes, or data loss. Your maximum liability is limited to the fees paid in the current billing period.</p>
 
-    <article>
-      <h2>9. Contact</h2>
-      <p>
-        Project and support inquiries can be submitted through
-        <a
-          href="https://attarasool.com"
-          target="_blank"
-          rel="noopener"
-        >attarasool.com</a>.
-      </p>
-    </article>
+<h2>11. Modifications</h2>
+<p>These terms may be updated as the platform evolves. Subscribers will be notified of material changes. Continued use after changes constitutes acceptance.</p>
 
-    <div class="legal-notice">
-      These general terms should be reviewed and adapted by the
-      deployment owner or qualified legal adviser before public or
-      commercial use.
-    </div>
-  </section>
+<h2>12. Contact</h2>
+<p>Questions about these terms can be directed to <a href="https://attarasool.com" target="_blank">attarasool.com</a> or via <a href="https://wa.me/923104852406" target="_blank">WhatsApp</a>.</p>
+
+<div class="legal-notice">These terms provide a general framework for the Atta Video AI platform. Operators using the platform for commercial purposes should consult qualified legal counsel.</div>
 </div>
-{% endblock %}
+
+<footer class="footer"><div class="footer-inner">
+<p>&copy; 2026 Atta Video AI. All rights reserved.</p>
+<ul class="footer-links"><li><a href="/privacy-policy">Privacy</a></li><li><a href="/terms">Terms</a></li><li><a href="https://attarasool.com" target="_blank">attarasool.com</a></li></ul>
+</div></footer>
+</body>
+</html>

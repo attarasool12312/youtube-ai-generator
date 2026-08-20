@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atta Video AI - AI-Powered Video Production Platform</title>
+<meta name="description" content="Transform ideas into publish-ready videos. AI handles scripting, narration, visuals, captions, avatars, and publishing to YouTube and Facebook.">
+<link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="icon" type="image/svg+xml" href="/static/images/logo.svg">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --white:#fff;--off:#f9fafb;--light:#f1f3f5;
+  --border:#e5e7eb;--border-h:#d1d5db;
+  --text:#111827;--sub:#4b5563;--muted:#9ca3af;
+  --accent:#e85d40;--accent-d:#c9442e;--accent-l:#ff8a6e;--accent-bg:#fff5f2;--accent-border:#fecaca;
+  --navy:#1e293b;
+  --blue:#3b82f6;--purple:#7c3aed;--amber:#f59e0b;--rose:#ef4444;--green:#10b981;--cyan:#06b6d4;
+  --shadow-s:0 1px 3px rgba(0,0,0,.05);
+  --shadow-m:0 4px 20px rgba(0,0,0,.07);
+  --shadow-l:0 16px 48px rgba(0,0,0,.1);
+  --radius:12px;
+}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',system-ui,sans-serif;color:var(--text);background:var(--white);line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+.ctr{max-width:1160px;margin:0 auto;padding:0 24px}
+
+/* Animations */
+.reveal{opacity:0;transform:translateY(32px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1)}
+.reveal.visible{opacity:1;transform:none}
+.reveal-d1{transition-delay:.1s}.reveal-d2{transition-delay:.2s}.reveal-d3{transition-delay:.3s}.reveal-d4{transition-delay:.4s}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes pulse-ring{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.6);opacity:0}}
+@keyframes wave-bar{0%{height:12%}100%{height:90%}}
+
+/* Nav */
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;background:rgba(255,255,255,.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--border);transition:box-shadow .3s}
+.nav.scrolled{box-shadow:var(--shadow-s)}
+.nav .ctr{display:flex;align-items:center;justify-content:space-between;height:64px}
+.n-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);font-weight:800;font-size:17px}
+.n-mark{width:34px;height:34px;background:var(--accent);border-radius:8px;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:800}
+.n-links{display:flex;align-items:center;gap:6px;list-style:none}
+.n-links a{font-size:14px;font-weight:500;color:var(--sub);text-decoration:none;padding:7px 14px;border-radius:6px;transition:all .2s}
+.n-links a:hover{color:var(--text);background:var(--off)}
+.n-links .n-cta{background:var(--text);color:#fff!important;font-weight:600;padding:8px 18px;border-radius:7px}
+.n-links .n-cta:hover{opacity:.88;background:var(--text)}
+.n-links .n-wa{background:var(--accent);color:#fff!important;font-weight:600;padding:8px 18px;border-radius:7px}
+.n-links .n-wa:hover{background:var(--accent-d)}
+.n-mobile{display:none;background:none;border:none;font-size:24px;cursor:pointer;color:var(--text);padding:4px}
+@media(max-width:900px){
+  .n-links{position:fixed;top:64px;left:0;right:0;background:var(--white);border-bottom:1px solid var(--border);flex-direction:column;padding:16px 24px;gap:4px;display:none;box-shadow:var(--shadow-m)}
+  .n-links.open{display:flex}
+  .n-links a{width:100%;padding:12px;border-radius:8px}
+  .n-links .n-cta,.n-links .n-wa{text-align:center}
+  .n-mobile{display:block}
+}
+
+/* Hero */
+.hero{padding:130px 0 60px;background:linear-gradient(180deg,var(--white) 0%,var(--off) 100%)}
+.hero-grid{display:grid;grid-template-columns:1fr 1.15fr;gap:48px;align-items:center}
+.hero h1{font-size:clamp(30px,4.6vw,50px);font-weight:900;line-height:1.1;letter-spacing:-.03em}
+.hero h1 span{color:var(--accent)}
+.hero-sub{font-size:18px;color:var(--sub);margin:20px 0 0;line-height:1.75;max-width:480px}
+.hero-btns{display:flex;gap:12px;margin-top:32px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:13px 28px;border-radius:9px;font-size:15px;font-weight:700;text-decoration:none;border:none;cursor:pointer;transition:all .2s}
+.btn-fill{background:var(--accent);color:#fff;box-shadow:0 2px 12px rgba(232,93,64,.25)}
+.btn-fill:hover{background:var(--accent-d);box-shadow:0 4px 20px rgba(232,93,64,.3);transform:translateY(-1px)}
+.btn-ghost{background:var(--white);color:var(--text);border:1.5px solid var(--border-h)}
+.btn-ghost:hover{border-color:var(--accent);background:var(--accent-bg)}
+.hero-trust{display:flex;align-items:center;gap:16px;margin-top:28px;flex-wrap:wrap}
+.hero-trust span{font-size:12px;color:var(--muted);font-weight:500}
+.trust-avatars{display:flex}
+.trust-avatars div{width:28px;height:28px;border-radius:50%;border:2px solid var(--white);margin-left:-8px;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff}
+.trust-avatars div:first-child{margin-left:0}
+
+/* Dashboard Mock */
+.dash-mock{background:var(--white);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-l);overflow:hidden;animation:float 5s ease-in-out infinite}
+.dash-topbar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--navy);border-bottom:1px solid #334155}
+.dash-dot{width:10px;height:10px;border-radius:50%}
+.dash-url{flex:1;margin:0 12px;padding:5px 12px;background:#334155;border-radius:5px;font-size:11px;color:#94a3b8;font-family:monospace}
+.dash-body{display:grid;grid-template-columns:170px 1fr;min-height:260px}
+.dash-sidebar{background:#f8fafc;border-right:1px solid var(--border);padding:14px 10px}
+.dash-nav-item{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:6px;font-size:11px;font-weight:500;color:var(--sub);margin-bottom:3px}
+.dash-nav-item.active{background:var(--accent-bg);color:var(--accent);font-weight:600}
+.dash-nav-dot{width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.dash-nav-item.active .dash-nav-dot{background:var(--accent)}
+.dash-content{padding:16px 20px}
+.dash-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.dash-stat{background:var(--off);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center}
+.dash-stat .num{font-size:20px;font-weight:800;color:var(--accent)}
+.dash-stat .lbl{font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+.dash-table{width:100%;font-size:10px;border-collapse:collapse}
+.dash-table th{text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+.dash-table td{padding:7px 8px;border-bottom:1px solid #f1f3f5;color:var(--sub)}
+.dash-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:600}
+.badge-done{background:#dcfce7;color:#166534}.badge-prog{background:#fef3c7;color:#92400e}.badge-wait{background:#f1f5f9;color:#64748b}
+@media(max-width:800px){
+  .hero-grid{grid-template-columns:1fr;gap:36px}
+  .dash-mock{max-width:520px;margin:0 auto}
+  .dash-sidebar{display:none}
+  .dash-body{grid-template-columns:1fr}
+}
+
+/* Stats */
+.stats{padding:48px 0;background:var(--off);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;text-align:center}
+.stat-item .val{font-size:clamp(28px,3.5vw,40px);font-weight:900;color:var(--accent)}
+.stat-item .lbl{font-size:14px;color:var(--sub);margin-top:4px}
+@media(max-width:600px){.stats-row{grid-template-columns:1fr 1fr}}
+
+/* Feature Sections */
+.feat-section{padding:100px 0}
+.feat-section:nth-child(even){background:var(--off)}
+.feat-row{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+.feat-row.reverse{direction:rtl}.feat-row.reverse>*{direction:ltr}
+.feat-label{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.feat-title{font-size:clamp(24px,3vw,34px);font-weight:800;line-height:1.2;letter-spacing:-.02em}
+.feat-desc{font-size:17px;color:var(--sub);margin-top:14px;line-height:1.75}
+.feat-list{list-style:none;margin-top:20px}
+.feat-list li{font-size:15px;color:var(--sub);padding:7px 0;display:flex;align-items:center;gap:10px}
+.feat-list li::before{content:"";width:20px;height:20px;flex-shrink:0;border-radius:50%;background:var(--accent-bg);border:1.5px solid var(--accent-border);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23e85d40'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z'/%3E%3C/svg%3E");background-size:12px;background-position:center;background-repeat:no-repeat}
+
+/* Feature Visuals */
+.feat-visual{border-radius:16px;overflow:hidden}
+.fv-box{background:var(--white);border:1px solid var(--border);border-radius:14px;padding:28px 24px;box-shadow:var(--shadow-m)}
+.fv-step{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--off);border:1px solid var(--border);border-radius:10px;margin-bottom:10px;transition:all .4s}
+.fv-step:hover{border-color:var(--accent);background:var(--accent-bg);transform:translateX(6px)}
+.fv-step:last-child{margin-bottom:0}
+.fv-icon{width:38px;height:38px;border-radius:8px;display:grid;place-items:center;font-size:18px;flex-shrink:0}
+.fv-step-text{flex:1}
+.fv-step-text strong{font-size:14px;font-weight:700;display:block}
+.fv-step-text span{font-size:12px;color:var(--muted)}
+.fv-arrow{color:var(--accent-l);font-size:16px;margin:0 4px 10px 17px;font-weight:700}
+
+.fv-wave{display:flex;align-items:end;gap:3px;height:40px;margin-bottom:16px;padding:0 4px}
+.fv-bar{width:4px;background:var(--accent);border-radius:2px;animation:wave-bar 1.2s ease-in-out infinite alternate}
+.fv-voice-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fv-voice{padding:10px 14px;background:var(--off);border:1px solid var(--border);border-radius:8px;font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;transition:border-color .2s}
+.fv-voice:hover{border-color:var(--accent)}
+.fv-voice .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.fv-channel{display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--off);border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+.fv-channel:last-child{margin-bottom:0}
+.fv-ch-icon{width:36px;height:36px;border-radius:8px;display:grid;place-items:center;font-size:16px;color:#fff;flex-shrink:0;font-weight:700}
+.fv-ch-text strong{font-size:13px;display:block}
+.fv-ch-text span{font-size:11px;color:var(--muted)}
+.fv-ch-status{margin-left:auto;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px}
+
+.fv-avatar-ring{width:120px;height:120px;border-radius:50%;background:linear-gradient(135deg,var(--accent-bg),var(--off));border:3px solid var(--accent-border);margin:0 auto 16px;display:grid;place-items:center;position:relative}
+.fv-avatar-ring::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--accent-l);opacity:.4;animation:pulse-ring 2.5s ease-out infinite}
+.fv-avatar-inner{width:90px;height:90px;border-radius:50%;background:linear-gradient(135deg,#e2e8f0,#cbd5e1);display:grid;place-items:center;font-size:36px}
+.fv-pos-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.fv-pos{padding:6px;background:var(--off);border:1px solid var(--border);border-radius:6px;font-size:10px;font-weight:600;color:var(--muted);text-align:center;transition:all .2s}
+.fv-pos.active{background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent)}
+
+@media(max-width:800px){.feat-row,.feat-row.reverse{grid-template-columns:1fr;direction:ltr}.feat-visual{max-width:460px;margin:0 auto}}
+
+/* Pricing */
+.pricing{padding:100px 0;background:var(--white)}
+.pricing-center{text-align:center;margin-bottom:16px}
+.pricing-center .feat-desc{margin:12px auto 0;max-width:540px}
+.p-label{text-align:center;margin:48px 0 20px;font-size:13px;font-weight:700;color:var(--sub);letter-spacing:1.5px;text-transform:uppercase}
+.p-divider{border:none;border-top:1px solid var(--border);max-width:100px;margin:0 auto 28px}
+
+.active-plans{display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:780px;margin:0 auto;align-items:stretch}
+.a-card{padding:32px 28px;background:var(--white);border:1.5px solid var(--border);border-radius:14px;position:relative;transition:transform .2s,box-shadow .2s;display:flex;flex-direction:column}
+.a-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-m)}
+.a-card.pop{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),var(--shadow-m)}
+.a-card.pop::before{content:"MOST POPULAR";position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:10px;font-weight:700;letter-spacing:1.5px;padding:5px 18px;border-radius:20px;white-space:nowrap}
+.a-plan{font-size:20px;font-weight:800;margin-bottom:4px}
+.a-desc{font-size:15px;color:var(--sub);margin-bottom:18px}
+.a-price{font-size:48px;font-weight:900;letter-spacing:-.03em;line-height:1}
+.a-price .cur{font-size:22px;vertical-align:super;color:var(--sub)}
+.a-price .per{font-size:14px;font-weight:500;color:var(--muted)}
+.a-note{font-size:12px;color:var(--accent);font-weight:600;margin-top:4px}
+.a-hr{border:none;border-top:1px solid var(--border);margin:22px 0}
+.a-list{list-style:none;margin-bottom:24px;flex:1}
+.a-list li{font-size:15px;color:var(--sub);padding:6px 0;display:flex;align-items:start;gap:9px}
+.a-list li::before{content:"";width:18px;height:18px;flex-shrink:0;margin-top:1px;background:var(--accent);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z'/%3E%3C/svg%3E") center/contain no-repeat}
+.btn-a{display:block;width:100%;padding:13px;text-align:center;border-radius:9px;font-size:15px;font-weight:700;text-decoration:none;cursor:pointer;border:none;transition:all .2s}
+.btn-a.solid{background:var(--accent);color:#fff}.btn-a.solid:hover{background:var(--accent-d)}
+.btn-a.outline{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}.btn-a.outline:hover{background:var(--accent-bg)}
+@media(max-width:600px){.active-plans{grid-template-columns:1fr}}
+
+.soon-plans{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;max-width:900px;margin:0 auto}
+.s-card{padding:24px 20px;background:var(--off);border:1px solid var(--border);border-radius:12px;text-align:center;opacity:.7}
+.s-badge{display:inline-block;padding:3px 12px;background:var(--white);border:1px solid var(--border);border-radius:16px;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1px;margin-bottom:10px}
+.s-name{font-size:17px;font-weight:700;margin-bottom:3px}
+.s-desc{font-size:13px;color:var(--muted);margin-bottom:14px}
+.s-price{font-size:24px;font-weight:700;color:var(--muted)}.s-price span{font-size:12px;font-weight:500}
+.s-list{list-style:none;text-align:left;margin:14px 0 16px}
+.s-list li{font-size:13px;color:var(--muted);padding:4px 0;padding-left:22px;position:relative}
+.s-list li::before{content:"";position:absolute;left:0;top:7px;width:12px;height:12px;background:var(--muted);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z'/%3E%3C/svg%3E") center/contain no-repeat}
+.s-btn{display:block;width:100%;padding:10px;background:var(--white);border:1px solid var(--border);border-radius:8px;font-size:13px;font-weight:600;color:var(--muted);cursor:default}
+@media(max-width:700px){.soon-plans{grid-template-columns:1fr}}
+
+/* Calendly */
+.booking{padding:100px 0;background:var(--off)}
+.booking-center{text-align:center}
+.booking-center .feat-desc{margin:12px auto 40px;max-width:500px}
+.cal-wrap{max-width:960px;margin:0 auto;background:var(--white);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-s)}
+
+
+/* Founder */
+.founder{padding:80px 0;background:var(--off);border-top:1px solid var(--border)}
+.founder-inner{display:grid;grid-template-columns:auto 1fr;gap:40px;align-items:center;max-width:800px;margin:0 auto}
+.founder-img{width:140px;height:140px;border-radius:50%;object-fit:cover;border:4px solid var(--white);box-shadow:var(--shadow-m)}
+.founder-name{font-size:22px;font-weight:800;margin-bottom:2px}
+.founder-role{font-size:14px;color:var(--accent);font-weight:600;margin-bottom:12px}
+.founder-msg{font-size:16px;color:var(--sub);line-height:1.8;font-style:italic}
+.founder-msg strong{color:var(--text);font-style:normal}
+.founder-links{margin-top:14px;display:flex;gap:14px}
+.founder-links a{font-size:13px;color:var(--sub);text-decoration:none;font-weight:600;padding:6px 16px;background:var(--white);border:1px solid var(--border);border-radius:20px;transition:all .2s}
+.founder-links a:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-bg)}
+@media(max-width:600px){.founder-inner{grid-template-columns:1fr;text-align:center}.founder-img{margin:0 auto}.founder-links{justify-content:center}}
+
+/* CTA Banner */
+.cta-banner{padding:48px 24px;background:var(--white);color:var(--text);text-align:center;border-top:1px solid var(--border)}
+.cta-banner h2{font-size:clamp(24px,3.5vw,38px);font-weight:800;margin-bottom:12px}
+.cta-banner p{font-size:16px;color:var(--sub);margin-bottom:32px}
+.cta-banner .btn-wa{display:inline-flex;align-items:center;gap:10px;padding:15px 36px;background:#25d366;color:#fff;border-radius:10px;font-size:16px;font-weight:700;text-decoration:none;transition:background .2s}
+.cta-banner .btn-wa:hover{background:#1fb855}
+.cta-banner .btn-wa svg{width:22px;height:22px;fill:#fff}
+
+/* Footer */
+.footer{padding:36px 0;border-top:1px solid var(--border)}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px}
+.footer-copy{font-size:13px;color:var(--muted)}
+.footer-links{display:flex;gap:20px;list-style:none}
+.footer-links a{font-size:13px;color:var(--muted);text-decoration:none;transition:color .2s}
+.footer-links a:hover{color:var(--text)}
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav" id="nav">
+  <div class="ctr">
+    <a href="/" class="n-brand"><img src="/static/images/logo.svg" alt="Atta Video AI" width="34" height="34" style="border-radius:8px">Atta Video AI</a>
+    <button class="n-mobile" id="n-toggle" aria-label="Menu">&#9776;</button>
+    <ul class="n-links" id="n-menu">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#pipeline">How It Works</a></li>
+      <li><a href="#avatars">Avatars</a></li>
+      <li><a href="#publishing">Publishing</a></li>
+      <li><a href="#pricing">Pricing</a></li>
+      <li><a href="#book">Book a Call</a></li>
+      <li><a href="https://wa.me/923104852406?text=Hi%2C%20I%27m%20interested%20in%20Atta%20Video%20AI" target="_blank" class="n-wa">&#128172; WhatsApp</a></li>
+      <li><a href="/login" class="n-cta">Sign In</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="ctr">
+    <div class="hero-grid">
+      <div class="reveal">
+        <h1>Automated Video Production, <span>End to End</span></h1>
+        <p class="hero-sub">Give it a title. Atta Video AI writes the script, generates narration with natural voices, collects HD visuals, adds captions, overlays a talking-head avatar, and publishes to YouTube and Facebook. No editing required.</p>
+        <div class="hero-btns">
+          <a href="https://wa.me/923104852406?text=Hi%2C%20I%27m%20interested%20in%20Atta%20Video%20AI" target="_blank" class="btn btn-fill">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.625.846 5.059 2.284 7.034L.789 23.492a.5.5 0 00.61.61l4.458-1.495A11.952 11.952 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-2.387 0-4.593-.838-6.316-2.234l-.44-.362-3.2 1.073 1.073-3.2-.362-.44A9.953 9.953 0 012 12C2 6.486 6.486 2 12 2s10 4.486 10 10-4.486 10-10 10z"/></svg>
+            Chat on WhatsApp
+          </a>
+          <a href="#pricing" class="btn btn-ghost">View Plans</a>
+        </div>
+              </div>
+
+      <div class="reveal reveal-d2">
+        <div class="dash-mock">
+          <div class="dash-topbar">
+            <div class="dash-dot" style="background:#ef4444"></div>
+            <div class="dash-dot" style="background:#f59e0b"></div>
+            <div class="dash-dot" style="background:#22c55e"></div>
+            <div class="dash-url">attavideoai.site/videos</div>
+          </div>
+          <div class="dash-body">
+            <div class="dash-sidebar">
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Overview</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Title to Video</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Script to Video</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Title Research</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Avatars</div>
+              <div class="dash-nav-item active"><div class="dash-nav-dot"></div>Videos &amp; Queue</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>Publishing</div>
+              <div class="dash-nav-item"><div class="dash-nav-dot"></div>System Health</div>
+            </div>
+            <div class="dash-content">
+              <div class="dash-cards">
+                <div class="dash-stat"><div class="num">24</div><div class="lbl">Videos</div></div>
+                <div class="dash-stat"><div class="num">18</div><div class="lbl">Published</div></div>
+                <div class="dash-stat"><div class="num">3</div><div class="lbl">Queued</div></div>
+              </div>
+              <table class="dash-table">
+                <thead><tr><th>Title</th><th>Dur.</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>5 Habits That Change Your Life</td><td>12m</td><td><span class="dash-badge badge-done">Completed</span></td></tr>
+                  <tr><td>Why Cold Showers Actually Work</td><td>8m</td><td><span class="dash-badge badge-prog">Rendering</span></td></tr>
+                  <tr><td>Morning Routine Breakdown</td><td>15m</td><td><span class="dash-badge badge-wait">Queued</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="stats">
+  <div class="ctr">
+    <div class="stats-row">
+      <div class="stat-item reveal"><div class="val">30 min</div><div class="lbl">Max Video Duration</div></div>
+      <div class="stat-item reveal reveal-d1"><div class="val">28</div><div class="lbl">Natural AI Voices</div></div>
+      <div class="stat-item reveal reveal-d2"><div class="val">5+</div><div class="lbl">Media Providers</div></div>
+      <div class="stat-item reveal reveal-d3"><div class="val">GPU</div><div class="lbl">Accelerated Rendering</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Feature 1: Pipeline -->
+<section class="feat-section" id="features">
+  <div class="ctr"><div class="feat-row" id="pipeline">
+    <div class="reveal">
+      <p class="feat-label">AI Pipeline</p>
+      <h2 class="feat-title">From Idea to Finished Video, Fully Automated</h2>
+      <p class="feat-desc">Every step of video production happens automatically on your dedicated GPU server. Type a title, and the system handles everything else.</p>
+      <ul class="feat-list">
+        <li>AI writes and validates narration scripts</li>
+        <li>Multiple LLM providers with automatic failover</li>
+        <li>Smart scene planning with visual descriptions</li>
+        <li>Duration targeting at 145 words per minute</li>
+      </ul>
+    </div>
+    <div class="feat-visual reveal reveal-d2">
+      <div class="fv-box">
+        <div class="fv-step"><div class="fv-icon" style="background:var(--accent-bg)">&#9998;</div><div class="fv-step-text"><strong>Script Generation</strong><span>AI writes structured narration</span></div></div>
+        <div class="fv-arrow">&#8595;</div>
+        <div class="fv-step"><div class="fv-icon" style="background:#eff6ff">&#127908;</div><div class="fv-step-text"><strong>Voice Narration</strong><span>28 natural AI voices at 24kHz</span></div></div>
+        <div class="fv-arrow">&#8595;</div>
+        <div class="fv-step"><div class="fv-icon" style="background:#fef3c7">&#127912;</div><div class="fv-step-text"><strong>Media Collection</strong><span>HD stock + AI-generated images</span></div></div>
+        <div class="fv-arrow">&#8595;</div>
+        <div class="fv-step"><div class="fv-icon" style="background:#fce7f3">&#128196;</div><div class="fv-step-text"><strong>Captions &amp; Render</strong><span>GPU-accelerated final output</span></div></div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- Feature 2: Voices -->
+<section class="feat-section">
+  <div class="ctr"><div class="feat-row reverse">
+    <div class="reveal">
+      <p class="feat-label">Voice Engine</p>
+      <h2 class="feat-title">28 Professional Voices, Instant Preview</h2>
+      <p class="feat-desc">Choose from American and British English voices. Male and female options. Preview any voice before committing to a full render.</p>
+      <ul class="feat-list">
+        <li>Kokoro neural TTS at broadcast quality</li>
+        <li>Multi-voice narration support</li>
+        <li>One-click voice preview in dashboard</li>
+        <li>Speed control from 0.75x to 1.25x</li>
+      </ul>
+    </div>
+    <div class="feat-visual reveal reveal-d2">
+      <div class="fv-box">
+        <div class="fv-wave" id="wave"></div>
+        <div class="fv-voice-grid">
+          <div class="fv-voice"><span class="dot" style="background:var(--accent)"></span>Michael <span style="color:var(--muted);margin-left:auto;font-size:10px">AM</span></div>
+          <div class="fv-voice"><span class="dot" style="background:var(--purple)"></span>Heart <span style="color:var(--muted);margin-left:auto;font-size:10px">AF</span></div>
+          <div class="fv-voice"><span class="dot" style="background:var(--blue)"></span>George <span style="color:var(--muted);margin-left:auto;font-size:10px">BM</span></div>
+          <div class="fv-voice"><span class="dot" style="background:var(--rose)"></span>Emma <span style="color:var(--muted);margin-left:auto;font-size:10px">BF</span></div>
+          <div class="fv-voice"><span class="dot" style="background:var(--amber)"></span>Fenrir <span style="color:var(--muted);margin-left:auto;font-size:10px">AM</span></div>
+          <div class="fv-voice"><span class="dot" style="background:var(--green)"></span>Nova <span style="color:var(--muted);margin-left:auto;font-size:10px">AF</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- Feature 3: Avatar -->
+<section class="feat-section" id="avatars">
+  <div class="ctr"><div class="feat-row">
+    <div class="reveal">
+      <p class="feat-label">Avatar System</p>
+      <h2 class="feat-title">Your Face in Every Video, Automatically</h2>
+      <p class="feat-desc">Upload a photo or video once. The system generates a lip-synced talking-head presenter that overlays on every video you produce.</p>
+      <ul class="feat-list">
+        <li>Upload once, reuse across all videos</li>
+        <li>Image or video source supported</li>
+        <li>Four corner positions available</li>
+        <li>Avatar failure never blocks video completion</li>
+      </ul>
+    </div>
+    <div class="feat-visual reveal reveal-d2">
+      <div class="fv-box" style="text-align:center">
+        <div class="fv-avatar-ring"><div class="fv-avatar-inner">&#128100;</div></div>
+        <p style="font-size:14px;font-weight:700;margin-bottom:4px">Lip-Synced Avatar Overlay</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">220px circular presenter, face-focused crop</p>
+        <div class="fv-pos-grid">
+          <div class="fv-pos">Top Left</div>
+          <div class="fv-pos">Top Right</div>
+          <div class="fv-pos">Bottom Left</div>
+          <div class="fv-pos active">Bottom Right &#10003;</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- Feature 4: Publishing -->
+<section class="feat-section" id="publishing">
+  <div class="ctr"><div class="feat-row reverse">
+    <div class="reveal">
+      <p class="feat-label">Publishing</p>
+      <h2 class="feat-title">YouTube and Facebook, One Click</h2>
+      <p class="feat-desc">Connect your channels, and videos publish directly from the dashboard. AI generates optimized titles, descriptions, tags, and thumbnails.</p>
+      <ul class="feat-list">
+        <li>Multiple YouTube channels supported</li>
+        <li>Facebook Pages via Zernio integration</li>
+        <li>Auto-publish after render completes</li>
+        <li>AI-generated SEO metadata</li>
+      </ul>
+    </div>
+    <div class="feat-visual reveal reveal-d2">
+      <div class="fv-box">
+        <div class="fv-channel">
+          <div class="fv-ch-icon" style="background:#dc2626">&#9654;</div>
+          <div class="fv-ch-text"><strong>YouTube Channel</strong><span>Connected via OAuth</span></div>
+          <span class="fv-ch-status" style="background:#dcfce7;color:#166534">Active</span>
+        </div>
+        <div class="fv-channel">
+          <div class="fv-ch-icon" style="background:#1877f2">f</div>
+          <div class="fv-ch-text"><strong>Facebook Page</strong><span>Connected via Zernio</span></div>
+          <span class="fv-ch-status" style="background:#dcfce7;color:#166534">Active</span>
+        </div>
+        <div class="fv-channel">
+          <div class="fv-ch-icon" style="background:#e2e8f0;color:var(--muted)">+</div>
+          <div class="fv-ch-text"><strong style="color:var(--muted)">More Platforms</strong><span>Coming soon</span></div>
+          <span class="fv-ch-status" style="background:#f1f5f9;color:#94a3b8">Soon</span>
+        </div>
+      </div>
+    </div>
+  </div></div>
+</section>
+
+<!-- Pricing -->
+<section class="pricing" id="pricing">
+  <div class="ctr">
+    <div class="pricing-center reveal">
+      <p class="feat-label">Pricing</p>
+      <h2 class="feat-title">Pick Your Plan</h2>
+      <p class="feat-desc">Get started with a dedicated instance today. Credit-based self-serve plans are coming soon.</p>
+    </div>
+
+    <p class="p-label reveal">&#10003; Available Now</p>
+
+    <div class="active-plans">
+      <div class="a-card reveal">
+        <div class="a-plan">Personal Dedicated</div>
+        <p class="a-desc">Your own server, self-managed after onboarding</p>
+        <div class="a-price"><span class="cur">$</span>700<span class="per"> /mo</span></div>
+        <p class="a-note">Includes 1 month free setup support</p>
+        <hr class="a-hr">
+        <ul class="a-list">
+          <li>Dedicated NVIDIA GPU server</li>
+          <li>Unlimited video generation</li>
+          <li>Videos up to 30 minutes</li>
+          <li>All 28 premium voices</li>
+          <li>Talking-head avatar system</li>
+          <li>YouTube + Facebook publishing</li>
+          <li>Title research tools</li>
+          <li>Full data privacy</li>
+          <li>1 month onboarding support</li>
+        </ul>
+        <a href="https://wa.me/923104852406?text=Hi%2C%20I%27m%20interested%20in%20the%20Personal%20Dedicated%20plan%20(%24700%2Fmo)" target="_blank" class="btn-a outline">&#128172; Chat on WhatsApp</a>
+      </div>
+      <div class="a-card pop reveal reveal-d1">
+        <div class="a-plan">Fully Managed</div>
+        <p class="a-desc">We run it for you. Updates, support, and maintenance included.</p>
+        <div class="a-price"><span class="cur">$</span>800<span class="per"> /mo</span></div>
+        <p class="a-note">Everything in Personal + ongoing support</p>
+        <hr class="a-hr">
+        <ul class="a-list">
+          <li>Everything in Personal Dedicated</li>
+          <li>Ongoing priority support</li>
+          <li>Server maintenance and updates</li>
+          <li>Troubleshooting and issue resolution</li>
+          <li>Performance and uptime monitoring</li>
+          <li>Software updates applied for you</li>
+          <li>Direct WhatsApp communication</li>
+          <li>Backup and disaster recovery</li>
+          <li>No technical knowledge required</li>
+        </ul>
+        <a href="https://wa.me/923104852406?text=Hi%2C%20I%27m%20interested%20in%20the%20Fully%20Managed%20plan%20(%24800%2Fmo)" target="_blank" class="btn-a solid">&#128172; Chat on WhatsApp</a>
+      </div>
+    </div>
+
+    <p class="p-label reveal" style="margin-top:64px">Credit-Based Plans</p>
+    <hr class="p-divider">
+
+    <div class="soon-plans">
+      <div class="s-card reveal">
+        <span class="s-badge">COMING SOON</span>
+        <div class="s-name">Starter</div>
+        <p class="s-desc">For creators getting started</p>
+        <div class="s-price">TBD <span>/mo</span></div>
+        <ul class="s-list"><li>Pay-per-video credits</li><li>Up to 10-min videos</li><li>Standard voices</li><li>YouTube publishing</li></ul>
+        <span class="s-btn">Coming Soon</span>
+      </div>
+      <div class="s-card reveal reveal-d1">
+        <span class="s-badge">COMING SOON</span>
+        <div class="s-name">Professional</div>
+        <p class="s-desc">For active content producers</p>
+        <div class="s-price">TBD <span>/mo</span></div>
+        <ul class="s-list"><li>Monthly credit bundle</li><li>Up to 20-min videos</li><li>All voices + avatar</li><li>YouTube + Facebook</li></ul>
+        <span class="s-btn">Coming Soon</span>
+      </div>
+      <div class="s-card reveal reveal-d2">
+        <span class="s-badge">COMING SOON</span>
+        <div class="s-name">Business</div>
+        <p class="s-desc">For agencies and teams</p>
+        <div class="s-price">TBD <span>/mo</span></div>
+        <ul class="s-list"><li>Bulk credits</li><li>Up to 30-min videos</li><li>Multi-user + API</li><li>Dedicated support</li></ul>
+        <span class="s-btn">Coming Soon</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Calendly -->
+<section class="booking" id="book">
+  <div class="ctr">
+    <div class="booking-center reveal">
+      <p class="feat-label">Let's Talk</p>
+      <h2 class="feat-title">Book a Free Pre-Sale Call</h2>
+      <p class="feat-desc">See a live demo, ask questions, and find out which plan fits your workflow.</p>
+    </div>
+    <div class="cal-wrap reveal reveal-d1">
+      <div class="calendly-inline-widget" data-url="https://calendly.com/attarasool2000/pre-sales-appointment" style="min-width:320px;height:700px;"></div>
+      <script type="text/javascript" src="https://assets.calendly.com/assets/external/widget.js" async></script>
+    </div>
+  </div>
+</section>
+
+
+<!-- Founder -->
+<section class="founder">
+  <div class="ctr">
+    <div class="founder-inner reveal">
+      <img src="/static/images/atta-rasool-profile.webp" alt="Atta Rasool" class="founder-img">
+      <div>
+        <div class="founder-name">Atta Rasool</div>
+        <div class="founder-role">Founder &amp; Developer</div>
+        <p class="founder-msg">"I built Atta Video AI because I saw creators spending hours editing videos that could be automated. This platform is the result of months of engineering, combining the best open-source AI models into one seamless pipeline. <strong>My goal is simple: you focus on ideas, the software handles everything else.</strong>"</p>
+        <div class="founder-links">
+          <a href="https://attarasool.com" target="_blank">attarasool.com</a>
+          <a href="https://wa.me/923104852406" target="_blank">WhatsApp</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA Banner -->
+<section class="cta-banner">
+  <div class="ctr">
+    <h2>Ready to Automate Your Video Production?</h2>
+    <p>Get your own dedicated AI video platform running in 24 hours.</p>
+    <a href="https://wa.me/923104852406?text=Hi%2C%20I%27m%20interested%20in%20Atta%20Video%20AI" target="_blank" class="btn-wa">
+      <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.625.846 5.059 2.284 7.034L.789 23.492a.5.5 0 00.61.61l4.458-1.495A11.952 11.952 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-2.387 0-4.593-.838-6.316-2.234l-.44-.362-3.2 1.073 1.073-3.2-.362-.44A9.953 9.953 0 012 12C2 6.486 6.486 2 12 2s10 4.486 10 10-4.486 10-10 10z"/></svg>
+      Chat With Us on WhatsApp
+    </a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="ctr footer-inner">
+    <p class="footer-copy">&copy; 2026 Atta Video AI. All rights reserved.</p>
+    <ul class="footer-links">
+      <li><a href="/privacy-policy">Privacy</a></li>
+      <li><a href="/terms">Terms</a></li>
+      <li><a href="https://attarasool.com" target="_blank" rel="noopener">attarasool.com</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+// Nav scroll
+const nav=document.getElementById('nav');
+window.addEventListener('scroll',()=>{nav.classList.toggle('scrolled',window.scrollY>10)});
+
+// Mobile menu
+document.getElementById('n-toggle').addEventListener('click',()=>{document.getElementById('n-menu').classList.toggle('open')});
+
+// Reveal
+const io=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');io.unobserve(e.target)}})},{threshold:.12,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+// Wave
+const wave=document.getElementById('wave');
+if(wave){for(let i=0;i<32;i++){const b=document.createElement('div');b.className='fv-bar';b.style.animationDelay=(i*0.06)+'s';wave.appendChild(b)}}
+
+// Smooth scroll
+document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();const t=document.querySelector(a.getAttribute('href'));if(t){t.scrollIntoView({behavior:'smooth',block:'start'});document.getElementById('n-menu').classList.remove('open')}})});
+</script>
+</body>
+</html>

@@ -679,11 +679,14 @@ def dashboard_context(request, jobs, active_page):
 @app.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     if not request.session.get("user_id"):
-        return templates.TemplateResponse(
-            request=request,
-            name="app_info_public.html",
-            context={"app_name": "Atta Video AI"},
-        )
+        host = (request.headers.get("host") or "").split(":")[0].lower()
+        if host == "attavideoai.site":
+            return templates.TemplateResponse(
+                request=request,
+                name="homepage.html",
+                context={"app_name": "Atta Video AI"},
+            )
+        return RedirectResponse("/login", status_code=303)
 
     jobs = load_dashboard_jobs(db)
 
@@ -3514,7 +3517,7 @@ def system_health_page(request: Request):
 def public_app_info_page(request: Request):
     return templates.TemplateResponse(
         request=request,
-        name="app_info_public.html",
+        name="homepage.html",
         context={
             "app_name": "Atta Video AI",
         },
