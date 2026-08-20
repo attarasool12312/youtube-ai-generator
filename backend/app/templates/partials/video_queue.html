@@ -33,6 +33,19 @@
 #video-queue-panel table {
     width: 100%;
 }
+
+#video-queue-panel thead th:nth-child(2),
+#video-queue-panel .queue-job-row > td:nth-child(2) {
+    width: 60px;
+    min-width: 60px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+#video-queue-panel thead th:nth-child(3),
+#video-queue-panel .queue-job-row > td:nth-child(3) {
+    text-align: left;
+}
 </style>
 
 <section class="crm-card" id="video-queue-panel">
@@ -66,8 +79,8 @@
       <table>
         <colgroup>
           <col style="width:48px;">
-          <col style="width:90px;">
-          <col style="width:32%;">
+          <col style="width:60px;">
+          <col style="width:38%;">
           <col style="width:18%;">
           <col style="width:22%;">
           <col>
