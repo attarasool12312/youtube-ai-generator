@@ -322,6 +322,110 @@ run_as_user "$PIP" install --no-deps \
     av==18.0.0 \
     flatbuffers==25.12.19
 
+log "Checking Hugging Face access"
+
+HF_TOKEN_FILE="$APP_HOME/.cache/huggingface/token"
+
+validate_huggingface_token() {
+    [[ -s "$HF_TOKEN_FILE" ]] || return 1
+
+    run_as_user env \
+        HF_TOKEN_FILE="$HF_TOKEN_FILE" \
+        HF_HUB_DISABLE_XET=1 \
+        "$PYTHON" - <<'PYHFVERIFY' >/dev/null 2>&1
+import os
+from pathlib import Path
+
+from huggingface_hub import HfApi, hf_hub_download
+
+token = Path(
+    os.environ["HF_TOKEN_FILE"]
+).read_text().strip()
+
+if not token:
+    raise SystemExit(1)
+
+# Verify that this is a working Hugging Face User Access Token.
+HfApi().whoami(token=token)
+
+# Verify that the account has access to the gated FLUX model.
+# model_index.json is tiny; this does not download the full model.
+hf_hub_download(
+    repo_id="black-forest-labs/FLUX.1-schnell",
+    filename="model_index.json",
+    token=token,
+)
+PYHFVERIFY
+}
+
+if validate_huggingface_token; then
+    log "Existing Hugging Face token is valid and has FLUX access"
+else
+    echo
+    echo "============================================================"
+    echo "HUGGING FACE TOKEN REQUIRED"
+    echo "============================================================"
+    echo
+    echo "The existing Hugging Face credential is missing, expired,"
+    echo "or does not have access to FLUX.1-schnell."
+    echo
+    echo "Do this in your browser:"
+    echo
+    echo "1. Sign in to Hugging Face:"
+    echo "   https://huggingface.co/"
+    echo
+    echo "2. Open Access Tokens:"
+    echo "   https://huggingface.co/settings/tokens"
+    echo
+    echo "3. Create a NEW User Access Token with READ permission."
+    echo
+    echo "4. Open the FLUX model page:"
+    echo "   https://huggingface.co/black-forest-labs/FLUX.1-schnell"
+    echo
+    echo "5. Accept/request the model access conditions if required."
+    echo
+    echo "6. Return here and paste the token when requested."
+    echo
+    echo "IMPORTANT: The token is entered invisibly and is never printed."
+    echo
+
+    mkdir -p "$APP_HOME/.cache/huggingface"
+    chown "$APP_USER:$APP_GROUP" "$APP_HOME/.cache/huggingface"
+    chmod 700 "$APP_HOME/.cache/huggingface"
+
+    for attempt in 1 2 3; do
+        read -r -s -p "Hugging Face User Access Token: " HF_TOKEN_INPUT
+        echo
+
+        if [[ -z "$HF_TOKEN_INPUT" ]]; then
+            echo "Token cannot be empty."
+            continue
+        fi
+
+        printf '%s' "$HF_TOKEN_INPUT" > "$HF_TOKEN_FILE"
+        chown "$APP_USER:$APP_GROUP" "$HF_TOKEN_FILE"
+        chmod 600 "$HF_TOKEN_FILE"
+
+        unset HF_TOKEN_INPUT
+
+        if validate_huggingface_token; then
+            log "Hugging Face token verified successfully"
+            break
+        fi
+
+        rm -f "$HF_TOKEN_FILE"
+
+        echo
+        echo "Token validation failed."
+        echo "Check the token and make sure FLUX access is accepted."
+        echo
+
+        if [[ "$attempt" == "3" ]]; then
+            fail "Hugging Face authentication could not be verified."
+        fi
+    done
+fi
+
 log "Preparing Whisper caption model"
 
 WHISPER_MODEL_DIR="$MODEL_ROOT/whisper/small.en"

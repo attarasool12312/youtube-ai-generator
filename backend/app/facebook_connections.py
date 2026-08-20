@@ -26,23 +26,33 @@ def ensure_user_zernio_profile(
 
     profile_name = f"atta-user-{user.id}"
 
-    existing_profiles = list_profiles(name=profile_name)
+    # Fresh VM recovery:
+    # If this Zernio account already has exactly one profile,
+    # safely adopt it instead of creating a duplicate profile.
+    all_profiles = list_profiles()
 
-    profile = next(
-        (
-            item
-            for item in existing_profiles
-            if item.get("name") == profile_name
-        ),
-        None,
-    )
-
-    if profile is None:
-        profile = create_profile(
-            profile_name,
-            description=f"Atta Video AI user {user.id}",
-            idempotency_key=f"atta-user-profile-{user.id}",
+    if len(all_profiles) == 1:
+        profile = all_profiles[0]
+    else:
+        existing_profiles = list_profiles(
+            name=profile_name
         )
+
+        profile = next(
+            (
+                item
+                for item in existing_profiles
+                if item.get("name") == profile_name
+            ),
+            None,
+        )
+
+        if profile is None:
+            profile = create_profile(
+                profile_name,
+                description=f"Atta Video AI user {user.id}",
+                idempotency_key=f"atta-user-profile-{user.id}",
+            )
 
     profile_id = profile.get("_id")
 

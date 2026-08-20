@@ -2693,6 +2693,25 @@ def publishing_page(
 
     user_id = int(request.session["user_id"])
 
+    if has_api_key("zernio_api_key"):
+        try:
+            current_user = db.get(
+                User,
+                user_id,
+            )
+
+            if current_user is not None:
+                sync_user_facebook_connections(
+                    db,
+                    current_user,
+                )
+        except Exception:
+            # Publishing page must remain usable even if
+            # Zernio is temporarily unavailable.
+            logger.exception(
+                "Automatic Facebook connection sync failed"
+            )
+
     facebook_connections = db.scalars(
         select(FacebookConnection)
         .where(
