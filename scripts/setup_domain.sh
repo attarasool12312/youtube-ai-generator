@@ -66,13 +66,27 @@ echo "HTTP proxy ready."
 echo "DNS A records for @ and www MUST point to this VM before Certbot."
 echo
 
-sudo certbot --nginx \
-    -d "$DOMAIN" \
-    -d "www.$DOMAIN" \
-    --non-interactive \
-    --agree-tos \
-    --email "$EMAIL" \
-    --redirect
+# Only add www for root domains (subdomains have more than 1 dot)
+DOTCOUNT=$(echo "$DOMAIN" | tr -cd '.' | wc -c)
+if [ "$DOTCOUNT" -gt 1 ]; then
+    echo "Subdomain detected, skipping www variant"
+    sudo certbot --nginx \
+        -d "$DOMAIN" \
+        --non-interactive \
+        --agree-tos \
+        --email "$EMAIL" \
+        --no-eff-email \
+        --redirect
+else
+    sudo certbot --nginx \
+        -d "$DOMAIN" \
+        -d "www.$DOMAIN" \
+        --non-interactive \
+        --agree-tos \
+        --email "$EMAIL" \
+        --no-eff-email \
+        --redirect
+fi
 
 sudo nginx -t
 sudo systemctl restart nginx
