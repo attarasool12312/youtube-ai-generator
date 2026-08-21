@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from app.scene_media import download_scene_images
 from app.video_renderer import render_video, overlay_avatar_video
 from app.paths import OUTPUT_ROOT
 from app.avatar_service import generate_avatar_video
+from app.gpu_utils import can_parallel_render_avatar, log_gpu_status
 
 from app.audio_export import create_narration_mp3
 
@@ -302,102 +304,130 @@ def run_job(job_id: int) -> None:
                 job.progress = 86
                 db.commit()
 
-        with SessionLocal() as db:
-            job = db.get(VideoJob, job_id)
-            if job:
-                job.status = "final_rendering"
-                job.progress = 90
-                db.commit()
+        # ========================================================
+        # GPU-HEAVY STAGES: Render + Avatar
+        # Dynamic parallel execution based on available VRAM.
+        # Minimum 16GB GPU: runs both simultaneously (~8.5GB used)
+        # Larger GPUs: same parallel, more headroom
+        # ========================================================
 
-        stage_started = time.perf_counter()
+        log_gpu_status()
 
-        package["video_file"] = render_video(
-            package["scenes"],
-            output_dir / "narration.wav",
-            output_dir / "final-video.mp4",
-            orientation,
-            captions_ass=(
-                Path(captions["ass"])
-                if captions
-                else None
-            ),
-        )
-
-        _record_timing(
-            output_dir,
-            timings,
-            "base_video_render",
-            stage_started,
-        )
-
-        # Avatar is an optional post-render layer.
-        # Any avatar failure must leave the normal completed
-        # Stock Only video intact.
+        # Resolve avatar info before GPU stages
+        avatar_cache_id = None
+        avatar_source_path = None
         if avatar_id:
-            try:
-                with SessionLocal() as db:
-                    avatar = db.get(
-                        Avatar,
-                        avatar_id,
-                    )
-
-                    if (
-                        avatar is None
-                        or avatar.status != "ready"
-                    ):
-                        raise RuntimeError(
-                            "Selected avatar is unavailable "
-                            "or not ready."
-                        )
-
+            with SessionLocal() as db:
+                avatar = db.get(Avatar, avatar_id)
+                if avatar is not None and avatar.status == "ready":
                     avatar_cache_id = avatar.cache_id
                     avatar_source_path = avatar.source_path
+                else:
+                    logger.warning(
+                        "Avatar %s unavailable or not ready, skipping",
+                        avatar_id,
+                    )
+                    avatar_id = None
 
+        use_parallel = avatar_id and can_parallel_render_avatar()
+
+        if use_parallel:
+            # --- PARALLEL: render + avatar simultaneously ---
+            print(
+                f"PARALLEL_MODE: render + avatar for job {job_id}",
+                flush=True,
+            )
+
+            update_job_progress(
+                job_id, "final_rendering", 90
+            )
+
+            parallel_started = time.perf_counter()
+            render_result = [None]
+            render_error = [None]
+            avatar_result = [None]
+            avatar_error = [None]
+
+            def _do_render():
+                try:
+                    render_result[0] = render_video(
+                        package["scenes"],
+                        output_dir / "narration.wav",
+                        output_dir / "final-video.mp4",
+                        orientation,
+                        captions_ass=(
+                            Path(captions["ass"])
+                            if captions
+                            else None
+                        ),
+                    )
+                except Exception as e:
+                    render_error[0] = e
+                    logger.error("Render failed: %s", e)
+
+            def _do_avatar():
+                try:
+                    avatar_result[0] = generate_avatar_video(
+                        cache_id=avatar_cache_id,
+                        source_path=avatar_source_path,
+                        narration_path=(
+                            output_dir / "narration.wav"
+                        ),
+                        output_name=f"job_{job_id}",
+                    )
+                except Exception as e:
+                    avatar_error[0] = e
+                    logger.warning("Avatar failed: %s", e)
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_render = pool.submit(_do_render)
+                fut_avatar = pool.submit(_do_avatar)
+                fut_render.result()
+                fut_avatar.result()
+
+            # Record render timing
+            render_elapsed = round(
+                time.perf_counter() - parallel_started, 3
+            )
+            timings["stages"]["base_video_render"] = render_elapsed
+            _save_job_timings(output_dir, timings)
+            print(
+                f"JOB_TIMING base_video_render={render_elapsed:.3f}s (parallel)",
+                flush=True,
+            )
+
+            # Record avatar timing (same wall clock in parallel)
+            timings["stages"]["avatar_generation"] = render_elapsed
+            _save_job_timings(output_dir, timings)
+            print(
+                f"JOB_TIMING avatar_generation={render_elapsed:.3f}s (parallel)",
+                flush=True,
+            )
+
+            if render_error[0]:
+                raise render_error[0]
+
+            package["video_file"] = render_result[0] or str(
+                output_dir / "final-video.mp4"
+            )
+
+            # Avatar overlay (sequential, needs both outputs)
+            talking_avatar = avatar_result[0]
+
+            if talking_avatar:
                 update_job_progress(
-                    job_id,
-                    "avatar_generation",
-                    93,
+                    job_id, "avatar_overlay", 97
                 )
 
-                avatar_generation_started = (
-                    time.perf_counter()
-                )
-
-                talking_avatar = generate_avatar_video(
-                    cache_id=avatar_cache_id,
-                    source_path=avatar_source_path,
-                    narration_path=(
-                        output_dir / "narration.wav"
-                    ),
-                    output_name=f"job_{job_id}",
-                )
-
-                _record_timing(
-                    output_dir,
-                    timings,
-                    "avatar_generation",
-                    avatar_generation_started,
-                )
-
-                update_job_progress(
-                    job_id,
-                    "avatar_overlay",
-                    97,
-                )
+                avatar_overlay_started = time.perf_counter()
 
                 avatar_composite = (
-                    output_dir
-                    / "final-video-avatar.mp4"
-                )
-
-                avatar_overlay_started = (
-                    time.perf_counter()
+                    output_dir / "final-video-avatar.mp4"
                 )
 
                 overlay_avatar_video(
                     base_video=(
-                        output_dir
-                        / "final-video.mp4"
+                        output_dir / "final-video.mp4"
                     ),
                     avatar_video=talking_avatar,
                     output_path=avatar_composite,
@@ -413,13 +443,11 @@ def run_job(job_id: int) -> None:
                 )
 
                 avatar_composite.replace(
-                    output_dir
-                    / "final-video.mp4"
+                    output_dir / "final-video.mp4"
                 )
 
                 package["video_file"] = str(
-                    output_dir
-                    / "final-video.mp4"
+                    output_dir / "final-video.mp4"
                 )
                 package["avatar"] = {
                     "enabled": True,
@@ -434,21 +462,151 @@ def run_job(job_id: int) -> None:
                     avatar_position,
                     flush=True,
                 )
-
-            except Exception as avatar_error:
+            else:
                 package["avatar"] = {
                     "enabled": False,
                     "avatar_id": avatar_id,
                     "position": avatar_position,
-                    "error": str(avatar_error),
+                    "error": str(avatar_error[0]) if avatar_error[0] else "no output",
                 }
-
                 print(
-                    "AVATAR_OVERLAY_FAILED:",
-                    str(avatar_error),
+                    "AVATAR_FAILED_IN_PARALLEL:",
+                    str(avatar_error[0]),
                     file=sys.stderr,
                     flush=True,
                 )
+
+        else:
+            # --- SEQUENTIAL: original flow ---
+            with SessionLocal() as db:
+                job = db.get(VideoJob, job_id)
+                if job:
+                    job.status = "final_rendering"
+                    job.progress = 90
+                    db.commit()
+
+            stage_started = time.perf_counter()
+
+            package["video_file"] = render_video(
+                package["scenes"],
+                output_dir / "narration.wav",
+                output_dir / "final-video.mp4",
+                orientation,
+                captions_ass=(
+                    Path(captions["ass"])
+                    if captions
+                    else None
+                ),
+            )
+
+            _record_timing(
+                output_dir,
+                timings,
+                "base_video_render",
+                stage_started,
+            )
+
+            # Avatar is an optional post-render layer.
+            # Any avatar failure must leave the normal completed
+            # Stock Only video intact.
+            if avatar_id:
+                try:
+                    update_job_progress(
+                        job_id,
+                        "avatar_generation",
+                        93,
+                    )
+
+                    avatar_generation_started = (
+                        time.perf_counter()
+                    )
+
+                    talking_avatar = generate_avatar_video(
+                        cache_id=avatar_cache_id,
+                        source_path=avatar_source_path,
+                        narration_path=(
+                            output_dir / "narration.wav"
+                        ),
+                        output_name=f"job_{job_id}",
+                    )
+
+                    _record_timing(
+                        output_dir,
+                        timings,
+                        "avatar_generation",
+                        avatar_generation_started,
+                    )
+
+                    update_job_progress(
+                        job_id,
+                        "avatar_overlay",
+                        97,
+                    )
+
+                    avatar_composite = (
+                        output_dir
+                        / "final-video-avatar.mp4"
+                    )
+
+                    avatar_overlay_started = (
+                        time.perf_counter()
+                    )
+
+                    overlay_avatar_video(
+                        base_video=(
+                            output_dir
+                            / "final-video.mp4"
+                        ),
+                        avatar_video=talking_avatar,
+                        output_path=avatar_composite,
+                        position=avatar_position,
+                        orientation=orientation,
+                    )
+
+                    _record_timing(
+                        output_dir,
+                        timings,
+                        "avatar_overlay",
+                        avatar_overlay_started,
+                    )
+
+                    avatar_composite.replace(
+                        output_dir
+                        / "final-video.mp4"
+                    )
+
+                    package["video_file"] = str(
+                        output_dir
+                        / "final-video.mp4"
+                    )
+                    package["avatar"] = {
+                        "enabled": True,
+                        "avatar_id": avatar_id,
+                        "position": avatar_position,
+                    }
+
+                    print(
+                        "AVATAR_OVERLAY_READY:",
+                        job_id,
+                        avatar_id,
+                        avatar_position,
+                        flush=True,
+                    )
+
+                except Exception as avatar_error:
+                    package["avatar"] = {
+                        "enabled": False,
+                        "avatar_id": avatar_id,
+                        "position": avatar_position,
+                        "error": str(avatar_error),
+                    }
+
+                    print(
+                        "AVATAR_OVERLAY_FAILED:",
+                        str(avatar_error),
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
         (output_dir / "scenes.json").write_text(
             json.dumps(package["scenes"], indent=2),

@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import shutil
 import subprocess
@@ -176,6 +177,64 @@ def _nvenc_available():
         OSError,
     ):
         return False
+
+
+def _max_scene_workers():
+    """
+    How many scene clips to encode in parallel.
+    Dynamic based on GPU VRAM. Each NVENC session uses ~50MB.
+    Falls back to 1 (sequential) if no GPU.
+    """
+    if not _nvenc_available():
+        return 1
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            vram_mb = int(result.stdout.strip().split("\n")[0].strip())
+            if vram_mb >= 24000:
+                return 6
+            if vram_mb >= 16000:
+                return 4
+            if vram_mb >= 12000:
+                return 3
+            return 2
+    except Exception:
+        pass
+    return 2
+
+
+def _scene_encoder_arguments():
+    """
+    Encoder arguments for individual scene clips.
+    Uses NVENC when available for massive speedup over CPU.
+    """
+    if _nvenc_available():
+        preset = os.getenv("VIDEO_NVENC_PRESET", "p4").strip().lower()
+        if preset not in {"p1", "p2", "p3", "p4", "p5", "p6", "p7"}:
+            preset = "p4"
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", preset,
+            "-rc", "constqp",
+            "-qp", "20",
+            "-pix_fmt", "yuv420p",
+        ]
+    return _cpu_encoder_arguments()
+
+
+def _hwaccel_input_args():
+    """
+    Hardware-accelerated decoding arguments.
+    Offloads video decoding from CPU to GPU.
+    Returns empty list if not available.
+    """
+    if _nvenc_available():
+        return ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+    return []
 
 
 def _subtitle_filter(subtitle_path):
@@ -454,7 +513,7 @@ def render_video(
     }
 
     try:
-        for scene in scenes:
+        def _render_one_clip(scene):
             number = int(scene["scene_number"])
             media = Path(
                 scene["media_file"]
@@ -542,14 +601,34 @@ def render_video(
                 ]
 
             command += (
-                _cpu_encoder_arguments()
+                _scene_encoder_arguments()
                 + [str(clip)]
             )
 
             _run(command)
+            return number, str(clip.resolve())
 
+        workers = _max_scene_workers()
+        print(
+            f"Rendering {len(scenes)} scene clips "
+            f"with {workers} parallel workers",
+            flush=True,
+        )
+
+        clip_map = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_render_one_clip, scene): scene
+                for scene in scenes
+            }
+            for future in as_completed(futures):
+                number, clip_path = future.result()
+                clip_map[number] = clip_path
+
+        for scene in scenes:
+            number = int(scene["scene_number"])
             timeline.append(
-                f"file '{clip.resolve()}'"
+                f"file '{clip_map[number]}'"
             )
 
         if not timeline:
@@ -717,8 +796,33 @@ def overlay_avatar_video(
         missing_ok=True,
     )
 
-    # "Cover" crop with a slight upward bias for portrait
-    # sources so the presenter's face remains centered.
+    # Circular avatar overlay.
+    # Generate a static circular mask and loop it, so geq
+    # runs once instead of per-frame. Major CPU savings.
+    r = avatar_width // 2
+    mask_path = output_path.parent / ".circle_mask.png"
+    if not mask_path.exists():
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-y", "-f", "lavfi", "-i",
+                f"color=white:s={avatar_width}x{avatar_width}:d=1",
+                "-vf",
+                f"format=rgba,"
+                f"geq="
+                f"r=255:g=255:b=255:"
+                f"a='if(lte("
+                f"(X-{r})*(X-{r})+"
+                f"(Y-{r})*(Y-{r}),"
+                f"{r}*{r}"
+                f"),255,0)'",
+                "-frames:v", "1",
+                str(mask_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
     filter_complex = (
         "[1:v]"
         "crop="
@@ -727,16 +831,14 @@ def overlay_avatar_video(
         "'(iw-min(iw,ih))/2':"
         "'max(0,(ih-min(iw,ih))*0.28)',"
         f"scale={avatar_width}:{avatar_width},"
+        "format=rgba"
+        "[scaled];"
+        "[2:v]"
+        f"scale={avatar_width}:{avatar_width},"
         "format=rgba,"
-        "geq="
-        "r='r(X,Y)':"
-        "g='g(X,Y)':"
-        "b='b(X,Y)':"
-        "a='if(lte("
-        "(X-W/2)*(X-W/2)+"
-        "(Y-H/2)*(Y-H/2),"
-        "(W/2)*(W/2)"
-        "),255,0)'"
+        "alphaextract"
+        "[amask];"
+        "[scaled][amask]alphamerge"
         "[avatar];"
         "[0:v][avatar]"
         f"overlay={x}:{y}:"
@@ -757,6 +859,9 @@ def overlay_avatar_video(
         str(base_video),
         "-i",
         str(avatar_video),
+        "-loop", "1",
+        "-i",
+        str(mask_path),
         "-filter_complex",
         filter_complex,
         "-map",
