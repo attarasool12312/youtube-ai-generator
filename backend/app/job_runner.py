@@ -233,76 +233,118 @@ def run_job(job_id: int) -> None:
                 duration_minutes * 60.0, actual_seconds, ratio,
             )
 
+        # ========================================================
+        # PARALLEL: Captions + Media Download
+        # Captions need only audio (available). Media needs
+        # scenes (available). Neither needs the other's output.
+        # Running both simultaneously saves ~30-60 seconds.
+        # ========================================================
+
+        update_job_progress(job_id, "captions", 58)
+
         captions = None
+        caption_started = time.perf_counter()
+        media_started = time.perf_counter()
 
         if captions_enabled:
-            stage_started = time.perf_counter()
+            def _do_captions():
+                return generate_caption_files(
+                    audio_path=output_dir / "narration.wav",
+                    output_directory=output_dir,
+                    orientation=orientation,
+                    font_size=caption_font_size,
+                    position=caption_position,
+                    background=caption_background,
+                    outline=caption_outline,
+                )
 
-            with SessionLocal() as db:
-                job = db.get(VideoJob, job_id)
-                if job:
-                    job.status = "captions"
-                    job.progress = 58
-                    db.commit()
+            def _do_media():
+                return download_scene_images(
+                    package["scenes"],
+                    output_dir,
+                    orientation,
+                    media_source,
+                    package.get("detected_style", video_style),
+                    package.get("title", title),
+                    duration_minutes,
+                )
 
-            captions = generate_caption_files(
-                audio_path=output_dir / "narration.wav",
-                output_directory=output_dir,
-                orientation=orientation,
-                font_size=caption_font_size,
-                position=caption_position,
-                background=caption_background,
-                outline=caption_outline,
+            caption_result = [None]
+            media_result = [None]
+            caption_error = [None]
+            media_error = [None]
+
+            def _run_captions():
+                try:
+                    caption_result[0] = _do_captions()
+                except Exception as e:
+                    caption_error[0] = e
+
+            def _run_media():
+                try:
+                    media_result[0] = _do_media()
+                except Exception as e:
+                    media_error[0] = e
+
+            print(
+                "PARALLEL_PREP: captions + media download",
+                flush=True,
             )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_cap = pool.submit(_run_captions)
+                fut_med = pool.submit(_run_media)
+                fut_cap.result()
+                fut_med.result()
+
+            if caption_error[0]:
+                logger.warning("Captions failed: %s", caption_error[0])
+            else:
+                captions = caption_result[0]
 
             _record_timing(
                 output_dir,
                 timings,
                 "captions",
-                stage_started,
+                caption_started,
+            )
+
+            if media_error[0]:
+                raise media_error[0]
+
+            package["scenes"] = media_result[0]
+
+            _record_timing(
+                output_dir,
+                timings,
+                "stock_media_collection",
+                media_started,
+            )
+
+        else:
+            # No captions, just download media
+            update_job_progress(job_id, "media_collection", 68)
+
+            package["scenes"] = download_scene_images(
+                package["scenes"],
+                output_dir,
+                orientation,
+                media_source,
+                package.get("detected_style", video_style),
+                package.get("title", title),
+                duration_minutes,
+            )
+
+            _record_timing(
+                output_dir,
+                timings,
+                "stock_media_collection",
+                media_started,
             )
 
         package["captions"] = captions
 
-        with SessionLocal() as db:
-            job = db.get(VideoJob, job_id)
-            if job and captions_enabled:
-                job.status = "captions"
-                job.progress = 65
-                db.commit()
-
-        with SessionLocal() as db:
-            job = db.get(VideoJob, job_id)
-            if job:
-                job.status = "media_collection"
-                job.progress = 68
-                db.commit()
-
-        stage_started = time.perf_counter()
-
-        package["scenes"] = download_scene_images(
-            package["scenes"],
-            output_dir,
-            orientation,
-            media_source,
-            package.get("detected_style", video_style),
-            package.get("title", title),
-            duration_minutes,
-        )
-
-        _record_timing(
-            output_dir,
-            timings,
-            "stock_media_collection",
-            stage_started,
-        )
-
-        with SessionLocal() as db:
-            job = db.get(VideoJob, job_id)
-            if job:
-                job.status = "media_collection"
-                job.progress = 86
-                db.commit()
+        update_job_progress(job_id, "media_collection", 86)
 
         # ========================================================
         # GPU-HEAVY STAGES: Render + Avatar

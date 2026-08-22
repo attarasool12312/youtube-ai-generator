@@ -2,8 +2,7 @@
 GPU resource detection and management.
 
 Detects available VRAM at runtime and provides resource allocation
-decisions. On 16GB GPUs, runs conservative. On 24GB+, runs aggressive.
-Everything auto-adjusts based on what hardware is available.
+decisions. Minimum 16GB GPU supported. Auto-scales with larger GPUs.
 """
 
 import subprocess
@@ -47,6 +46,12 @@ def get_gpu_name():
 def can_parallel_render_avatar():
     """NVENC ~500MB + MuseTalk ~8GB = ~8.5GB. Safe on 12GB+."""
     return get_vram_mb() >= 12000
+
+
+def get_cpu_count():
+    """Return CPU core count for dynamic worker scaling."""
+    import os
+    return os.cpu_count() or 2
 
 
 def log_gpu_status():

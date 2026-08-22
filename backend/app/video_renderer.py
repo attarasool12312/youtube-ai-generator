@@ -182,29 +182,33 @@ def _nvenc_available():
 def _max_scene_workers():
     """
     How many scene clips to encode in parallel.
-    Dynamic based on GPU VRAM. Each NVENC session uses ~50MB.
-    Falls back to 1 (sequential) if no GPU.
+    Dynamic based on GPU VRAM and CPU cores.
+    Each NVENC session uses ~50MB VRAM.
+    Each clip also needs CPU for decode/scale/filter.
     """
     if not _nvenc_available():
-        return 1
+        cpu = os.cpu_count() or 2
+        return max(1, min(4, cpu // 2))
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.total",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=10,
         )
+        vram_mb = 16000
         if result.returncode == 0:
             vram_mb = int(result.stdout.strip().split("\n")[0].strip())
-            if vram_mb >= 24000:
-                return 6
-            if vram_mb >= 16000:
-                return 4
-            if vram_mb >= 12000:
-                return 3
-            return 2
     except Exception:
         pass
-    return 2
+    cpu = os.cpu_count() or 2
+    # VRAM limit: each session ~50MB, leave 8GB for avatar
+    vram_workers = max(2, (vram_mb - 8000) // 200)
+    # CPU limit: each clip needs ~1 core for decode/filter
+    cpu_workers = max(2, cpu - 1)
+    # Take the minimum of both limits
+    workers = min(vram_workers, cpu_workers)
+    # Cap at reasonable maximum
+    return min(workers, 16)
 
 
 def _scene_encoder_arguments():
@@ -571,6 +575,11 @@ def render_video(
                     "error",
                     "-nostdin",
                     "-y",
+                ]
+                # GPU-accelerated decode for video inputs
+                if _nvenc_available():
+                    command += ["-hwaccel", "cuda"]
+                command += [
                     "-stream_loop",
                     "-1",
                     "-i",
