@@ -44,6 +44,38 @@ def trim_words(text: str, maximum: int) -> str:
     return " ".join(words[:maximum])
 
 
+
+def _clean_narration(text: str) -> str:
+    """Strip LLM review notes, word counts, and meta-commentary from narration."""
+    import re
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip empty lines
+        if not stripped:
+            continue
+        # Skip lines with markdown formatting (*bold*, _italic_)
+        if stripped.startswith("*") and stripped.endswith("*"):
+            continue
+        # Skip word count notes like "(20 words) - Good"
+        if re.search(r'\(\d+\s*words?\)', stripped):
+            continue
+        # Skip review markers
+        if any(marker in stripped.lower() for marker in [
+            "check.", "checked.", "- good", "- ok", "perfect.",
+            "style/cadence", "sentence length", "word count",
+            "finish with", "include one", "no headings",
+            "no labels", "no bullet", "visual direction",
+        ]):
+            continue
+        # Skip lines that are just labels like "Section:" or "Hook:"
+        if re.match(r'^[A-Z][a-z]+:', stripped) and len(stripped) < 40:
+            continue
+        cleaned.append(stripped)
+    return " ".join(cleaned)
+
+
 def generate_section(
     title: str,
     video_style: str,
@@ -55,14 +87,21 @@ def generate_section(
         f"Video title: {title}\n"
         f"Style: {video_style}\n"
         f"Section: {section_name}\n"
-        f"Write at least {target_words + 20} words.\n"
-        "Return narration only. No headings or notes.\n"
+        f"Write exactly {target_words + 20} words of spoken narration.\n"
+        "CRITICAL RULES:\n"
+        "- Return ONLY the narration text that will be read aloud.\n"
+        "- Do NOT include word counts, style notes, reviews, or analysis.\n"
+        "- Do NOT include labels like (20 words), *Style*, Check, Good, Perfect.\n"
+        "- Do NOT include any markdown formatting.\n"
+        "- Write in a natural conversational documentary tone.\n"
+        "- Just the spoken words, nothing else.\n"
         f"Previous context: {previous_context[-800:]}"
     )
 
     text = call_qwen(prompt)
 
     for _ in range(3):
+        text = _clean_narration(text)
         if count_words(text) >= target_words:
             return trim_words(text, target_words)
 
