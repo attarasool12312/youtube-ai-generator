@@ -14,7 +14,7 @@ class NarratorVoice:
     english_variant: str
     gender: str
     approved: bool = True
-    recommended_speed: float = 1.0
+    speed_correction: float = 1.0
     quality_status: str = "verified"
 
     @property
@@ -26,38 +26,41 @@ class NarratorVoice:
         return f"{self.label} - {self.gender} ({self.english_variant})"
 
 
-# Official Kokoro-82M v1.0 English voices. Only explicit approved entries are exposed.
+# Per-voice correction: normalizes all voices to Michael's pace (168 WPM at 1.0).
+# Format: (voice_id, label, english_variant, gender, approved, speed_correction)
 _VOICE_ROWS = (
-    ("am_michael", "Michael", "American English", "Male"),
-    ("am_fenrir", "Fenrir", "American English", "Male"),
-    ("am_puck", "Puck", "American English", "Male"),
-    ("af_heart", "Heart", "American English", "Female"),
-    ("af_bella", "Bella", "American English", "Female"),
-    ("af_nicole", "Nicole", "American English", "Female"),
-    ("af_alloy", "Alloy", "American English", "Female"),
-    ("af_aoede", "Aoede", "American English", "Female"),
-    ("af_jessica", "Jessica", "American English", "Female"),
-    ("af_kore", "Kore", "American English", "Female"),
-    ("af_nova", "Nova", "American English", "Female"),
-    ("af_river", "River", "American English", "Female"),
-    ("af_sarah", "Sarah", "American English", "Female"),
-    ("af_sky", "Sky", "American English", "Female"),
-    ("am_adam", "Adam", "American English", "Male"),
-    ("am_echo", "Echo", "American English", "Male"),
-    ("am_eric", "Eric", "American English", "Male"),
-    ("am_liam", "Liam", "American English", "Male"),
-    ("am_onyx", "Onyx", "American English", "Male"),
-    ("am_santa", "Santa", "American English", "Male"),
-    ("bf_alice", "Alice", "British English", "Female"),
-    ("bf_emma", "Emma", "British English", "Female"),
-    ("bf_isabella", "Isabella", "British English", "Female"),
-    ("bf_lily", "Lily", "British English", "Female"),
-    ("bm_daniel", "Daniel", "British English", "Male"),
-    ("bm_fable", "Fable", "British English", "Male"),
-    ("bm_george", "George", "British English", "Male"),
-    ("bm_lewis", "Lewis", "British English", "Male"),
+    ("am_michael", "Michael", "American English", "Male", True, 1.0),
+    ("am_fenrir", "Fenrir", "American English", "Male", True, 0.8),
+    ("am_puck", "Puck", "American English", "Male", True, 0.78),
+    ("af_heart", "Heart", "American English", "Female", True, 0.92),
+    ("af_bella", "Bella", "American English", "Female", True, 0.95),
+    ("af_nicole", "Nicole", "American English", "Female", True, 1.39),
+    ("af_alloy", "Alloy", "American English", "Female", True, 0.82),
+    ("af_aoede", "Aoede", "American English", "Female", True, 0.85),
+    ("af_jessica", "Jessica", "American English", "Female", True, 0.77),
+    ("af_kore", "Kore", "American English", "Female", True, 0.82),
+    ("af_nova", "Nova", "American English", "Female", True, 0.81),
+    ("af_river", "River", "American English", "Female", True, 0.77),
+    ("af_sarah", "Sarah", "American English", "Female", True, 0.93),
+    ("af_sky", "Sky", "American English", "Female", True, 0.88),
+    ("am_adam", "Adam", "American English", "Male", True, 0.88),
+    ("am_echo", "Echo", "American English", "Male", True, 0.83),
+    ("am_eric", "Eric", "American English", "Male", True, 0.77),
+    ("am_liam", "Liam", "American English", "Male", True, 0.79),
+    ("am_onyx", "Onyx", "American English", "Male", True, 0.82),
+    ("am_santa", "Santa", "American English", "Male", True, 0.89),
+    ("bf_alice", "Alice", "British English", "Female", True, 0.84),
+    ("bf_emma", "Emma", "British English", "Female", True, 0.87),
+    ("bf_isabella", "Isabella", "British English", "Female", True, 0.88),
+    ("bf_lily", "Lily", "British English", "Female", True, 0.84),
+    ("bm_daniel", "Daniel", "British English", "Male", True, 0.8),
+    ("bm_fable", "Fable", "British English", "Male", True, 0.81),
+    ("bm_george", "George", "British English", "Male", True, 0.95),
+    ("bm_lewis", "Lewis", "British English", "Male", True, 0.98),
 )
-ENGLISH_NARRATOR_VOICES = tuple(NarratorVoice(*row) for row in _VOICE_ROWS)
+ENGLISH_NARRATOR_VOICES = tuple(
+    NarratorVoice(voice_id=r[0], label=r[1], english_variant=r[2], gender=r[3], approved=r[4], speed_correction=r[5]) for r in _VOICE_ROWS
+)
 APPROVED_NARRATOR_VOICES = tuple(v for v in ENGLISH_NARRATOR_VOICES if v.approved)
 VOICE_BY_ID = {v.voice_id: v for v in APPROVED_NARRATOR_VOICES}
 DEFAULT_NARRATOR_VOICE = "am_michael"

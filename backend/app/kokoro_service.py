@@ -13,11 +13,11 @@ from kokoro import KPipeline
 from app.voice_registry import get_narrator_voice, validate_voice_speed
 
 SAMPLE_RATE = 24000
-TARGET_CHUNK_CHARACTERS = 650
-MAX_CHUNK_CHARACTERS = 1000
+TARGET_CHUNK_CHARACTERS = 350
+MAX_CHUNK_CHARACTERS = 500
 MIN_CHUNK_CHARACTERS = 90
-CHUNK_PAUSE_SECONDS = 0.16
-PARAGRAPH_PAUSE_SECONDS = 0.42
+CHUNK_PAUSE_SECONDS = 0.22
+PARAGRAPH_PAUSE_SECONDS = 0.55
 _pipelines = {}
 
 
@@ -107,6 +107,9 @@ def _synthesize_chunk(pipeline, text: str, voice: str, speed: float):
 def generate_narration(text, voice, speed, output_path, pipeline_override=None):
     voice_info = get_narrator_voice(voice)
     speed = validate_voice_speed(speed)
+    # Normalize all voices to Michael's pace (168 WPM at speed 1.0).
+    # Each voice has a correction factor so they all sound the same pace.
+    speed = speed * voice_info.speed_correction
     text_chunks = chunk_narration_text(text)
     if not text_chunks:
         raise ValueError("Narration text must not be empty.")
