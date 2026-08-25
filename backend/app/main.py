@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 import shutil
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1342,6 +1342,7 @@ def script_to_video_page(
     return templates.TemplateResponse(
         request=request,
         name="script_to_video.html",
+
         context=context,
     )
 
@@ -3925,3 +3926,357 @@ def generate_profile_recovery_code(
             "recovery_code": display_code,
         },
     )
+
+
+
+@app.get("/voices")
+def voice_studio_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    import sqlite3
+    from app.voice_registry import APPROVED_NARRATOR_VOICES
+    from app.paths import PROJECT_ROOT
+
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cloned_rows = conn.execute(
+        "SELECT * FROM cloned_voices ORDER BY created_at DESC"
+    ).fetchall()
+    tts_rows = conn.execute(
+        "SELECT * FROM tts_generations ORDER BY created_at DESC LIMIT 50"
+    ).fetchall()
+    conn.close()
+    cloned = [dict(v) for v in cloned_rows]
+    tts_history = [dict(v) for v in tts_rows]
+
+    preview_dir = Path(__file__).parent / "static" / "voice-previews"
+    preview_files = set()
+    if preview_dir.exists():
+        preview_files = {f.stem for f in preview_dir.glob("*.mp3")}
+
+    from app.project_info import get_project_info
+    from app.models import User
+    from app.database import SessionLocal as SL
+
+    with SL() as db:
+        user = db.get(User, request.session.get("user_id"))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="voice_studio.html",
+        context={
+            "app_name": "Atta Video AI",
+            "active_page": "voices",
+            "cloned_voices": cloned,
+            "builtin_voices": APPROVED_NARRATOR_VOICES,
+            "preview_files": preview_files,
+            "tts_history": tts_history,
+            "project_info": get_project_info(),
+            "user": user,
+        },
+    )
+
+
+@app.post("/voices/upload")
+async def upload_clone_voice(
+    request: Request,
+    name: str = Form(...),
+    reference_audio: UploadFile = File(...),
+    exaggeration: float = Form(0.5),
+):
+    if not request.session.get("user_id"):
+        return JSONResponse({"success": False, "error": "Not authenticated"}, 401)
+
+    import sqlite3
+    from app.paths import PROJECT_ROOT
+
+    user_id = request.session["user_id"]
+
+    # Save reference audio
+    voices_dir = Path(__file__).parent / "static" / "cloned-voices"
+    voices_dir.mkdir(parents=True, exist_ok=True)
+
+    # Insert record first to get ID
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.execute(
+        "INSERT INTO cloned_voices (user_id, name, reference_audio_path, exaggeration, status) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (user_id, name, "", exaggeration, "processing"),
+    )
+    voice_id = cursor.lastrowid
+    conn.commit()
+
+    # Save file
+    voice_dir = voices_dir / str(voice_id)
+    voice_dir.mkdir(parents=True, exist_ok=True)
+    ref_path = voice_dir / f"reference{Path(reference_audio.filename).suffix}"
+
+    content = await reference_audio.read()
+    ref_path.write_bytes(content)
+
+    # Convert to WAV if needed
+    ref_wav = voice_dir / "reference.wav"
+    if ref_path.suffix.lower() != ".wav":
+        import subprocess
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(ref_path), "-ar", "24000", "-ac", "1", str(ref_wav)],
+            check=True,
+        )
+    else:
+        import shutil
+        shutil.copy2(str(ref_path), str(ref_wav))
+
+    # Update path
+    conn.execute(
+        "UPDATE cloned_voices SET reference_audio_path = ? WHERE id = ?",
+        (str(ref_wav), voice_id),
+    )
+    conn.commit()
+
+    # Generate preview
+    try:
+        from app.chatterbox_service import generate_preview
+
+        preview_wav = voice_dir / "preview.wav"
+        preview_mp3 = voice_dir / "preview.mp3"
+
+        generate_preview(
+            reference_audio_path=str(ref_wav),
+            output_path=str(preview_wav),
+        )
+
+        import subprocess
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(preview_wav), "-b:a", "128k", str(preview_mp3)],
+            check=True,
+        )
+        preview_wav.unlink(missing_ok=True)
+
+        conn.execute(
+            "UPDATE cloned_voices SET preview_audio_path = ?, status = ? WHERE id = ?",
+            (str(preview_mp3), "ready", voice_id),
+        )
+        conn.commit()
+
+    except Exception as e:
+        conn.execute(
+            "UPDATE cloned_voices SET status = ?, error_message = ? WHERE id = ?",
+            ("error", str(e), voice_id),
+        )
+        conn.commit()
+        conn.close()
+        return JSONResponse({"success": False, "error": str(e)})
+
+    conn.close()
+    return JSONResponse({"success": True, "voice_id": voice_id})
+
+
+@app.post("/voices/preview/{voice_id}")
+def preview_cloned_voice(voice_id: int, request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"success": False, "error": "Not authenticated"}, 401)
+
+    import sqlite3
+    from app.paths import PROJECT_ROOT
+
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    voice = conn.execute(
+        "SELECT * FROM cloned_voices WHERE id = ?", (voice_id,)
+    ).fetchone()
+
+    if not voice:
+        conn.close()
+        return JSONResponse({"success": False, "error": "Voice not found"})
+
+    try:
+        from app.chatterbox_service import generate_preview
+
+        voice_dir = Path(__file__).parent / "static" / "cloned-voices" / str(voice_id)
+        voice_dir.mkdir(parents=True, exist_ok=True)
+
+        preview_wav = voice_dir / "preview.wav"
+        preview_mp3 = voice_dir / "preview.mp3"
+
+        generate_preview(
+            reference_audio_path=voice["reference_audio_path"],
+            output_path=str(preview_wav),
+        )
+
+        import subprocess
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(preview_wav), "-b:a", "128k", str(preview_mp3)],
+            check=True,
+        )
+        preview_wav.unlink(missing_ok=True)
+
+        conn.execute(
+            "UPDATE cloned_voices SET preview_audio_path = ?, status = ? WHERE id = ?",
+            (str(preview_mp3), "ready", voice_id),
+        )
+        conn.commit()
+        conn.close()
+
+        return JSONResponse({"success": True})
+
+    except Exception as e:
+        conn.close()
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+@app.post("/voices/delete/{voice_id}")
+def delete_cloned_voice(voice_id: int, request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"success": False, "error": "Not authenticated"}, 401)
+
+    import sqlite3, shutil
+    from app.paths import PROJECT_ROOT
+
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("DELETE FROM cloned_voices WHERE id = ?", (voice_id,))
+    conn.commit()
+    conn.close()
+
+    voice_dir = Path(__file__).parent / "static" / "cloned-voices" / str(voice_id)
+    if voice_dir.exists():
+        shutil.rmtree(str(voice_dir))
+
+    return JSONResponse({"success": True})
+
+
+@app.post("/text-to-voice/generate")
+async def text_to_voice_generate(
+    request: Request,
+    text: str = Form(...),
+    voice: str = Form(...),
+    speed: float = Form(1.0),
+    format: str = Form("mp3"),
+    title: str = Form("Untitled"),
+):
+    if not request.session.get("user_id"):
+        return JSONResponse({"success": False, "error": "Not authenticated"}, 401)
+
+    import sqlite3, uuid, subprocess
+    from app.paths import PROJECT_ROOT
+
+    output_dir = Path(__file__).parent / "static" / "tts-output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    file_id = uuid.uuid4().hex[:12]
+    wav_path = output_dir / f"{file_id}.wav"
+    out_path = output_dir / f"{file_id}.{format}"
+
+    try:
+        if voice.startswith("cloned:"):
+            # Cloned voice via Chatterbox
+            voice_id = int(voice.split(":")[1])
+            db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            v = conn.execute(
+                "SELECT * FROM cloned_voices WHERE id = ?", (voice_id,)
+            ).fetchone()
+            conn.close()
+
+            if not v:
+                return JSONResponse({"success": False, "error": "Voice not found"})
+
+            from app.chatterbox_service import generate_cloned_voice
+            generate_cloned_voice(
+                text=text,
+                reference_audio_path=v["reference_audio_path"],
+                output_path=str(wav_path),
+                exaggeration=v["exaggeration"] or 0.5,
+            )
+
+        elif voice.startswith("builtin:"):
+            # Built-in Kokoro voice
+            voice_id = voice.split(":")[1]
+            from app.kokoro_service import generate_narration
+            generate_narration(text, voice_id, speed, wav_path)
+
+        else:
+            return JSONResponse({"success": False, "error": "Invalid voice selection"})
+
+        # Convert to requested format
+        if format == "mp3":
+            subprocess.run(
+                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                 "-i", str(wav_path), "-b:a", "128k", str(out_path)],
+                check=True,
+            )
+            wav_path.unlink(missing_ok=True)
+        else:
+            out_path = wav_path
+
+        filename = f"tts-{file_id}.{format}"
+        audio_url = f"/static/tts-output/{file_id}.{format}"
+
+        # Save to history
+        try:
+            voice_name = voice.split(":")[1] if ":" in voice else voice
+            voice_type = "cloned" if voice.startswith("cloned:") else "builtin"
+            if voice_type == "cloned":
+                cv_row = conn2 if 'conn2' in dir() else None
+                import sqlite3 as sq
+                hconn = sq.connect(str(db_path))
+                hconn.row_factory = sq.Row
+                cv_info = hconn.execute("SELECT name FROM cloned_voices WHERE id=?", (int(voice_name),)).fetchone()
+                voice_name = cv_info["name"] if cv_info else f"Cloned #{voice_name}"
+                hconn.close()
+
+            dur_r = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(out_path)],
+                capture_output=True, text=True
+            )
+            duration = float(dur_r.stdout.strip()) if dur_r.stdout.strip() else 0
+
+            import sqlite3 as sq2
+            hconn2 = sq2.connect(str(db_path))
+            hconn2.execute(
+                "INSERT INTO tts_generations (user_id, voice_name, voice_type, text_preview, word_count, duration_seconds, audio_path, format, title) VALUES (?,?,?,?,?,?,?,?,?)",
+                (request.session.get("user_id", 1), voice_name, voice_type, text[:200], len(text.split()), duration, str(out_path), format, title)
+            )
+            hconn2.commit()
+            hconn2.close()
+        except Exception as hist_err:
+            print(f"TTS history save failed: {hist_err}", flush=True)
+
+        return JSONResponse({
+            "success": True,
+            "audio_url": audio_url,
+            "filename": filename,
+        })
+
+    except Exception as e:
+        wav_path.unlink(missing_ok=True)
+        return JSONResponse({"success": False, "error": str(e)})
+
+
+
+
+@app.post("/tts/delete/{gen_id}")
+def delete_tts_generation(gen_id: int, request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"success": False, "error": "Not authenticated"}, 401)
+    import sqlite3
+    from app.paths import PROJECT_ROOT
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    gen = conn.execute("SELECT audio_path FROM tts_generations WHERE id=?", (gen_id,)).fetchone()
+    if gen and gen["audio_path"]:
+        Path(gen["audio_path"]).unlink(missing_ok=True)
+    conn.execute("DELETE FROM tts_generations WHERE id=?", (gen_id,))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"success": True})

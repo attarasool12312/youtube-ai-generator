@@ -313,6 +313,19 @@ fi
 run_as_user "$PIP" install --upgrade pip setuptools wheel
 run_as_user "$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
 
+# Patch perth watermarker for platforms without binary
+log "Patching perth watermarker fallback"
+PERTH_INIT=$(find "$PROJECT_ROOT/.venv" -path "*/perth/__init__.py" 2>/dev/null | head -1)
+if [ -n "$PERTH_INIT" ] && ! grep -q "DummyWatermarker fallback" "$PERTH_INIT" 2>/dev/null; then
+    cat >> "$PERTH_INIT" << 'PERTH_PATCH'
+
+# DummyWatermarker fallback for platforms where the binary is unavailable
+if PerthImplicitWatermarker is None:
+    PerthImplicitWatermarker = DummyWatermarker
+PERTH_PATCH
+    log "Perth watermarker patched"
+fi
+
 log "Installing isolated Whisper runtime"
 
 run_as_user "$PIP" install --no-deps \

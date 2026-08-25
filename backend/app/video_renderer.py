@@ -575,11 +575,6 @@ def render_video(
                     "error",
                     "-nostdin",
                     "-y",
-                ]
-                # GPU-accelerated decode for video inputs
-                if _nvenc_available():
-                    command += ["-hwaccel", "cuda"]
-                command += [
                     "-stream_loop",
                     "-1",
                     "-i",

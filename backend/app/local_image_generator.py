@@ -11,7 +11,10 @@ os.environ.setdefault(
 )
 
 import torch
-from diffusers import FluxPipeline
+try:
+    from diffusers import FluxPipeline
+except ImportError:
+    FluxPipeline = None
 from PIL import Image
 
 from app.paths import FLUX_MODEL_PATH

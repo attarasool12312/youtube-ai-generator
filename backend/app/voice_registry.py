@@ -89,7 +89,13 @@ def validate_voice_speed(speed: float) -> float:
 
 
 def validated_voice_pool(voice_ids) -> list[str]:
-    return list(dict.fromkeys(get_narrator_voice(value).voice_id for value in voice_ids))
+    result = []
+    for value in voice_ids:
+        if value.startswith("cloned:"):
+            result.append(value)
+        else:
+            result.append(get_narrator_voice(value).voice_id)
+    return list(dict.fromkeys(result))
 
 
 def voice_preview_filename(voice_id: str) -> str:
@@ -110,4 +116,22 @@ def voice_template_context() -> dict:
         "additional_voices": ADDITIONAL_VOICES,
         "default_narrator_voice": DEFAULT_NARRATOR_VOICE,
         "voice_preview_url_root": VOICE_PREVIEW_URL_ROOT,
+        "cloned_voices": _get_cloned_voices_for_template(),
     }
+
+
+def _get_cloned_voices_for_template():
+    """Fetch cloned voices for template dropdowns."""
+    import sqlite3
+    from app.paths import PROJECT_ROOT
+    db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        voices = conn.execute(
+            "SELECT id, name FROM cloned_voices WHERE status='ready' ORDER BY name"
+        ).fetchall()
+        conn.close()
+        return [dict(v) for v in voices]
+    except Exception:
+        return []

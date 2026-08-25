@@ -86,9 +86,20 @@
             <label>Main Narrator</label>
             <div class="voice-select-row">
               <select name="narrator_voice" required>
+                {% if cloned_voices %}
+                <optgroup label="Cloned Voices">
+                  {% for cv in cloned_voices %}
+                  <option value="cloned:{{ cv.id }}">&#127908; {{ cv.name }} (Cloned)</option>
+                  {% endfor %}
+                </optgroup>
+                <optgroup label="Built-in Voices">
+                {% endif %}
                 {% for voice in narrator_voices %}
                 <option value="{{ voice.voice_id }}"{% if voice.voice_id == default_narrator_voice %} selected{% endif %}>{{ voice.display_label }}</option>
                 {% endfor %}
+                {% if cloned_voices %}
+                </optgroup>
+                {% endif %}
               </select>
               <button
                 type="button"

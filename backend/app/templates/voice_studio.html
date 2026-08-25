@@ -1,0 +1,499 @@
+{% extends "base_app.html" %}
+{% block title %}Voice Studio - Atta Video AI{% endblock %}
+{% block content %}
+<style>
+.voice-studio{max-width:1100px;margin:0 auto}
+.vs-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}
+.vs-header h1{font-size:26px;font-weight:800}
+.vs-tabs{display:flex;gap:6px;margin-bottom:24px;border-bottom:2px solid var(--app-border)}
+.vs-tab{padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;border-bottom:3px solid transparent;color:var(--app-muted);transition:all .2s}
+.vs-tab.active{color:var(--app-primary);border-bottom-color:var(--app-primary)}
+.vs-tab:hover{color:var(--app-text)}
+.vs-panel{display:none}.vs-panel.active{display:block}
+
+/* Upload section */
+.vs-upload{padding:32px;background:var(--app-surface);border:2px dashed var(--app-border);border-radius:var(--app-radius);text-align:center;margin-bottom:24px;transition:border-color .2s}
+.vs-upload:hover{border-color:var(--app-primary)}
+.vs-upload h3{font-size:18px;font-weight:700;margin-bottom:8px}
+.vs-upload p{font-size:14px;color:var(--app-muted);margin-bottom:16px}
+.vs-upload input[type=file]{display:none}
+.vs-upload label{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;background:var(--app-primary);color:#fff;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.vs-upload label:hover{opacity:.88}
+.vs-form{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:600px;margin:20px auto 0}
+.vs-form label{font-size:13px;font-weight:600;display:block;margin-bottom:4px}
+.vs-form input,.vs-form select{width:100%;padding:9px 12px;border:1.5px solid var(--app-border);border-radius:8px;font-size:14px}
+.vs-form button{grid-column:1/-1;padding:12px;background:var(--app-primary);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s}
+.vs-form button:hover{opacity:.88}
+
+/* Voice cards */
+.vs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.vs-card{padding:20px;background:var(--app-surface);border:1.5px solid var(--app-border);border-radius:var(--app-radius);transition:border-color .2s}
+.vs-card:hover{border-color:var(--app-primary)}
+.vs-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.vs-card-name{font-size:16px;font-weight:700}
+.vs-card-type{font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px}
+.vs-card-type.builtin{background:#e0f2fe;color:#0369a1}
+.vs-card-type.cloned{background:#fce7f3;color:#be185d}
+.vs-card-meta{font-size:12px;color:var(--app-muted);margin-bottom:12px}
+.vs-card-audio{width:100%;height:36px;margin-bottom:10px}
+.vs-card-actions{display:flex;gap:8px}
+.vs-card-actions button,.vs-card-actions a{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;border:1.5px solid var(--app-border);background:var(--app-surface);color:var(--app-text);cursor:pointer;text-decoration:none;transition:all .2s}
+.vs-card-actions button:hover,.vs-card-actions a:hover{border-color:var(--app-primary);color:var(--app-primary)}
+.vs-card-actions .del{color:#dc2626;border-color:#fecaca}
+.vs-card-actions .del:hover{background:#fef2f2}
+
+/* Text to voice */
+.ttv-form{max-width:100%}
+.ttv-form textarea{width:100%;min-height:160px;padding:14px;border:1.5px solid var(--app-border);border-radius:10px;font-size:15px;font-family:inherit;resize:vertical}
+.ttv-form .ttv-controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0}
+.ttv-form .ttv-controls label{font-size:13px;font-weight:600;display:block;margin-bottom:4px}
+.ttv-form .ttv-controls select,.ttv-form .ttv-controls input{width:100%;padding:8px 10px;border:1.5px solid var(--app-border);border-radius:7px;font-size:13px}
+.ttv-result{margin-top:20px;padding:20px;background:var(--app-surface-soft);border:1px solid var(--app-border);border-radius:10px;display:none}
+.ttv-result audio{width:100%;margin:10px 0}
+.ttv-result a{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--app-primary);color:#fff;border-radius:7px;font-size:13px;font-weight:600;text-decoration:none}
+.ttv-gen-btn{padding:12px 32px;background:var(--app-primary);color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s}
+.ttv-gen-btn:hover{opacity:.88}
+.ttv-gen-btn:disabled{opacity:.5;cursor:not-allowed}
+
+.tip-box{padding:14px 18px;background:var(--app-surface-soft);border:1px solid var(--app-border);border-radius:10px;font-size:13px;color:var(--app-muted);margin-top:16px}
+.tip-box strong{color:var(--app-text)}
+</style>
+
+<div class="voice-studio">
+  <div class="vs-header">
+    <h1>Voice Studio</h1>
+  </div>
+
+  <div class="vs-tabs">
+    <div class="vs-tab active" onclick="switchTab('voices')">My Voices</div>
+    <div class="vs-tab" onclick="switchTab('clone')">Clone a Voice</div>
+    <div class="vs-tab" onclick="switchTab('tts')">Text to Voice</div>
+    <div class="vs-tab" onclick="switchTab('history')">Generated Audio</div>
+  </div>
+
+  <!-- TAB 1: Voice Library -->
+  <div class="vs-panel active" id="panel-voices">
+    <div class="vs-grid">
+      {% for voice in cloned_voices %}
+      <div class="vs-card">
+        <div class="vs-card-head">
+          <span class="vs-card-name">{{ voice['name'] }}</span>
+          <span class="vs-card-type cloned">Cloned</span>
+        </div>
+        <div class="vs-card-meta">Created {{ voice['created_at'][:10] if voice['created_at'] else 'recently' }}</div>
+        {% if voice['preview_audio_path'] %}
+        <audio class="vs-card-audio" controls preload="none">
+          <source src="/static/cloned-voices/{{ voice['id'] }}/preview.mp3" type="audio/mpeg">
+        </audio>
+        {% endif %}
+        <div class="vs-card-actions">
+          <button onclick="previewVoice({{ voice['id'] }})">Generate Preview</button>
+          <button class="del" onclick="deleteVoice({{ voice['id'] }}, '{{ voice['name'] }}')">Delete</button>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% for voice in builtin_voices %}
+      <div class="vs-card">
+        <div class="vs-card-head">
+          <span class="vs-card-name">{{ voice.label }}</span>
+          <span class="vs-card-type builtin">Built-in {{ voice.gender }}</span>
+        </div>
+        <div class="vs-card-meta">{{ voice.english_variant }} &middot; {{ voice.voice_id }}</div>
+        {% if voice.voice_id in preview_files %}
+        <audio class="vs-card-audio" controls preload="none">
+          <source src="/static/voice-previews/{{ voice.voice_id }}.mp3" type="audio/mpeg">
+        </audio>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- TAB 2: Clone Voice -->
+  <div class="vs-panel" id="panel-clone">
+    <div class="vs-upload" id="dropzone">
+      <h3>Upload Reference Audio</h3>
+      <p>Upload 5-30 seconds of clear, single-speaker audio. WAV or MP3. No background music or noise.</p>
+      <input type="file" id="ref-audio" accept="audio/*" onchange="showCloneForm()">
+      <label for="ref-audio">&#127908; Choose Audio File</label>
+      <p id="file-name" style="margin-top:10px;font-weight:600;color:var(--app-text);display:none"></p>
+    </div>
+
+    <form class="vs-form" id="clone-form" action="/voices/upload" method="post" enctype="multipart/form-data" style="display:none">
+      <div>
+        <label>Voice Name</label>
+        <input type="text" name="name" placeholder="e.g. My Voice, John's Voice" required>
+      </div>
+      <div>
+        <label>Exaggeration (emotion level)</label>
+        <select name="exaggeration">
+          <option value="0.3">Calm (0.3)</option>
+          <option value="0.5" selected>Natural (0.5)</option>
+          <option value="0.7">Expressive (0.7)</option>
+          <option value="1.0">Dramatic (1.0)</option>
+        </select>
+      </div>
+      <button type="submit">Clone Voice & Generate Preview</button>
+    </form>
+
+    <div class="tip-box">
+      <strong>Tips for best voice cloning:</strong><br>
+      &bull; Use 10-30 seconds of clean speech (no music, no echo)<br>
+      &bull; Record in a quiet room with consistent volume<br>
+      &bull; Speak naturally at a steady pace<br>
+      &bull; WAV format gives best results, MP3 also works<br>
+      &bull; One speaker only - no conversations
+    </div>
+  </div>
+
+  <!-- TAB 3: Text to Voice -->
+  <div class="vs-panel" id="panel-tts">
+    <div class="ttv-form">
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Title (for your reference)</label>
+        <input id="tts-title" type="text" placeholder="e.g. Product intro, Chapter 1, Client demo..." style="width:100%;padding:10px 14px;border:1.5px solid var(--app-border);border-radius:8px;font-size:14px">
+      </div>
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Script / Text</label>
+      <textarea id="tts-text" name="text" placeholder="Enter text to convert to speech..."></textarea>
+
+      <div class="ttv-controls">
+        <div>
+          <label>Voice</label>
+          <select id="tts-voice" name="voice">
+            <optgroup label="Cloned Voices">
+              {% for voice in cloned_voices %}
+              <option value="cloned:{{ voice['id'] }}">&#127908; {{ voice['name'] }}</option>
+              {% endfor %}
+              {% if not cloned_voices %}
+              <option disabled>No cloned voices yet</option>
+              {% endif %}
+            </optgroup>
+            <optgroup label="Built-in Voices">
+              {% for voice in builtin_voices %}
+              <option value="builtin:{{ voice.voice_id }}">{{ voice.label }} ({{ voice.gender }}, {{ voice.english_variant }})</option>
+              {% endfor %}
+            </optgroup>
+          </select>
+        </div>
+        <div>
+          <label>Speed</label>
+          <select id="tts-speed" name="speed">
+            <option value="0.75">Slow</option>
+            <option value="0.85">Slightly Slow</option>
+            <option value="1.0" selected>Normal</option>
+            <option value="1.15">Fast</option>
+          </select>
+        </div>
+        <div>
+          <label>Format</label>
+          <select id="tts-format" name="format">
+            <option value="mp3" selected>MP3</option>
+            <option value="wav">WAV</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="ttv-gen-btn" id="tts-generate" onclick="generateTTS()">Generate Audio</button>
+
+      <!-- Progress Card -->
+      <div id="tts-progress" style="display:none;margin-top:20px;padding:24px;background:var(--app-surface);border:1.5px solid var(--app-border);border-radius:12px">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+          <div id="tts-spinner" style="width:40px;height:40px;border:4px solid var(--app-border);border-top-color:var(--app-primary);border-radius:50%;animation:spin 1s linear infinite"></div>
+          <div>
+            <p id="tts-status-text" style="font-weight:700;font-size:15px">Initializing...</p>
+            <p id="tts-status-sub" style="font-size:12px;color:var(--app-muted)">Please wait</p>
+          </div>
+        </div>
+        <div style="height:6px;background:var(--app-border);border-radius:6px;overflow:hidden">
+          <div id="tts-progress-bar" style="height:100%;width:0%;background:var(--app-primary);border-radius:6px;transition:width 0.5s ease"></div>
+        </div>
+        <!-- Waveform animation -->
+        <div id="tts-wave" style="display:flex;align-items:end;justify-content:center;gap:3px;height:30px;margin-top:16px">
+        </div>
+      </div>
+      <style>
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes wave-anim{0%{height:15%}50%{height:85%}100%{height:15%}}
+        .tts-wave-bar{width:4px;background:var(--app-primary);border-radius:2px;animation:wave-anim 1s ease-in-out infinite}
+      </style>
+
+      <!-- Result Card -->
+      <div class="ttv-result" id="tts-result">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:36px;height:36px;background:#dcfce7;border-radius:8px;display:grid;place-items:center;font-size:18px">&#10003;</div>
+          <div>
+            <p style="font-weight:700;font-size:15px">Audio Generated Successfully</p>
+            <p id="tts-result-info" style="font-size:12px;color:var(--app-muted)"></p>
+          </div>
+        </div>
+        <audio id="tts-audio" controls style="width:100%;margin:10px 0"></audio>
+        <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+          <a id="tts-download" href="#" download style="display:inline-flex;align-items:center;gap:8px;padding:10px 24px;background:var(--app-primary);color:#fff;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap">&#11015; Download MP3</a>
+          <button onclick="document.getElementById('tts-result').style.display='none'" style="padding:10px 24px;border:1.5px solid var(--app-border);border-radius:8px;font-size:14px;font-weight:600;background:var(--app-surface);cursor:pointer;white-space:nowrap;color:var(--app-text)">Close</button>
+          <button onclick="document.getElementById('tts-text').value='';document.getElementById('tts-result').style.display='none'" style="padding:10px 24px;border:1.5px solid var(--app-border);border-radius:8px;font-size:14px;font-weight:600;background:var(--app-surface);cursor:pointer;white-space:nowrap;color:var(--app-text)">New Generation</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: Generated Audio History -->
+  <div class="vs-panel" id="panel-history">
+    <style>
+    .tts-list{display:flex;flex-direction:column;gap:10px}
+    .tts-item{padding:16px;background:var(--app-surface);border:1.5px solid var(--app-border);border-radius:10px}
+    .tts-top{display:flex;justify-content:space-between;align-items:start;margin-bottom:10px}
+    .tts-info h4{font-size:15px;font-weight:700;margin-bottom:3px}
+    .tts-meta{font-size:12px;color:var(--app-muted)}
+    .tts-preview{font-size:12px;color:var(--app-muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:600px}
+    .tts-bottom{display:flex;align-items:center;gap:12px;margin-top:10px}
+    .tts-bottom audio{flex:1;height:36px}
+    .tts-btn{padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;border:1.5px solid var(--app-border);background:var(--app-surface);color:var(--app-text);cursor:pointer;text-decoration:none;white-space:nowrap}
+    .tts-btn:hover{border-color:var(--app-primary)}
+    .tts-btn.del{color:#dc2626;border-color:#fecaca}
+    .tts-btn.del:hover{background:#fef2f2}
+    .tts-badge{font-size:10px;font-weight:600;padding:3px 8px;border-radius:10px;white-space:nowrap}
+    .tts-badge.cloned{background:#fce7f3;color:#be185d}
+    .tts-badge.builtin{background:#e0f2fe;color:#0369a1}
+    </style>
+    {% if tts_history %}
+    <div class="tts-list">
+      {% for gen in tts_history %}
+      <div class="tts-item" id="tts-gen-{{ gen.id }}">
+        <div class="tts-top">
+          <div class="tts-info">
+            <h4>{% if gen.title and gen.title != "Untitled" %}{{ gen.title }} <span style="font-weight:400;font-size:12px;color:var(--app-muted)">({{ gen.voice_name }})</span>{% else %}{{ gen.voice_name }}{% endif %}</h4>
+            <div class="tts-meta">
+              {% if gen.word_count %}{{ gen.word_count }} words{% endif %}
+              {% if gen.duration_seconds %} &middot; {{ gen.duration_seconds|int }}s{% endif %}
+              &middot; {{ gen.format|upper if gen.format else 'MP3' }}
+              &middot; {{ gen.created_at[:16] if gen.created_at else '' }}
+            </div>
+            {% if gen.text_preview and gen.text_preview != 'Generated before history tracking' %}
+            <div class="tts-preview">{{ gen.text_preview }}</div>
+            {% endif %}
+          </div>
+          <span class="tts-badge {{ gen.voice_type }}">{{ gen.voice_type|capitalize }}</span>
+        </div>
+        <div class="tts-bottom">
+          <audio controls preload="none">
+            <source src="/static/tts-output/{{ gen.audio_path.split('/')[-1] }}" type="audio/mpeg">
+          </audio>
+          <a href="/static/tts-output/{{ gen.audio_path.split('/')[-1] }}" download class="tts-btn">Download</a>
+          <button onclick="deleteTTS({{ gen.id }})" class="tts-btn del">Delete</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:60px 20px;color:var(--app-muted)">
+      <p style="font-size:36px;margin-bottom:12px">&#127911;</p>
+      <p style="font-size:16px;font-weight:600">No generated audio yet</p>
+      <p style="font-size:14px;margin-top:6px">Go to the Text to Voice tab to generate your first audio</p>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+function switchTab(tab) {
+  document.querySelectorAll('.vs-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.vs-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+  document.querySelectorAll('.vs-tab').forEach(t => {
+    if (t.getAttribute('onclick').includes(tab)) t.classList.add('active');
+  });
+}
+
+function showCloneForm() {
+  const file = document.getElementById('ref-audio').files[0];
+  if (file) {
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('file-name').style.display = 'block';
+    document.getElementById('clone-form').style.display = 'grid';
+    // Add file to form
+    const form = document.getElementById('clone-form');
+    const existing = form.querySelector('input[type=file][name=reference_audio]');
+    if (!existing) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.name = 'reference_audio';
+      input.style.display = 'none';
+      form.appendChild(input);
+    }
+  }
+}
+
+// Override form submit to include the file from dropzone
+document.getElementById('clone-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const formData = new FormData(this);
+  const refFile = document.getElementById('ref-audio').files[0];
+  if (refFile) formData.set('reference_audio', refFile);
+
+  const btn = this.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Cloning voice...';
+
+  fetch('/voices/upload', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        window.location.href = '/voices?tab=voices&msg=Voice cloned successfully!';
+      } else {
+        alert('Error: ' + (data.error || 'Unknown error'));
+        btn.disabled = false;
+        btn.textContent = 'Clone Voice & Generate Preview';
+      }
+    })
+    .catch(err => {
+      alert('Error: ' + err);
+      btn.disabled = false;
+      btn.textContent = 'Clone Voice & Generate Preview';
+    });
+});
+
+function generateTTS() {
+  const text = document.getElementById('tts-text').value.trim();
+  if (!text) { alert('Please enter some text.'); return; }
+
+  const voice = document.getElementById('tts-voice').value;
+  const speed = document.getElementById('tts-speed').value;
+  const format = document.getElementById('tts-format').value;
+  const isCloned = voice.startsWith('cloned:');
+  const wordCount = text.split(/\s+/).length;
+
+  const btn = document.getElementById('tts-generate');
+  const prog = document.getElementById('tts-progress');
+  const result = document.getElementById('tts-result');
+  const bar = document.getElementById('tts-progress-bar');
+  const statusText = document.getElementById('tts-status-text');
+  const statusSub = document.getElementById('tts-status-sub');
+  const wave = document.getElementById('tts-wave');
+
+  btn.style.display = 'none';
+  result.style.display = 'none';
+  prog.style.display = 'block';
+
+  // Create waveform bars
+  wave.innerHTML = '';
+  for (let i = 0; i < 40; i++) {
+    const b = document.createElement('div');
+    b.className = 'tts-wave-bar';
+    b.style.animationDelay = (i * 0.05) + 's';
+    wave.appendChild(b);
+  }
+
+  // Progress messages
+  const messages = isCloned ? [
+    ['Preparing voice engine...', 'Loading AI voice model', 10],
+    ['Analyzing your voice sample...', 'Learning voice patterns and tone', 25],
+    ['Breaking text into segments...', wordCount + ' words to process', 40],
+    ['Generating your voice...', 'Creating natural speech patterns', 60],
+    ['Assembling audio...', 'Adding natural pauses and rhythm', 75],
+    ['Finalizing audio file...', 'Almost ready...', 90],
+  ] : [
+    ['Preparing voice engine...', 'Loading AI speech model', 15],
+    ['Breaking text into segments...', wordCount + ' words to process', 35],
+    ['Generating narration...', 'Creating natural speech audio', 60],
+    ['Fine-tuning audio...', 'Adjusting pacing and flow', 80],
+    ['Finalizing audio file...', 'Almost ready...', 90],
+  ];
+
+  let msgIndex = 0;
+  const interval = setInterval(() => {
+    if (msgIndex < messages.length) {
+      statusText.textContent = messages[msgIndex][0];
+      statusSub.textContent = messages[msgIndex][1];
+      bar.style.width = messages[msgIndex][2] + '%';
+      msgIndex++;
+    }
+  }, isCloned ? 8000 : 4000);
+
+  // Start immediately
+  statusText.textContent = messages[0][0];
+  statusSub.textContent = messages[0][1];
+  bar.style.width = messages[0][2] + '%';
+  msgIndex = 1;
+
+  const formData = new FormData();
+  formData.append('text', text);
+  formData.append('title', document.getElementById('tts-title').value.trim() || 'Untitled');
+  formData.append('voice', voice);
+  formData.append('speed', speed);
+  formData.append('format', format);
+
+  fetch('/text-to-voice/generate', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+      clearInterval(interval);
+      prog.style.display = 'none';
+      btn.style.display = 'block';
+
+      if (data.success) {
+        bar.style.width = '100%';
+        statusText.textContent = 'Complete!';
+        result.style.display = 'block';
+        document.getElementById('tts-audio').src = data.audio_url;
+        document.getElementById('tts-download').href = data.audio_url;
+        document.getElementById('tts-download').download = data.filename;
+        document.getElementById('tts-result-info').textContent =
+          wordCount + ' words processed \u00b7 ' + (isCloned ? 'Cloned voice' : 'Built-in voice');
+      } else {
+        alert('Error: ' + (data.error || 'Generation failed'));
+      }
+    })
+    .catch(err => {
+      clearInterval(interval);
+      prog.style.display = 'none';
+      btn.style.display = 'block';
+      alert('Error: ' + err);
+    });
+}
+
+function previewVoice(voiceId) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  fetch('/voices/preview/' + voiceId, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      btn.disabled = false;
+      btn.textContent = 'Generate Preview';
+      if (data.success) {
+        window.location.reload();
+      } else {
+        alert('Error: ' + (data.error || 'Preview failed'));
+      }
+    });
+}
+
+function deleteTTS(genId) {
+  if (!confirm('Delete this generated audio?')) return;
+  fetch('/tts/delete/' + genId, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) document.getElementById('tts-gen-' + genId).remove();
+      else alert('Error: ' + (data.error || 'Delete failed'));
+    });
+}
+
+function deleteVoice(voiceId, name) {
+  if (!confirm('Delete voice "' + name + '"? This cannot be undone.')) return;
+
+  fetch('/voices/delete/' + voiceId, { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) window.location.reload();
+      else alert('Error: ' + (data.error || 'Delete failed'));
+    });
+}
+
+// Auto-open tab from URL
+const params = new URLSearchParams(window.location.search);
+const autoTab = params.get('tab');
+if (autoTab) { switchTab(autoTab); }
+</script>
+{% endblock %}

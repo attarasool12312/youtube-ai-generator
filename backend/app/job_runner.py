@@ -180,12 +180,35 @@ def run_job(job_id: int) -> None:
 
         stage_started = time.perf_counter()
 
-        generate_narration(
-            package["script"],
-            narrator_voice,
-            voice_speed,
-            output_dir / "narration.wav",
-        )
+        if narrator_voice.startswith("cloned:"):
+            # Use Chatterbox for cloned voice
+            cloned_id = int(narrator_voice.split(":")[1])
+            import sqlite3
+            from app.paths import PROJECT_ROOT
+            db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            cv = conn.execute(
+                "SELECT reference_audio_path, exaggeration FROM cloned_voices WHERE id = ?",
+                (cloned_id,)
+            ).fetchone()
+            conn.close()
+            if cv is None:
+                raise ValueError(f"Cloned voice {cloned_id} not found")
+            from app.chatterbox_service import generate_cloned_voice
+            generate_cloned_voice(
+                text=package["script"],
+                reference_audio_path=cv["reference_audio_path"],
+                output_path=str(output_dir / "narration.wav"),
+                exaggeration=cv["exaggeration"] or 0.5,
+            )
+        else:
+            generate_narration(
+                package["script"],
+                narrator_voice,
+                voice_speed,
+                output_dir / "narration.wav",
+            )
 
         create_narration_mp3(
             output_dir / "narration.wav",
