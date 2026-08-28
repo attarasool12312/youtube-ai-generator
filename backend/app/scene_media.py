@@ -100,12 +100,6 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
                         used_sources, ai_prompt, media_source, prefer_wikimedia,
                         topic_context, history_sources, asset_usage, duration_minutes=10):
     media_source = normalize_media_source(media_source)
-    if media_source == "ai_only":
-        return select_media(
-            query, media_dir, number, requested, orientation, used_sources,
-            ai_prompt, "ai_only", prefer_wikimedia=prefer_wikimedia,
-            topic_context=topic_context, history_sources=history_sources,
-        )
     try:
         return select_media(
             query, media_dir, number, requested, orientation, used_sources,

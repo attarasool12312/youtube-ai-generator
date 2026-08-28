@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 import httpx
 
-from app.ai_media import flux_image
 from app.media_relevance import MediaTopicContext
 from app.openverse_media import download_historical_image
 from app.stock_providers import (
@@ -111,11 +110,6 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     used_sources = set(used_sources or ())
-    media_source = normalize_media_source(media_source)
-    if media_source == "ai_only":
-        logger.info("MEDIA scene=%d provider=ai query=%r result=selected", number, ai_prompt or query)
-        return flux_image(ai_prompt or query, folder, number, orientation)
-
     provider_used_sources = used_sources | set(history_sources or ())
     if prefer_wikimedia:
         result = _try_licensed_historical_sources(

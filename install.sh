@@ -210,13 +210,8 @@ restore_recovery_state() {
         "$recovery_tmp/backend/data/app.db" \
         "$PROJECT_ROOT/backend/data/app.db"
 
-    if [[ -s "$recovery_tmp/huggingface/token" ]]; then
-        mkdir -p "$APP_HOME/.cache/huggingface"
-
-        install -o "$APP_USER" -g "$APP_GROUP" -m 600 \
-            "$recovery_tmp/huggingface/token" \
-            "$APP_HOME/.cache/huggingface/token"
-    fi
+    # Hugging Face tokens are intentionally not restored from recovery.
+    # A fresh token is requested interactively on every installer run.
 
     rm -rf "$recovery_tmp"
 
@@ -311,7 +306,17 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 run_as_user "$PIP" install --upgrade pip setuptools wheel
+# Install base requirements first.
+# Critical dependency installs must NEVER be allowed to fail silently.
 run_as_user "$PIP" install -r "$PROJECT_ROOT/backend/requirements.txt"
+
+# Chatterbox voice cloning is intentionally pinned.
+run_as_user "$PIP" install chatterbox-tts==0.1.7
+
+# Chatterbox 0.1.7 requires these exact versions.
+# Re-assert them after dependency resolution so future packages cannot
+# leave the environment with an incompatible Torch/Diffusers stack.
+run_as_user "$PIP" install     torch==2.6.0     torchaudio==2.6.0     diffusers==0.29.0     safetensors==0.5.3
 
 # Patch perth watermarker for platforms without binary
 log "Patching perth watermarker fallback"
@@ -335,109 +340,75 @@ run_as_user "$PIP" install --no-deps \
     av==18.0.0 \
     flatbuffers==25.12.19
 
-log "Checking Hugging Face access"
-
+# Hugging Face token (needed for Whisper, MuseTalk, Kokoro, Chatterbox)
+# Always request a fresh token. Never silently reuse a cached/recovered token.
 HF_TOKEN_FILE="$APP_HOME/.cache/huggingface/token"
 
-validate_huggingface_token() {
-    [[ -s "$HF_TOKEN_FILE" ]] || return 1
+echo
+echo "============================================================"
+echo "HUGGING FACE TOKEN REQUIRED"
+echo "============================================================"
+echo "Atta Video AI needs a Hugging Face READ token to download"
+echo "Whisper, MuseTalk and related voice/avatar model files."
+echo
+echo "How to get a FREE Hugging Face token:"
+echo "  1. Open: https://huggingface.co/settings/tokens"
+echo "  2. Sign in to Hugging Face (create a free account if needed)."
+echo "  3. Click 'Create new token'."
+echo "  4. Give it a name, for example: AttaVideoAI"
+echo "  5. Choose READ access (or Fine-grained with read access)."
+echo "  6. Create the token, copy it, then paste it below."
+echo
+echo "Your input is hidden while you paste it."
+echo
 
-    run_as_user env \
+mkdir -p "$APP_HOME/.cache/huggingface"
+chown "$APP_USER:$APP_GROUP" "$APP_HOME/.cache/huggingface"
+chmod 700 "$APP_HOME/.cache/huggingface"
+
+# Never silently use an old cached token.
+rm -f "$HF_TOKEN_FILE"
+
+for attempt in 1 2 3; do
+    read -r -s -p "Hugging Face Token: " HF_TOKEN_INPUT
+    echo
+
+    if [[ -z "$HF_TOKEN_INPUT" ]]; then
+        echo "Token cannot be empty."
+        continue
+    fi
+
+    printf "%s" "$HF_TOKEN_INPUT" > "$HF_TOKEN_FILE"
+    chown "$APP_USER:$APP_GROUP" "$HF_TOKEN_FILE"
+    chmod 600 "$HF_TOKEN_FILE"
+    unset HF_TOKEN_INPUT
+
+    if run_as_user env \
         HF_TOKEN_FILE="$HF_TOKEN_FILE" \
         HF_HUB_DISABLE_XET=1 \
-        "$PYTHON" - <<'PYHFVERIFY' >/dev/null 2>&1
-import os
+        "$PYTHON" - <<'PYHFVERIFY'
 from pathlib import Path
+import os
+from huggingface_hub import HfApi
 
-from huggingface_hub import HfApi, hf_hub_download
-
-token = Path(
-    os.environ["HF_TOKEN_FILE"]
-).read_text().strip()
-
-if not token:
-    raise SystemExit(1)
-
-# Verify that this is a working Hugging Face User Access Token.
+token = Path(os.environ["HF_TOKEN_FILE"]).read_text().strip()
 HfApi().whoami(token=token)
-
-# Verify that the account has access to the gated FLUX model.
-# model_index.json is tiny; this does not download the full model.
-hf_hub_download(
-    repo_id="black-forest-labs/FLUX.1-schnell",
-    filename="model_index.json",
-    token=token,
-)
+print("HUGGING_FACE_TOKEN_OK")
 PYHFVERIFY
-}
+    then
+        log "Fresh Hugging Face token verified successfully"
+        break
+    fi
 
-if validate_huggingface_token; then
-    log "Existing Hugging Face token is valid and has FLUX access"
-else
-    echo
-    echo "============================================================"
-    echo "HUGGING FACE TOKEN REQUIRED"
-    echo "============================================================"
-    echo
-    echo "The existing Hugging Face credential is missing, expired,"
-    echo "or does not have access to FLUX.1-schnell."
-    echo
-    echo "Do this in your browser:"
-    echo
-    echo "1. Sign in to Hugging Face:"
-    echo "   https://huggingface.co/"
-    echo
-    echo "2. Open Access Tokens:"
-    echo "   https://huggingface.co/settings/tokens"
-    echo
-    echo "3. Create a NEW User Access Token with READ permission."
-    echo
-    echo "4. Open the FLUX model page:"
-    echo "   https://huggingface.co/black-forest-labs/FLUX.1-schnell"
-    echo
-    echo "5. Accept/request the model access conditions if required."
-    echo
-    echo "6. Return here and paste the token when requested."
-    echo
-    echo "IMPORTANT: The token is entered invisibly and is never printed."
-    echo
+    rm -f "$HF_TOKEN_FILE"
+    echo "Token validation failed. Please paste a valid Hugging Face READ token."
 
-    mkdir -p "$APP_HOME/.cache/huggingface"
-    chown "$APP_USER:$APP_GROUP" "$APP_HOME/.cache/huggingface"
-    chmod 700 "$APP_HOME/.cache/huggingface"
+    if [[ "$attempt" == "3" ]]; then
+        fail "Hugging Face authentication failed after 3 attempts."
+    fi
+done
 
-    for attempt in 1 2 3; do
-        read -r -s -p "Hugging Face User Access Token: " HF_TOKEN_INPUT
-        echo
 
-        if [[ -z "$HF_TOKEN_INPUT" ]]; then
-            echo "Token cannot be empty."
-            continue
-        fi
-
-        printf '%s' "$HF_TOKEN_INPUT" > "$HF_TOKEN_FILE"
-        chown "$APP_USER:$APP_GROUP" "$HF_TOKEN_FILE"
-        chmod 600 "$HF_TOKEN_FILE"
-
-        unset HF_TOKEN_INPUT
-
-        if validate_huggingface_token; then
-            log "Hugging Face token verified successfully"
-            break
-        fi
-
-        rm -f "$HF_TOKEN_FILE"
-
-        echo
-        echo "Token validation failed."
-        echo "Check the token and make sure FLUX access is accepted."
-        echo
-
-        if [[ "$attempt" == "3" ]]; then
-            fail "Hugging Face authentication could not be verified."
-        fi
-    done
-fi
 
 log "Preparing Whisper caption model"
 
@@ -679,6 +650,14 @@ run_as_user env \
     PYTHONPATH="$PROJECT_ROOT/backend" \
     "$PYTHON" -m app.init_db
 
+log "Running voice database migration"
+
+run_as_user env \
+    YOUTUBE_AI_PROJECT_ROOT="$PROJECT_ROOT" \
+    YOUTUBE_AI_MODEL_ROOT="$MODEL_ROOT" \
+    PYTHONPATH="$PROJECT_ROOT/backend" \
+    "$PYTHON" -m app.migrate_cloned_voices
+
 chown "$APP_USER:$APP_GROUP" \
     "$PROJECT_ROOT/backend/data/app.db"
 
@@ -718,6 +697,8 @@ try:
         "video_jobs",
         "facebook_connections",
         "facebook_publish_jobs",
+        "cloned_voices",
+        "tts_generations",
     }
 
     missing_tables = required_tables - tables
@@ -762,6 +743,7 @@ try:
         "facebook_auto_publish_enabled",
         "facebook_auto_publish_connection_id",
         "facebook_auto_publish_scheduled_at",
+        "cloned_voice_id",
     }
 
     missing_video_columns = (
@@ -803,52 +785,12 @@ PYCLEAR
 chown "$APP_USER:$APP_GROUP" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
-FLUX_DIR="$MODEL_ROOT/flux1-schnell"
-HF_TOKEN_FILE="$APP_HOME/.cache/huggingface/token"
-
-if [[ ! -f "$FLUX_DIR/model_index.json" ]]; then
-    [[ -s "$HF_TOKEN_FILE" ]] || \
-        fail "Hugging Face token is missing from the recovery backup."
-
-    log "Downloading FLUX.1-schnell"
-
-    run_as_user env \
-        MODEL_ROOT="$MODEL_ROOT" \
-        HF_TOKEN_FILE="$HF_TOKEN_FILE" \
-        HF_HOME="$MODEL_ROOT/huggingface" \
-        "$PYTHON" - <<'PYFLUX'
-import os
-from pathlib import Path
-from huggingface_hub import snapshot_download
-
-model_root = Path(os.environ["MODEL_ROOT"])
-token_file = Path(os.environ["HF_TOKEN_FILE"])
-target = model_root / "flux1-schnell"
-
-token = token_file.read_text().strip()
-
-if not token:
-    raise SystemExit("Hugging Face token file is empty.")
-
-target.mkdir(parents=True, exist_ok=True)
-
-snapshot_download(
-    repo_id="black-forest-labs/FLUX.1-schnell",
-    local_dir=str(target),
-    token=token,
-    max_workers=4,
-)
-PYFLUX
-else
-    log "Existing FLUX model preserved"
-fi
-
-[[ -f "$FLUX_DIR/model_index.json" ]] || \
-    fail "FLUX model download is incomplete."
 
 log "Installing MuseTalk avatar engine"
 
-run_as_user bash \
+run_as_user env \
+    TORCH_HOME="$APP_HOME/.cache/torch" \
+    bash \
     "$PROJECT_ROOT/scripts/setup_musetalk.sh" \
     "$APP_HOME/avatar-engine"
 
@@ -896,18 +838,34 @@ systemctl restart "$SERVICE_NAME"
 
 log "Checking dashboard"
 
-for _ in $(seq 1 90); do
+DASHBOARD_READY=0
+
+for attempt in $(seq 1 30); do
     if curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; then
+        DASHBOARD_READY=1
+        echo "Dashboard health check passed."
         break
+    fi
+
+    # Do not wait for the full timeout if the service has already crashed.
+    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+        echo
+        echo "Dashboard service exited during startup."
+        journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true
+        fail "Dashboard service failed."
+    fi
+
+    if (( attempt % 5 == 0 )); then
+        echo "Waiting for dashboard... (${attempt}/30)"
     fi
 
     sleep 2
 done
 
-curl -fsS http://127.0.0.1:8000/health >/dev/null || {
+if [[ "$DASHBOARD_READY" -ne 1 ]]; then
     journalctl -u "$SERVICE_NAME" -n 100 --no-pager || true
-    fail "Dashboard service failed."
-}
+    fail "Dashboard did not become healthy within 60 seconds."
+fi
 
 log "Running final checks"
 

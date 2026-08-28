@@ -16,17 +16,35 @@ class MediaModeTests(unittest.TestCase):
         self.assertEqual(normalize_media_source("invalid"), "stock_only")
         self.assertEqual(normalize_media_source(None), "stock_only")
 
-    def test_stock_only_never_calls_ai(self):
-        with tempfile.TemporaryDirectory() as folder, patch("app.media_selector.flux_image") as ai, patch("app.media_selector.try_providers", return_value=None), patch("app.media_selector._try_licensed_historical_sources", return_value=None):
+    def test_stock_only_exhaustion_raises_cleanly(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("app.media_selector.try_providers", return_value=None), \
+             patch("app.media_selector._try_licensed_historical_sources", return_value=None):
             with self.assertRaises(RuntimeError):
-                select_media("octopus", folder, 1, "video", "landscape", media_source="stock_only")
-        ai.assert_not_called()
+                select_media(
+                    "octopus",
+                    folder,
+                    1,
+                    "video",
+                    "landscape",
+                    media_source="stock_only",
+                )
 
-    def test_ai_only_explicitly_calls_ai(self):
-        expected = {"provider": "flux"}
-        with tempfile.TemporaryDirectory() as folder, patch("app.media_selector.flux_image", return_value=expected) as ai:
-            self.assertIs(select_media("prompt", folder, 1, "image", "landscape", media_source="ai_only"), expected)
-        ai.assert_called_once()
+    def test_legacy_ai_only_is_forced_to_stock_only(self):
+        self.assertEqual(normalize_media_source("ai_only"), "stock_only")
+
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("app.media_selector.try_providers", return_value=None), \
+             patch("app.media_selector._try_licensed_historical_sources", return_value=None):
+            with self.assertRaises(RuntimeError):
+                select_media(
+                    "prompt",
+                    folder,
+                    1,
+                    "image",
+                    "landscape",
+                    media_source="ai_only",
+                )
 
 
 class QueryAndReuseTests(unittest.TestCase):

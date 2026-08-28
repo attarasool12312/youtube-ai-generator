@@ -17,10 +17,6 @@ from PIL import (
 )
 
 from app.ai_provider import call_gemini
-from app.local_image_generator import (
-    generate_hd_image,
-    get_runtime_profile,
-)
 from app.youtube_metadata_generator import (
     _extract_json_object,
     _script_excerpt,
@@ -1189,54 +1185,19 @@ def generate_youtube_thumbnail(
         )
     )
 
-    seed_identity = (
-        f"{video_job.id}|{title}|{visual_prompt}"
-    )
-    seed = int(
-        sha256(
-            seed_identity.encode("utf-8")
-        ).hexdigest()[:8],
-        16,
+    selected_source = _create_fast_thumbnail_background(
+        package,
+        title,
+        background_path,
     )
 
-    runtime = get_runtime_profile(
-        "landscape"
-    )
-    background_provider = "local-flux"
-
-    if runtime["profile"] == "low":
-        selected_source = (
-            _create_fast_thumbnail_background(
-                package,
-                title,
-                background_path,
-            )
+    if not selected_source:
+        raise RuntimeError(
+            "No downloaded stock scene media is available for the YouTube thumbnail."
         )
 
-        if selected_source:
-            background_provider = (
-                "existing-media-fast-mode"
-            )
-        else:
-            generate_hd_image(
-                prompt=visual_prompt,
-                output_path=background_path,
-                orientation="landscape",
-                seed=seed,
-            )
-            background_provider = (
-                "local-flux-low-fallback"
-            )
-    else:
-        generate_hd_image(
-            prompt=visual_prompt,
-            output_path=background_path,
-            orientation="landscape",
-            seed=seed,
-        )
-        background_provider = (
-            "local-flux-high-quality"
-        )
+    background_provider = "existing-stock-media"
+    runtime_profile = "stock_only"
 
     final_provider = (
         f"{provider}+{background_provider}"
@@ -1258,9 +1219,8 @@ def generate_youtube_thumbnail(
         "headline": headline,
         "visual_prompt": visual_prompt,
         "provider": final_provider,
-        "runtime_profile": runtime["profile"],
+        "runtime_profile": runtime_profile,
         "background_provider": background_provider,
-        "seed": seed,
         "width": THUMBNAIL_WIDTH,
         "height": THUMBNAIL_HEIGHT,
         "size_bytes": size_bytes,

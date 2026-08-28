@@ -8,18 +8,18 @@ This system generates complete YouTube videos from a single title.
 
 Pipeline:
 
-Title Input  
-↓  
-AI Script Generation  
-↓  
-Scene Planning  
-↓  
-Local FLUX.1-schnell Image Generation  
-↓  
-Kokoro TTS Voice Generation  
-↓  
-FFmpeg Video Rendering  
-↓  
+Title Input
+↓
+AI Script Generation
+↓
+Scene Planning
+↓
+Stock Media Selection
+↓
+Kokoro TTS Voice Generation
+↓
+FFmpeg Video Rendering
+↓
 Final MP4 Output
 
 ## Private GitHub Repository Access
@@ -93,49 +93,9 @@ INSTALLATION_COMPLETE
 ```
 
 
-## Memory Configuration
-
-The system uses FLUX.1-schnell for local image generation.
-
-FLUX model loading requires additional memory.
-
-Recommended VM configuration:
-
-- RAM: 32GB+
-- Swap: 24GB
-
-
-Create swap:
-
-```bash
-sudo fallocate -l 24G /swapfile
-
-sudo chmod 600 /swapfile
-
-sudo mkswap /swapfile
-
-sudo swapon /swapfile
-```
-
-
-Enable swap after reboot:
-
-```bash
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-
-
-Verify:
-
-```bash
-free -h
-```
-
-
-Without enough memory, Linux may terminate the image generation process during FLUX loading.
-
-
 ## AI Components
+
+
 
 ### Ollama
 
@@ -153,27 +113,6 @@ Test:
 ```bash
 ollama run qwen3:14b "Say hello"
 ```
-
-
-### FLUX.1-schnell
-
-Used for local image generation.
-
-Model location:
-
-```
-~/models/flux1-schnell
-```
-
-
-Hugging Face cache:
-
-```
-~/models/huggingface
-```
-
-
-The system uses Diffusers with local model loading.
 
 
 ## Environment Configuration
@@ -368,7 +307,7 @@ AI Models:
 
 ```
 Qwen3:14B
-FLUX.1-schnell
+Stock Media
 ```
 
 
@@ -376,7 +315,7 @@ Verified:
 
 - Dashboard working
 - AI generation working
-- FLUX image generation working
+- Stock media generation pipeline working
 - Video rendering working
 - Video download working
 - Recovery backup working
@@ -393,9 +332,9 @@ https://attarasool.com
 
 ## Tested Production Checkpoint — 2026-08-01
 
-The following features were completed on the OpenRelay RTX 4090 deployment. The final full workflow test used Mixed media:
+The following features were completed on the OpenRelay RTX 4090 deployment. The final full workflow test used Stock media:
 
-- Mixed, Stock Only, and AI Only media-source modes
+- Stock Only media-source mode
 - Improved Pixabay and stock-media selection
 - Duplicate-media prevention
 - Static image fades without unwanted zoom
@@ -410,7 +349,7 @@ The following features were completed on the OpenRelay RTX 4090 deployment. The 
 - Browser desktop notifications for job started, completed, and failed
 - Bottom-left dashboard popup notifications with optional sound
 
-A complete 3-minute landscape video using Mixed media and captions was generated and verified successfully.
+A complete 3-minute landscape video using Stock media and captions was generated and verified successfully.
 
 The active deployment and recovery branch is:
 

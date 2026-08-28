@@ -1,8 +1,8 @@
 diff --git a/scripts/realtime_inference.py b/scripts/realtime_inference.py
-index 579b050..f3c15ee 100644
+index 579b050..4ae163f 100644
 --- a/scripts/realtime_inference.py
 +++ b/scripts/realtime_inference.py
-@@ -209,31 +209,138 @@ class Avatar:
+@@ -209,31 +209,144 @@ class Avatar:
  
          torch.save(self.input_latent_list_cycle, os.path.join(self.latents_out_path))
  
@@ -44,7 +44,7 @@ index 579b050..f3c15ee 100644
 +
 +        try:
 +            while True:
-+                if self.idx >= video_len - 1:
++                if self.idx >= video_len:
 +                    break
 +
 +                try:
@@ -54,6 +54,10 @@ index 579b050..f3c15ee 100644
 +                    )
 +                except queue.Empty:
 +                    continue
++
++                # Producer finished: never wait forever on an empty queue.
++                if res_frame is None:
++                    break
 +
 +                bbox = self.coord_list_cycle[
 +                    self.idx % len(self.coord_list_cycle)
@@ -71,8 +75,10 @@ index 579b050..f3c15ee 100644
 +                        res_frame.astype(np.uint8),
 +                        (x2 - x1, y2 - y1),
 +                    )
-+                except Exception:
-+                    continue
++                except Exception as error:
++                    raise RuntimeError(
++                        f"Avatar frame resize failed at frame {self.idx}: {error}"
++                    ) from error
 +
 +                mask = self.mask_list_cycle[
 +                    self.idx % len(self.mask_list_cycle)
@@ -165,7 +171,7 @@ index 579b050..f3c15ee 100644
  
      @torch.no_grad()
      def inference(self, audio_path, out_vid_name, fps, skip_save_images):
-@@ -259,7 +366,27 @@ class Avatar:
+@@ -259,7 +372,27 @@ class Avatar:
          res_frame_queue = queue.Queue()
          self.idx = 0
          # Create a sub-thread and start it
@@ -194,7 +200,14 @@ index 579b050..f3c15ee 100644
          process_thread.start()
  
          gen = datagen(whisper_chunks,
-@@ -282,7 +409,17 @@ class Avatar:
+@@ -279,10 +412,24 @@ class Avatar:
+             recon = vae.decode_latents(pred_latents)
+             for res_frame in recon:
+                 res_frame_queue.put(res_frame)
++
++        # Signal the consumer explicitly that no more frames are coming.
++        res_frame_queue.put(None)
++
          # Close the queue and sub-thread after all tasks are completed
          process_thread.join()
  
@@ -213,7 +226,7 @@ index 579b050..f3c15ee 100644
              print('Total process time of {} frames without saving images = {}s'.format(
                  video_num,
                  time.time() - start_time))
-@@ -291,7 +428,49 @@ class Avatar:
+@@ -291,7 +438,49 @@ class Avatar:
                  video_num,
                  time.time() - start_time))
  
@@ -264,7 +277,7 @@ index 579b050..f3c15ee 100644
              # optional
              cmd_img2video = f"ffmpeg -y -v warning -r {fps} -f image2 -i {self.avatar_path}/tmp/%08d.png -vcodec libx264 -vf format=yuv420p -crf 18 {self.avatar_path}/temp.mp4"
              print(cmd_img2video)
-@@ -339,6 +518,11 @@ if __name__ == "__main__":
+@@ -339,6 +528,11 @@ if __name__ == "__main__":
                         action="store_true",
                         help="Whether skip saving images for better generation speed calculation",
                         )

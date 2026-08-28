@@ -18,6 +18,5 @@ MODEL_ROOT = Path(
 OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "jobs"
 DATA_ROOT = PROJECT_ROOT / "backend" / "data"
 ENV_FILE = PROJECT_ROOT / ".env"
-FLUX_MODEL_PATH = MODEL_ROOT / "flux1-schnell"
 HF_HOME = MODEL_ROOT / "huggingface"
 WHISPER_MODEL_PATH = MODEL_ROOT / "whisper" / "small.en"

@@ -60,7 +60,7 @@ class ThumbnailQualityTests(unittest.TestCase):
         self.assertEqual(_clean_headline("  A REAL   HEADLINE  "), "A REAL HEADLINE")
 
     def test_fallback_is_title_derived_and_nonblank(self):
-        self.assertEqual(_fallback_headline("How Does a Jet Engine Work?"), "Jet Engine Work?")
+        self.assertEqual(_fallback_headline("How Does a Jet Engine Work?"), "How Does a Jet Engine Work?")
         self.assertNotEqual(_fallback_headline("A History of Glass"), "THE HIDDEN STORY")
         self.assertTrue(_fallback_headline("  "))
 
@@ -69,6 +69,10 @@ class ThumbnailQualityTests(unittest.TestCase):
         responses = [
             SimpleNamespace(text="Useful topic summary", provider="gemini"),
             SimpleNamespace(text='{"headline":"OCEANS IN MOTION"}', provider="gemini"),
+            SimpleNamespace(
+                text='{"same_video":true,"replacement_headline":""}',
+                provider="gemini",
+            ),
             SimpleNamespace(text='{"image_prompt":"Render OCEANS IN MOTION over a dramatic ocean current map"}', provider="gemini"),
         ]
         try:
@@ -137,7 +141,12 @@ class ThumbnailQualityTests(unittest.TestCase):
             )
         self.assertEqual(headline, "QUANTUM POWER")
         self.assertNotIn(headline, visual)
-        self.assertIn("Do NOT ask the image model to render text", call.call_args.args[0])
+        self.assertTrue(
+            any(
+                "Do NOT ask the image model to render text" in item.args[0]
+                for item in call.call_args_list
+            )
+        )
 
     def test_profiles_titles_and_durations_have_consistent_fallback_package(self):
         self.assertEqual(set(TITLES), set(PROFILES))

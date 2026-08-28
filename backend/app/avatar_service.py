@@ -203,6 +203,7 @@ def _run_realtime(config_path, timeout=None):
 
     environment = os.environ.copy()
     environment["FFMPEG_PATH"] = "/usr/bin"
+    environment["TORCH_HOME"] = str(Path.home() / ".cache" / "torch")
 
     # MuseTalk uses PyTorch 2.0.1, which does not support
     # the newer CUDA allocator option "expandable_segments".

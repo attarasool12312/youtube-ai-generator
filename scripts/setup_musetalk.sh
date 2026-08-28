@@ -367,6 +367,40 @@ else
     log "Existing face parsing ResNet preserved"
 fi
 
+
+S3FD_CACHE_DIR="${TORCH_HOME:-$HOME/.cache/torch}/hub/checkpoints"
+S3FD_PATH="$S3FD_CACHE_DIR/s3fd-619a316812.pth"
+S3FD_SHA256="619a31681264d3f7f7fc7a16a42cbbe8b23f31a256f75a366e5a1bcd59b33543"
+
+if ! file_large_enough "$S3FD_PATH" 80000000
+then
+    log "Downloading S3FD face detector"
+
+    mkdir -p "$S3FD_CACHE_DIR"
+
+    S3FD_TARGET="$S3FD_PATH" \
+    HF_HUB_DISABLE_XET=1 \
+    "$PYTHON" - <<'PYS3FD'
+import os
+import shutil
+from pathlib import Path
+from huggingface_hub import hf_hub_download
+
+target = Path(os.environ["S3FD_TARGET"])
+source = hf_hub_download(
+    repo_id="camenduru/facexlib",
+    filename="s3fd-619a316812.pth",
+)
+
+target.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(source, target)
+
+print(f"S3FD_READY {target.stat().st_size}")
+PYS3FD
+else
+    log "Existing S3FD face detector preserved"
+fi
+
 log "Verifying MuseTalk model files"
 
 file_large_enough models/musetalkV15/unet.pth 3000000000 || \
@@ -392,6 +426,12 @@ file_large_enough models/face-parse-bisent/79999_iter.pth 40000000 || \
 
 file_large_enough models/face-parse-bisent/resnet18-5c106cde.pth 40000000 || \
     fail "Face parsing ResNet is incomplete."
+
+file_large_enough "$S3FD_PATH" 80000000 || \
+    fail "S3FD face detector is incomplete."
+
+echo "$S3FD_SHA256  $S3FD_PATH" | sha256sum -c - >/dev/null || \
+    fail "S3FD face detector checksum verification failed."
 
 log "Running MuseTalk import/GPU verification"
 

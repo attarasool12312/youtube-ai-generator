@@ -68,15 +68,19 @@ class HistoricalRoutingTests(unittest.TestCase):
     def test_wikimedia_then_openverse_and_no_ai(self):
         wiki = Mock(side_effect=RuntimeError("exhausted"))
         openverse = Mock(return_value={"provider": "openverse", "source": "ov"})
-        with patch("app.media_selector.LICENSED_HISTORICAL_PROVIDERS", (("wikimedia", wiki), ("openverse", openverse))), patch("app.media_selector.flux_image") as ai:
+        with patch(
+            "app.media_selector.LICENSED_HISTORICAL_PROVIDERS",
+            (("wikimedia", wiki), ("openverse", openverse)),
+        ):
             self.assertEqual(self.call()["provider"], "openverse")
         wiki.assert_called_once()
         openverse.assert_called_once()
-        ai.assert_not_called()
 
     def test_exhaustion_never_invokes_ai(self):
         failed = Mock(side_effect=RuntimeError("exhausted"))
-        with patch("app.media_selector.LICENSED_HISTORICAL_PROVIDERS", (("wikimedia", failed), ("openverse", failed))), patch("app.media_selector.try_providers", return_value=None), patch("app.media_selector.flux_image") as ai:
+        with patch(
+            "app.media_selector.LICENSED_HISTORICAL_PROVIDERS",
+            (("wikimedia", failed), ("openverse", failed)),
+        ), patch("app.media_selector.try_providers", return_value=None):
             with self.assertRaises(RuntimeError):
                 self.call()
-        ai.assert_not_called()

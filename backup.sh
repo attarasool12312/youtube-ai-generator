@@ -4,20 +4,13 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-HF_TOKEN_FILE="${HF_TOKEN_FILE:-$HOME/.cache/huggingface/token}"
-[[ -s "$HF_TOKEN_FILE" ]] || {
-    echo "Hugging Face token is missing: $HF_TOKEN_FILE" >&2
-    exit 1
-}
-
 BRANCH="$(git branch --show-current)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/backend/data" "$TMP/systemd" "$TMP/huggingface"
+mkdir -p "$TMP/backend/data" "$TMP/systemd"
 
 install -m 600 .env "$TMP/.env"
-install -m 600 "$HF_TOKEN_FILE" "$TMP/huggingface/token"
 
 python3 - backend/data/app.db "$TMP/backend/data/app.db" <<'PY'
 import sqlite3
