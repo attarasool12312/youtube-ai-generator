@@ -10,7 +10,21 @@ if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ]; then
     exit 2
 fi
 
+
 echo "=== DOMAIN SETUP: $DOMAIN ==="
+
+# Some cloud providers reserve public port 80 themselves.
+# In that case, do not break the main application installation.
+if ss -ltnp '( sport = :80 )' 2>/dev/null | grep -q 'LISTEN'; then
+    if ! ss -ltnp '( sport = :80 )' 2>/dev/null | grep -q 'nginx'; then
+        echo
+        echo "WARNING: Port 80 is already in use by another service."
+        echo "Skipping nginx/domain setup."
+        echo "The dashboard remains available locally on 127.0.0.1:8000."
+        echo "DOMAIN_SETUP_SKIPPED_PORT_80_BUSY"
+        exit 0
+    fi
+fi
 
 sudo apt-get update
 sudo apt-get install -y nginx snapd

@@ -205,10 +205,19 @@ def _max_scene_workers():
     vram_workers = max(2, (vram_mb - 8000) // 200)
     # CPU limit: each clip needs ~1 core for decode/filter
     cpu_workers = max(2, cpu - 1)
-    # Take the minimum of both limits
+    # Take the minimum of both limits.
     workers = min(vram_workers, cpu_workers)
-    # Cap at reasonable maximum
-    return min(workers, 16)
+
+    # Consumer/GeForce GPUs can hit NVENC session/resource limits
+    # long before VRAM is exhausted. Keep parallel scene encoding
+    # conservative and allow an explicit override when needed.
+    try:
+        scene_cap = int(os.getenv("VIDEO_SCENE_WORKERS", "4"))
+    except ValueError:
+        scene_cap = 4
+
+    scene_cap = max(1, min(scene_cap, 8))
+    return min(workers, scene_cap)
 
 
 def _scene_encoder_arguments():
@@ -604,12 +613,36 @@ def render_video(
                     vf,
                 ]
 
-            command += (
-                _scene_encoder_arguments()
-                + [str(clip)]
-            )
+            scene_encoder = _scene_encoder_arguments()
+            base_command = list(command)
+            command += scene_encoder + [str(clip)]
 
-            _run(command)
+            try:
+                _run(command)
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                OSError,
+            ) as error:
+                if "h264_nvenc" not in scene_encoder:
+                    raise
+
+                print(
+                    f"NVENC scene {number} failed; "
+                    "retrying safely with CPU. "
+                    f"{_error_tail(error)}",
+                    flush=True,
+                )
+
+                clip.unlink(missing_ok=True)
+
+                cpu_command = (
+                    base_command
+                    + _cpu_encoder_arguments()
+                    + [str(clip)]
+                )
+                _run(cpu_command)
+
             return number, str(clip.resolve())
 
         workers = _max_scene_workers()

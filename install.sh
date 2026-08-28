@@ -963,9 +963,17 @@ read -r -p "Certbot email [$DEFAULT_CERTBOT_EMAIL]: " INSTALL_CERTBOT_EMAIL
 INSTALL_CERTBOT_EMAIL="${INSTALL_CERTBOT_EMAIL:-$DEFAULT_CERTBOT_EMAIL}"
 
 if [[ -n "$INSTALL_DOMAIN" && -n "$INSTALL_CERTBOT_EMAIL" ]]; then
-    bash "$PROJECT_ROOT/scripts/setup_domain.sh" \
+    if bash "$PROJECT_ROOT/scripts/setup_domain.sh" \
         "$INSTALL_DOMAIN" \
         "$INSTALL_CERTBOT_EMAIL"
+    then
+        echo "Domain setup step finished."
+    else
+        echo
+        echo "WARNING: Domain setup failed, but core installation is healthy."
+        echo "Dashboard remains available locally on 127.0.0.1:8000."
+        echo "You can configure the domain separately later."
+    fi
 fi
 
 echo
