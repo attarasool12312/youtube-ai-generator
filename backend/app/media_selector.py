@@ -104,6 +104,70 @@ def _try_licensed_historical_sources(query, folder, number, orientation,
     return None
 
 
+def _stock_pass(query, folder, number, requested, orientation, excluded, topic_context):
+    if requested in {"video", "stock_video"}:
+        result = try_providers(
+            VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded, topic_context,
+        )
+        if result:
+            return result
+    return try_providers(
+        IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded, topic_context,
+    )
+
+
+def _is_weak_result(result):
+    if result.get("relevance_entity_match") is True:
+        return False
+    score = result.get("relevance_score")
+    return not isinstance(score, (int, float)) or score < 18
+
+
+def _stock_with_history_preference(query, folder, number, requested, orientation,
+                                   used_sources, provider_used_sources, history_sources,
+                                   topic_context):
+    """Fresh media is preferred, but a weak fresh pick loses to a strong older one.
+
+    History is an exclusion on the first pass. Only when that pass yields a
+    non-subject result do we search again with history allowed (same-job
+    duplicates still excluded), keeping whichever candidate scores higher.
+    """
+    result = _stock_pass(query, folder, number, requested, orientation, provider_used_sources, topic_context)
+    if not result or not history_sources or not _is_weak_result(result):
+        return result
+    alt_folder = folder / "history-alt"
+    alt_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        alternative = _stock_pass(
+            query, alt_folder, number, requested, orientation, set(used_sources), topic_context,
+        )
+    except Exception as error:  # never let the retry break the normal path
+        logger.debug("MEDIA scene=%d history-preference retry failed: %s", number, error)
+        alternative = None
+    alt_score = (alternative or {}).get("relevance_score")
+    if alternative and isinstance(alt_score, (int, float)) and alt_score > (result.get("relevance_score") or 0):
+        alt_path = Path(alternative["media_file"])
+        final_path = folder / alt_path.name
+        try:
+            alt_path.replace(final_path)
+        except OSError as error:
+            logger.debug("MEDIA scene=%d history-preference move failed: %s", number, error)
+            return result
+        alternative["media_file"] = str(final_path)
+        alternative["history_reuse"] = True
+        logger.info(
+            "MEDIA scene=%d history-preference=reused_older score=%s over fresh score=%s",
+            number, alt_score, result.get("relevance_score"),
+        )
+        return alternative
+    if alternative:
+        try:
+            Path(alternative["media_file"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return result
+
+
 def select_media(query, folder, number, requested, orientation, used_sources=None,
                  ai_prompt=None, media_source="stock_only", prefer_wikimedia=False,
                  topic_context: MediaTopicContext | None = None, history_sources=None):
@@ -119,17 +183,9 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
         if result:
             return result
 
-    if requested in {"video", "stock_video"}:
-        result = try_providers(
-            VIDEO_PROVIDERS, query, folder, number, "mp4", orientation,
-            provider_used_sources, topic_context,
-        )
-        if result:
-            return result
-
-    result = try_providers(
-        IMAGE_PROVIDERS, query, folder, number, "jpg", orientation,
-        provider_used_sources, topic_context,
+    result = _stock_with_history_preference(
+        query, folder, number, requested, orientation,
+        used_sources, provider_used_sources, history_sources, topic_context,
     )
     if result:
         return result

@@ -300,6 +300,7 @@ Classification rules:
 - Biographies and other unsupported or ambiguous subjects use general_explainer.
 - A historic building, monument or archaeological site normally uses historical_place.
 - A war, revolution, dynasty, civilization, incident or historical era normally uses historical_event.
+- Ancient practices, artifacts, burials, mummies, tombs and archaeology topics normally use historical_event unless the title names one specific site.
 - Countries, cities and modern travel topics normally use geography_travel.
 - Hypothetical or "what if" topics normally use what_if.
 - Scientific and technology topics use tech_science.
@@ -307,7 +308,15 @@ Classification rules:
 - Space topics use space_astronomy.
 - Companies, markets, finance and economics use business_economics.
 - Process explanations use educational_how_it_works.
-- Health and wellbeing topics use health_wellness.n- Sports rules, tactics and performance use sports.n- Vehicles and transport systems use automotive_transport.n- Cooking and food science use food_cooking.n- Climate, energy and conservation use environment_climate.n- Language, customs and social behavior use culture_society.n- Buildings and structural design use architecture_engineering.n- Use a specialized profile only when the title clearly fits it.n- Use general_explainer for ambiguous, niche, unknown or unsupported subjects.
+- Health and wellbeing topics use health_wellness.
+- Sports rules, tactics and performance use sports.
+- Vehicles and transport systems use automotive_transport.
+- Cooking and food science use food_cooking.
+- Climate, energy and conservation use environment_climate.
+- Language, customs and social behavior use culture_society.
+- Buildings and structural design use architecture_engineering.
+- Use a specialized profile only when the title clearly fits it.
+- Use general_explainer for ambiguous, niche, unknown or unsupported subjects.
 
 Return exactly one profile key and nothing else.
 """

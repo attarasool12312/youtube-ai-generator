@@ -5,7 +5,7 @@ import shutil
 
 from app.media_selector import normalize_media_source, select_media
 from app.video_profiles import is_historical_profile
-from app.media_relevance import build_media_topic_context
+from app.media_relevance import build_media_topic_context, scene_context, with_era_years
 from app.stock_providers import normalized_query
 from app.paths import DATA_ROOT
 
@@ -152,6 +152,10 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
     history_path = DATA_ROOT / "media_history.json"
     prefer_wikimedia = is_historical_profile(video_profile)
     topic_context = build_media_topic_context(video_title, video_profile) if video_title else None
+    if topic_context is not None and is_historical_profile(video_profile):
+        topic_context = with_era_years(
+            topic_context, (scene.get("search_query") or "" for scene in scenes),
+        )
     try:
         history = json.loads(history_path.read_text())
     except Exception:
@@ -172,7 +176,7 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
             result = _select_scene_media(
                 query, media_dir, number, scene.get("media_type", "video"),
                 orientation, used_sources, scene.get("image_prompt") or query,
-                media_source, prefer_wikimedia, topic_context, history_sources,
+                media_source, prefer_wikimedia, scene_context(topic_context, query), history_sources,
                 asset_usage, duration_minutes,
             )
         except Exception as error:

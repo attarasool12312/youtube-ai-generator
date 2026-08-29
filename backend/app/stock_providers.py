@@ -6,7 +6,7 @@ import httpx
 
 from app.api_settings import get_api_key
 from app.openverse_client import openverse_headers
-from app.media_relevance import build_media_query_candidates, score_media_candidate
+from app.media_relevance import build_media_query_candidates, concrete_subject_words, practical_head_query, score_media_candidate
 
 CLIENT = httpx.Client(timeout=60, follow_redirects=True)
 logger = logging.getLogger(__name__)
@@ -101,16 +101,25 @@ def provider_query_candidates(query, topic_context=None):
 
 
 def pixabay_query_candidates(query, topic_context=None):
+    """Exact scene query first, then a practical head noun, then topic broadening.
+
+    Pixabay matches tags loosely, so the most specific query goes first and the
+    broad topic query is a last resort rather than the default.
+    """
     normalized = normalized_query(query)
     words = normalized.split()
+    concrete = concrete_subject_words(query)
+    head = practical_head_query(query, topic_context)
 
     candidates = [
         " ".join(words[:4]),
-        " ".join(words[:2]),
+        " ".join(concrete[:2]) if len(concrete) >= 2 else " ".join(words[:2]),
+        head,
     ]
     if topic_context is not None:
-        topic_words = normalized_query(topic_context.primary_topic).split()
-        candidates = [" ".join(topic_words[:4]), " ".join(topic_words[:2])] + candidates
+        topic_concrete = concrete_subject_words(topic_context.primary_topic)
+        topic_words = topic_concrete or normalized_query(topic_context.primary_topic).split()
+        candidates.append(" ".join(topic_words[:2]))
 
     return [
         candidate
