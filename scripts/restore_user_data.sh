@@ -48,6 +48,15 @@ mkdir -p "$KEEP" "$ROOT/backend/data" "$ROOT/backend/app/static"
 [ -d "$SRC/avatars" ] && cp -r "$SRC/avatars" "$ROOT/backend/data/avatars"
 [ -d "$SRC/cloned-voices" ] && cp -r "$SRC/cloned-voices" "$ROOT/backend/app/static/cloned-voices"
 
+# When invoked via sudo/systemd-run the copies land root-owned and the app
+# (running as the project owner) cannot write its own database. Hand the
+# files back to whoever owns the project directory.
+OWNER="$(stat -c '%U:%G' "$ROOT")"
+if [ "$(id -u)" = "0" ] && [ "$OWNER" != "root:root" ]; then
+    chown -R "$OWNER"         "$ROOT/backend/data"         "$ROOT/backend/app/static/cloned-voices" 2>/dev/null || true
+    [ -f "$ROOT/.env" ] && chown "$OWNER" "$ROOT/.env"
+fi
+
 if [ "$RESTART" = "1" ]; then
     sudo systemctl start youtube-ai-generator
     sleep 3

@@ -1,0 +1,91 @@
+{% extends "base_app.html" %}
+
+{% block title %}Backup &amp; Restore · {{ app_name }}{% endblock %}
+{% block page_heading %}Backup &amp; Restore{% endblock %}
+{% block page_subheading %}
+Export your data to a portable archive, or restore it on this or another machine.
+{% endblock %}
+
+{% block content %}
+<div class="crm-page-grid">
+
+  {% if message %}
+  <div class="success">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">Export</span>
+        <h2>Create a backup</h2>
+        <p>
+          Includes your database (jobs, settings, YouTube/Facebook connections),
+          API keys, avatars and cloned-voice audio. Generated videos are not
+          included. Keep archives private — they contain your credentials.
+        </p>
+      </div>
+      <form method="post" action="/backup/create">
+        <button type="submit" class="crm-primary-button">Create Backup</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">Import</span>
+        <h2>Upload an archive</h2>
+        <p>Upload a backup made on another machine, then restore it below.</p>
+      </div>
+    </div>
+    <form method="post" action="/backup/upload" enctype="multipart/form-data" class="backup-upload-form">
+      <input type="file" name="archive" accept=".gz,.tar.gz" required>
+      <button type="submit" class="crm-secondary-button">Upload</button>
+    </form>
+  </section>
+
+  <section class="crm-card">
+    <div class="crm-card-header">
+      <div>
+        <span class="developer-section-label">Archives</span>
+        <h2>Available backups</h2>
+        <p>
+          Restoring replaces current data (a safety copy is kept in
+          <code>backend/data/pre-restore-*</code>) and restarts the app —
+          the page will be unavailable for about half a minute.
+        </p>
+      </div>
+    </div>
+    {% if archives %}
+    <table class="crm-table">
+      <thead>
+        <tr><th>Archive</th><th>Size</th><th>Created</th><th></th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for item in archives %}
+        <tr>
+          <td><code>{{ item.name }}</code></td>
+          <td>{{ item.size }}</td>
+          <td>{{ item.created }}</td>
+          <td><a class="crm-secondary-button" href="/backup/download/{{ item.name }}">Download</a></td>
+          <td>
+            <form method="post" action="/backup/restore"
+                  onsubmit="return confirm('Restore {{ item.name }}? The app will restart.');">
+              <input type="hidden" name="name" value="{{ item.name }}">
+              <button type="submit" class="crm-secondary-button">Restore</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No backups yet. Create one above.</p>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

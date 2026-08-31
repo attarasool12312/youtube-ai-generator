@@ -1,9 +1,13 @@
 from pathlib import Path
 from datetime import datetime, timezone
+import re
+import shlex
+import subprocess
 from contextlib import asynccontextmanager
 import logging
 import shutil
 from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from urllib.parse import quote
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.paths import OUTPUT_ROOT
+from app.paths import OUTPUT_ROOT, PROJECT_ROOT
 from app.avatar_service import (
     AVATAR_STORAGE_ROOT,
     create_cache_id,
@@ -3504,6 +3508,129 @@ def system_health_page(request: Request):
             "project_info": get_project_info(),
             "system_metrics": collect_dashboard_metrics(),
         },
+    )
+
+
+_BACKUP_NAME = re.compile(r"^atta-user-data-[0-9]{8}-[0-9]{6}\.tar\.gz$")
+_BACKUPS_DIR = PROJECT_ROOT / "backups"
+
+
+def _backup_archives():
+    if not _BACKUPS_DIR.is_dir():
+        return []
+    items = []
+    for path in sorted(_BACKUPS_DIR.glob("atta-user-data-*.tar.gz"), reverse=True):
+        if not _BACKUP_NAME.match(path.name):
+            continue
+        stat = path.stat()
+        items.append({
+            "name": path.name,
+            "size": f"{stat.st_size / (1024 * 1024):.1f} MB",
+            "created": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+        })
+    return items
+
+
+def _backup_page(request, message="", error=""):
+    return templates.TemplateResponse(
+        request=request,
+        name="backup.html",
+        context={
+            "app_name": settings.app_name,
+            "active_page": "backup",
+            "project_info": get_project_info(),
+            "archives": _backup_archives(),
+            "message": message,
+            "error": error,
+        },
+    )
+
+
+@app.get("/backup")
+def backup_page(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    return _backup_page(
+        request,
+        message=request.query_params.get("message", ""),
+        error=request.query_params.get("error", ""),
+    )
+
+
+@app.post("/backup/create")
+def backup_create(request: Request):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    script = PROJECT_ROOT / "scripts" / "backup_user_data.sh"
+    result = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, timeout=300,
+        cwd=str(PROJECT_ROOT),
+    )
+    if result.returncode != 0 or "BACKUP_OK" not in result.stdout:
+        detail = (result.stderr or result.stdout or "unknown error").strip()[-200:]
+        return RedirectResponse(f"/backup?error=Backup failed: {quote(detail)}", status_code=303)
+    return RedirectResponse("/backup?message=Backup created.", status_code=303)
+
+
+@app.get("/backup/download/{name}")
+def backup_download(request: Request, name: str):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    if not _BACKUP_NAME.match(name):
+        return RedirectResponse("/backup?error=Invalid archive name.", status_code=303)
+    path = _BACKUPS_DIR / name
+    if not path.is_file():
+        return RedirectResponse("/backup?error=Archive not found.", status_code=303)
+    return FileResponse(path, filename=name, media_type="application/gzip")
+
+
+@app.post("/backup/upload")
+async def backup_upload(request: Request, archive: UploadFile = File(...)):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    name = Path(archive.filename or "").name
+    if not _BACKUP_NAME.match(name):
+        return RedirectResponse(
+            "/backup?error=File must be an atta-user-data-*.tar.gz archive.", status_code=303,
+        )
+    _BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    destination = _BACKUPS_DIR / name
+    with destination.open("wb") as handle:
+        while chunk := await archive.read(1024 * 1024):
+            handle.write(chunk)
+    return RedirectResponse(f"/backup?message=Uploaded {quote(name)}.", status_code=303)
+
+
+@app.post("/backup/restore")
+def backup_restore(request: Request, name: str = Form(...)):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+    if not _BACKUP_NAME.match(name) or not (_BACKUPS_DIR / name).is_file():
+        return RedirectResponse("/backup?error=Archive not found.", status_code=303)
+    script = PROJECT_ROOT / "scripts" / "restore_user_data.sh"
+    log_path = _BACKUPS_DIR / "restore.log"
+    # The restore stops and restarts this very app, so it must run outside this
+    # service's cgroup or systemd kills it mid-restore. A transient unit via
+    # systemd-run survives the restart it performs.
+    unit = f"atta-restore-{datetime.now():%Y%m%d%H%M%S}"
+    command = (
+        f"bash {shlex.quote(str(script))} {shlex.quote(str(_BACKUPS_DIR / name))} "
+        f">> {shlex.quote(str(log_path))} 2>&1"
+    )
+    launch = subprocess.run(
+        ["sudo", "-n", "systemd-run", "--collect", f"--unit={unit}",
+         "bash", "-c", command],
+        capture_output=True, text=True, timeout=30,
+    )
+    if launch.returncode != 0:
+        detail = (launch.stderr or launch.stdout or "systemd-run failed").strip()[-200:]
+        return _backup_page(request, error=f"Could not start restore: {detail}")
+    return _backup_page(
+        request,
+        message=(
+            "Restore started. The app will restart; refresh this page in about "
+            "30 seconds. Details land in backups/restore.log."
+        ),
     )
 
 
