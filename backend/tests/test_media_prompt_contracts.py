@@ -28,5 +28,6 @@ class ScenePromptTests(unittest.TestCase):
             _enrich_scene_batch_once("How Elevators Work", "educational_how_it_works",
                                      [{"scene_number": 1, "narration": "The counterweight balances the car."}])
         prompt = captured["prompt"]
-        for fragment in ("photographable nouns", "editorial or mood words", "animal", "use image when"):
+        for fragment in ("photographable nouns", "editorial or mood words", "animal", "use image when",
+                         "abstract concept"):
             self.assertIn(fragment, prompt)

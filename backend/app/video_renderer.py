@@ -617,8 +617,10 @@ def render_video(
             base_command = list(command)
             command += scene_encoder + [str(clip)]
 
+            # A corrupt input with -stream_loop can encode forever; bound it.
+            scene_timeout = max(180.0, float(duration) * 30.0)
             try:
-                _run(command)
+                _run(command, timeout=scene_timeout)
             except (
                 subprocess.CalledProcessError,
                 subprocess.TimeoutExpired,
@@ -641,7 +643,7 @@ def render_video(
                     + _cpu_encoder_arguments()
                     + [str(clip)]
                 )
-                _run(cpu_command)
+                _run(cpu_command, timeout=scene_timeout)
 
             return number, str(clip.resolve())
 

@@ -1,4 +1,6 @@
+import json
 import logging
+import subprocess
 from pathlib import Path
 import re
 
@@ -195,13 +197,77 @@ def _relevance_fields(item):
     return fields
 
 
+_VIDEO_SUFFIXES = {".mp4", ".webm", ".mov", ".m4v"}
+
+
+def _validate_video_file(path):
+    """Reject undecodable or pathological video files before they reach render.
+
+    A provider once returned a "video" whose container was 30 minutes of audio
+    with 5 seconds of frames; ffmpeg's -stream_loop then spun for an hour.
+    Rules: a decodable video stream must exist, carry at least ~0.5s of frames,
+    and the container may not be wildly longer than the video stream.
+    """
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name,duration,nb_frames,avg_frame_rate",
+             "-show_entries", "format=duration", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=20,
+        )
+        if probe.returncode != 0:
+            return False, "ffprobe-failed"
+        payload = json.loads(probe.stdout or "{}")
+        streams = payload.get("streams") or []
+        if not streams:
+            return False, "no-video-stream"
+        stream = streams[0]
+        video_duration = _probe_float(stream.get("duration"))
+        if video_duration is None:
+            frames = _probe_float(stream.get("nb_frames"))
+            rate = _probe_rate(stream.get("avg_frame_rate"))
+            if frames and rate:
+                video_duration = frames / rate
+        container_duration = _probe_float((payload.get("format") or {}).get("duration"))
+        if video_duration is not None and video_duration < 0.5:
+            return False, f"video-stream-too-short:{video_duration:.2f}s"
+        if (video_duration is not None and container_duration is not None
+                and container_duration > video_duration * 3 + 10):
+            return False, f"container-video-mismatch:{container_duration:.0f}s-vs-{video_duration:.0f}s"
+        return True, "ok"
+    except Exception as error:  # validation must never break downloads
+        logger.debug("Video validation skipped for %s: %s", path, error)
+        return True, "validation-skipped"
+
+
+def _probe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _probe_rate(value):
+    try:
+        numerator, _, denominator = str(value or "").partition("/")
+        return float(numerator) / float(denominator or 1)
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
 def try_save_media(url, output_path, headers=None):
     try:
         save_media(url, output_path, headers=headers)
-        return True
     except Exception as error:
         logger.debug("Media candidate download rejected url=%r reason=%s", url, error)
         return False
+    if Path(output_path).suffix.lower() in _VIDEO_SUFFIXES:
+        valid, reason = _validate_video_file(output_path)
+        if not valid:
+            logger.info("Media candidate rejected url=%r reason=%s", url, reason)
+            Path(output_path).unlink(missing_ok=True)
+            return False
+    return True
 
 
 def save_media(url, output_path, headers=None):

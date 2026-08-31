@@ -35,14 +35,46 @@ def _provider_name(provider):
     return provider.__name__.removesuffix("_image").removesuffix("_video")
 
 
+# A result at or above this score (or any subject match at the lower bar) ends
+# the search immediately; anything weaker is kept only as best-so-far while the
+# remaining variants and providers get a chance to beat it.
+GOOD_SCORE = 30
+GOOD_ENTITY_SCORE = 24
+# How many additional downloaded candidates a weak scene may collect before we
+# settle for the best seen. Bounds quota and download cost per scene.
+MAX_EXTRA_CANDIDATES = 3
+
+
+def _result_score(result):
+    score = result.get("relevance_score")
+    return score if isinstance(score, (int, float)) else 0
+
+
+def _is_good_result(result):
+    score = _result_score(result)
+    if score >= GOOD_SCORE:
+        return True
+    return bool(result.get("relevance_entity_match")) and score >= GOOD_ENTITY_SCORE
+
+
 def try_providers(providers, query, folder, number, extension, orientation,
                   used_sources, topic_context=None):
+    """Search providers/variants until a good result appears; otherwise best-of.
+
+    A weak first hit no longer wins by default: the search continues (bounded)
+    and the highest-scoring candidate is kept. Candidates download to temp
+    names; only the winner is moved onto the scene path.
+    """
+    final_path = folder / f"scene-{number:03d}.{extension}"
+    best = None
+    best_path = None
+    extra = 0
     for index, provider in enumerate(providers):
         queries = [query] if provider in {pixabay_video, pixabay_image} else provider_query_candidates(query, topic_context)
         provider_name = provider.__name__
         provider_rate_limited = False
         for provider_query in queries:
-            path = folder / f"scene-{number:03d}.{extension}"
+            path = folder / f"scene-{number:03d}-cand{extra}.{extension}" if best else final_path
             try:
                 result = provider(
                     provider_query, path, orientation, used_sources=used_sources,
@@ -66,19 +98,64 @@ def try_providers(providers, query, folder, number, extension, orientation,
                 continue
             result["media_file"] = str(path)
             result.setdefault("matched_query", provider_query)
+            if _is_good_result(result):
+                if best_path is not None and path != final_path:
+                    Path(path).replace(final_path)
+                    result["media_file"] = str(final_path)
+                _discard_candidate_files(best_path, final_path)
+                logger.info(
+                    "MEDIA scene=%d provider=%s query=%r result=selected score=%s source=%s",
+                    number, provider_name, provider_query,
+                    result.get("relevance_score", "provider"), result.get("source", ""),
+                )
+                return result
+            if best is None or _result_score(result) > _result_score(best):
+                if best_path is not None:
+                    _discard_candidate_files(best_path, final_path)
+                best, best_path = result, Path(path)
+            else:
+                _discard_candidate_files(Path(path), final_path)
+            extra += 1
             logger.info(
-                "MEDIA scene=%d provider=%s query=%r result=selected score=%s source=%s",
+                "MEDIA scene=%d provider=%s query=%r result=weak score=%s continuing=%s",
                 number, provider_name, provider_query,
-                result.get("relevance_score", "provider"), result.get("source", ""),
+                result.get("relevance_score"), extra <= MAX_EXTRA_CANDIDATES,
             )
-            return result
+            if extra > MAX_EXTRA_CANDIDATES:
+                return _finish_best(best, best_path, final_path, number)
         if provider_rate_limited:
             continue
         logger.info(
             "MEDIA scene=%d provider=%s query=%r result=exhausted",
             number, provider_name, query,
         )
-    return None
+    return _finish_best(best, best_path, final_path, number)
+
+
+def _discard_candidate_files(path, final_path):
+    if path is None or path == final_path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _finish_best(best, best_path, final_path, number):
+    if best is None:
+        return None
+    if best_path is not None and best_path != final_path:
+        try:
+            best_path.replace(final_path)
+        except OSError as error:
+            logger.debug("MEDIA scene=%d best-of move failed: %s", number, error)
+            return None
+        best["media_file"] = str(final_path)
+    logger.info(
+        "MEDIA scene=%d result=best_of score=%s source=%s",
+        number, best.get("relevance_score"), best.get("source", ""),
+    )
+    return best
 
 
 def _try_licensed_historical_sources(query, folder, number, orientation,
@@ -187,6 +264,25 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
         query, folder, number, requested, orientation,
         used_sources, provider_used_sources, history_sources, topic_context,
     )
+    if result and not _is_weak_result(result):
+        return result
+    if not prefer_wikimedia:
+        # Commons often has the branded/entity subjects stock libraries lack
+        # (storefronts, products, race teams). Last resort for weak scenes only.
+        try:
+            licensed = _try_licensed_historical_sources(
+                query, folder, number, orientation, provider_used_sources,
+                history_sources, topic_context,
+            )
+        except Exception as error:
+            logger.debug("MEDIA scene=%d licensed fallback failed: %s", number, error)
+            licensed = None
+        if licensed and _result_score(licensed) > (_result_score(result) if result else 0):
+            logger.info(
+                "MEDIA scene=%d result=licensed_fallback score=%s source=%s",
+                number, licensed.get("relevance_score"), licensed.get("source", ""),
+            )
+            return licensed
     if result:
         return result
 
