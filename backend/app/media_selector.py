@@ -275,7 +275,7 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
         topic_context, deadline,
     )
-    if video_result and _result_confidence(video_result) in {"acceptable", "strong"} and not (video_result.get("relevance_penalties") or []):
+    if video_result and _result_confidence(video_result) in {"acceptable", "strong"} and _result_score(video_result) >= 55 and not (video_result.get("relevance_penalties") or []):
         video_result["needs_ai_fallback"] = False
         video_result["stock_decision"] = "video_accepted"
         return video_result
@@ -289,7 +289,7 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
             IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded,
             topic_context, deadline,
         )
-        if image_result and _result_confidence(image_result) in {"acceptable", "strong"} and not (image_result.get("relevance_penalties") or []):
+        if image_result and _result_confidence(image_result) in {"acceptable", "strong"} and _result_score(image_result) >= 55 and not (image_result.get("relevance_penalties") or []):
             _discard_result_media(video_result)
             image_result["needs_ai_fallback"] = False
             image_result["stock_decision"] = "explicit_still_accepted"

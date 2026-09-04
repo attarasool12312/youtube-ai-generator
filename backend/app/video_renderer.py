@@ -14,7 +14,7 @@ def _stable_fraction(value):
 
 
 def _cinematic_motion_enabled():
-    value = os.getenv("VIDEO_IMAGE_MOTION", "1").strip().lower()
+    value = os.getenv("VIDEO_IMAGE_MOTION", "0").strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 

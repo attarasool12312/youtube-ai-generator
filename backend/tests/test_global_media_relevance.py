@@ -62,13 +62,14 @@ class QueryAndReuseTests(unittest.TestCase):
         usage["asset"]["uses"] = REUSE_MAX_USES
         self.assertNotIn("asset", reuse_eligible_keys(usage, 20))
 
-    def test_reuse_works_outside_nature_and_never_reaches_ai(self):
+    def test_stock_exhaustion_hands_off_to_ai_without_reuse(self):
         usage = {"source-a": {"last_scene": 1, "uses": 1}}
-        result = {"source": "source-a", "provider": "pexels", "media_file": "x", "media_type": "image"}
-        with patch("app.scene_media.select_media", side_effect=[RuntimeError("fresh exhausted"), result]) as selector:
+        with patch("app.scene_media.select_media", side_effect=RuntimeError("fresh exhausted")):
             selected = _select_scene_media("motor", Path("/tmp"), 5, "image", "landscape", {"source-a"}, "prompt", "mixed", False, build_media_topic_context("How Motors Work", "educational_how_it_works"), set(), usage)
-        self.assertTrue(selected["reused"])
-        self.assertEqual(selector.call_args_list[1].args[7], "stock_only")
+        self.assertEqual(selected["provider"], "stock-exhausted")
+        self.assertTrue(selected["needs_ai_fallback"])
+        self.assertEqual(selected["stock_decision"], "ai_fallback_pending_no_stock")
+        self.assertNotIn("reused", selected)
 
     def test_info_logging_contract_exists(self):
         with tempfile.TemporaryDirectory() as folder, patch("app.media_selector.try_providers", return_value=None), patch("app.media_selector._try_licensed_historical_sources", return_value=None):

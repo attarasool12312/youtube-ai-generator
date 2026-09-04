@@ -65,10 +65,7 @@ def get_portable_job_root(job: VideoJob) -> Path:
     return portable_root
 
 
-def resolve_scene_media(
-    job: VideoJob,
-    scene_number: int,
-) -> Path | None:
+def resolve_scene_media(job: VideoJob, scene_number: int) -> Path | None:
     if scene_number < 1:
         return None
 
@@ -76,24 +73,43 @@ def resolve_scene_media(
     job_root = get_portable_job_root(job)
     media_root = (job_root / "media").resolve()
 
-    if (
-        media_root == root
-        or root not in media_root.parents
-        or not media_root.is_dir()
-    ):
+    if media_root == root or root not in media_root.parents or not media_root.is_dir():
         return None
 
+    # Prefer the exact final media winner stored in the scene plan.
+    for index, scene in enumerate(parse_scene_plan(job), start=1):
+        try:
+            number = int(scene.get("scene_number") or index)
+        except (TypeError, ValueError):
+            number = index
+        if number != scene_number:
+            continue
+
+        raw = str(scene.get("media_file") or "").strip()
+        if raw:
+            candidate = Path(raw).resolve()
+            if candidate.suffix.lower() in ALLOWED_SCENE_EXTENSIONS and root in candidate.parents and candidate.is_file():
+                return candidate
+
+            # Portable restore fallback: preserve path beneath media/.
+            marker = "/media/"
+            normalized = raw.replace("\\", "/")
+            if marker in normalized:
+                relative = normalized.split(marker, 1)[1]
+                candidate = (media_root / relative).resolve()
+                if candidate.suffix.lower() in ALLOWED_SCENE_EXTENSIONS and root in candidate.parents and candidate.is_file():
+                    return candidate
+        break
+
+    # Legacy fallback for older jobs without media_file in scene_plan.
     scene_prefix = f"scene-{scene_number:03d}"
-
-    for path in sorted(media_root.glob(f"{scene_prefix}.*")):
-        resolved = path.resolve()
-
-        if (
-            resolved.suffix.lower() in ALLOWED_SCENE_EXTENSIONS
-            and root in resolved.parents
-            and resolved.is_file()
-        ):
-            return resolved
+    for directory in (media_root, media_root / "ai"):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob(f"{scene_prefix}.*")):
+            resolved = path.resolve()
+            if resolved.suffix.lower() in ALLOWED_SCENE_EXTENSIONS and root in resolved.parents and resolved.is_file():
+                return resolved
 
     return None
 

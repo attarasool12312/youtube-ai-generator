@@ -117,91 +117,29 @@ def _warmup_alive(handle):
 
 def build_zimage_prompt(scene, video_title="", video_profile=""):
     subject = " ".join(str(scene.get("visual_subject") or scene.get("search_query") or "").split()).strip()
-    narration = " ".join(str(scene.get("narration") or "").split()).strip()
     negatives = scene.get("negative_keywords") or []
     if isinstance(negatives, str):
         negatives = [negatives]
     negatives = [str(value).strip() for value in negatives if str(value).strip()]
-    lower_subject = subject.lower()
-    lower_narration = narration.lower()
 
-    def has(*terms):
-        text = lower_subject + " " + lower_narration
-        return any(term in text for term in terms)
-
-    shot_style = (
-        "Use a clean, high-end documentary composition with a clear focal subject, realistic depth, natural materials, and believable environmental detail."
-    )
-    subject_treatment = (
-        "Show the scene literally and accurately, with the main subject visually obvious at first glance."
-    )
-
-    if has("satellite", "orbit", "earth from space", "communication satellite"):
-        shot_style = (
-            "Create a cinematic orbital documentary shot, photographed from space with a wide-angle lens feel, dramatic scale, crisp detail, and realistic lighting."
-        )
-        subject_treatment = (
-            "Show a real communication satellite in orbit around Earth with the planet visible below, emphasizing space, altitude, and global scale."
-        )
-    elif has("map", "network", "global traffic", "globe", "routes"):
-        shot_style = (
-            "Create a sleek cinematic visualization frame with a realistic globe or world-scale network view, elegant lighting, dark atmospheric background, and subtle glowing route lines."
-        )
-        subject_treatment = (
-            "Depict worldwide data movement and global connectivity visually, but without any written labels, legends, UI panels, or infographic text."
-        )
-    elif has("ocean floor", "seabed", "fiber optic cable", "submarine cable"):
-        shot_style = (
-            "Create a dramatic underwater documentary frame with clear depth, suspended particles, soft shafts of light, rich blue tones, and realistic seabed textures."
-        )
-        subject_treatment = (
-            "Show the cable resting on the ocean floor as the main subject. Do not show submarines, naval vehicles, divers, or unrelated underwater machinery unless explicitly required."
-        )
-    elif has("cross section", "cutaway", "schematic", "anatomy of cable"):
-        shot_style = (
-            "Create a premium photoreal cutaway product-style frame with studio-quality lighting, clean composition, extremely sharp materials, and a realistic macro engineering look."
-        )
-        subject_treatment = (
-            "Show the cable cross-section or internal structure clearly as a realistic physical cutaway, not as a textbook diagram, poster, or labeled infographic."
-        )
-    elif has("deep sea", "abyss", "underwater abyss"):
-        shot_style = (
-            "Create a moody cinematic deep-ocean frame with vast scale, darkness, volumetric water haze, and subtle light falloff into the abyss."
-        )
-        subject_treatment = (
-            "Emphasize isolation, depth, and the extreme deep-sea environment in a realistic documentary style."
-        )
-    elif has("landing station", "server rack", "data center", "telecom room"):
-        shot_style = (
-            "Create a realistic interior documentary frame with crisp detail, controlled cinematic lighting, and a professional commercial-camera look."
-        )
-        subject_treatment = (
-            "Show the infrastructure clearly and realistically, focusing on equipment, scale, and operational detail."
-        )
+    lower = subject.lower()
+    visual_type = "photorealistic real-world scene"
+    if any(word in lower for word in ("cross-section", "cross section", "cutaway", "schematic")):
+        visual_type = "high-detail realistic scientific cutaway visualization with no labels"
+    elif "map" in lower:
+        visual_type = "clean realistic scientific map visualization with no labels, legends, interface, borders, or writing"
+    elif "animation" in lower:
+        visual_type = "realistic scientific visualization, not a cartoon or presentation slide"
 
     parts = [
-        "Create one photorealistic cinematic documentary image.",
-        "This must look like a real frame from a professionally edited documentary film.",
-        "It is NOT a poster, thumbnail, presentation slide, collage, or infographic.",
-        f"Primary visible subject: {subject or 'the literal subject described in the narration'}.",
-        f"Scene meaning and context: {narration[:700]}.",
-        subject_treatment,
-        shot_style,
-        "Use realistic lighting, grounded physical detail, correct scale, believable textures, and strong composition.",
-        "Avoid repetitive generic imagery. Choose a visually distinctive interpretation of this specific scene.",
-        "No text or symbols. ABSOLUTELY NO TEXT OR SYMBOLS: no words, letters, numbers, captions, titles, labels, logos, watermarks, UI, map labels, signage, or readable markings anywhere in the image.",
-        "If the scene contains a monitor, document, device display, control panel, museum label, book page, scientific interface, chart, or computer screen, it must show only abstract non-readable shapes, blurred content, or be out of focus.",
-        "Any object surface that would normally contain text should appear blank, obscured, or unreadable.",
-        "Do not invent unrelated subjects, and do not add submarines unless the scene explicitly requires a submarine vehicle.",
-        "Do not show cameras, camcorders, lenses, tripods, camera crews, studio rigs, microphones, filming setups, or behind-the-scenes production equipment unless the scene explicitly requires them.",
+        f"Create a {visual_type} showing exactly: {subject}.",
+        "The requested subject must be the clear main focus and accurately match its real environment, scale, materials, geography, and physical context.",
+        "Use natural realistic lighting, believable detail, clean composition, realistic colors, and high visual fidelity.",
+        "Do not add unrelated objects or concepts that are not required by the subject.",
+        "No text. No readable words, letters, numbers, labels, logos, captions, signs, watermarks, interface elements, article layouts, poster layouts, or presentation layouts.",
     ]
-
     if negatives:
-        parts.append("Avoid these wrong meanings or unwanted subjects: " + ", ".join(negatives[:8]) + ".")
-
-    if video_profile:
-        parts.append(f"Visual tone: {video_profile} documentary style.")
-
+        parts.append("Exclude: " + ", ".join(negatives[:8]) + ".")
     return " ".join(parts)
 
 

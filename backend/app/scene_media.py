@@ -107,19 +107,6 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
             topic_context=topic_context, history_sources=history_sources,
         )
     except RuntimeError:
-        reusable = reuse_eligible_keys(asset_usage, number)
-        if reusable:
-            try:
-                result = select_media(
-                    query, media_dir, number, requested, orientation,
-                    set(used_sources) - reusable, ai_prompt, "stock_only",
-                    prefer_wikimedia=prefer_wikimedia, topic_context=topic_context,
-                    history_sources=set(history_sources) - reusable,
-                )
-                result["reused"] = True
-                return result
-            except RuntimeError:
-                pass
         for broad_query in emergency_topic_queries(topic_context):
             logger.info("MEDIA scene=%d emergency=true query=%r", number, broad_query)
             try:
@@ -132,11 +119,6 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
                 return result
             except RuntimeError:
                 continue
-        result = _emergency_local_reuse(
-            asset_usage, media_dir, number, duration_minutes,
-        )
-        if result:
-            return result
         # Stock exhaustion is not fatal.  Hand the scene to the isolated
         # Z-Image batch instead of aborting the whole video before the AI
         # fallback stage gets a chance to run.
@@ -154,8 +136,7 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
             "relevance_score": 0,
             "relevance_confidence": "none",
             "relevance_reason": (
-                "No usable stock candidate remained after normal, broad-topic, "
-                "and local-reuse attempts."
+                "No usable unique stock candidate remained after normal and broad-topic searches."
             ),
             "relevance_penalties": ["stock_exhausted"],
             "subject_coverage": 0.0,
