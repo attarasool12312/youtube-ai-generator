@@ -1,3 +1,4 @@
+import gc
 import os
 import re
 from dataclasses import dataclass
@@ -31,6 +32,18 @@ def _pipeline_for(language_code: str):
     if language_code not in _pipelines:
         _pipelines[language_code] = KPipeline(lang_code=language_code, repo_id="hexgrad/Kokoro-82M")
     return _pipelines[language_code]
+
+
+def unload_pipelines():
+    """Release cached Kokoro pipelines before a large GPU stage."""
+    _pipelines.clear()
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 def _sentences(text: str) -> list[str]:

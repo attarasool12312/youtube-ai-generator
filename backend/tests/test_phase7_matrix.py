@@ -131,8 +131,8 @@ class Phase7ProfileMatrixTests(unittest.TestCase):
 
         real_builder = build_media_topic_context
         with patch("app.ai_pipeline.build_media_topic_context", wraps=real_builder) as builder, patch(
-            "app.ai_pipeline.call_scene_json", side_effect=response
-        ):
+            "app.ai_pipeline.build_media_script_context", return_value={"summary": "test context"}
+        ), patch("app.ai_pipeline.call_scene_json", side_effect=response):
             enriched = enrich_scene_batch(title, "educational_how_it_works", scenes)
 
         self.assertEqual(builder.call_count, 1)

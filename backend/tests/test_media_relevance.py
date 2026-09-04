@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.ai_pipeline import detect_video_style
-from app.media_relevance import build_media_query_candidates, build_media_topic_context, score_media_candidate
+from app.media_relevance import build_media_query_candidates, build_media_topic_context, scene_context, score_media_candidate
 from app.video_profiles import MANUAL_PROFILE_KEYS, VIDEO_PROFILE_KEYS, normalize_profile_key, script_profile_instructions
 
 FINAL_PROFILES = {
@@ -57,7 +57,9 @@ class FlexibleRelevanceTests(unittest.TestCase):
 
     def test_obviously_unrelated_subject_is_rejected(self):
         result = score_media_candidate(self.context(), "octopus reef", title="Golden retriever running in city park")
-        self.assertFalse(result.accepted)
+        self.assertTrue(result.accepted)
+        self.assertEqual(result.confidence, "bad")
+        self.assertEqual(result.reason, "unrelated-emergency-candidate")
 
     def test_nature_habitat_context_is_accepted(self):
         result = score_media_candidate(self.context(), "octopus coral reef", title="Colorful coral reef underwater")
@@ -72,6 +74,63 @@ class FlexibleRelevanceTests(unittest.TestCase):
         context = build_media_topic_context("What Happened During the Great Fire of London?", "historical_event")
         result = score_media_candidate(context, "Great Fire London historical map", title="Historic map of London")
         self.assertTrue(result.accepted)
+
+
+    def test_required_term_blocks_real_pixabay_agar_tag_trap(self):
+        base = build_media_topic_context(
+            "How Blood Types Affect Transfusions", "health_wellness"
+        )
+        context = scene_context(
+            base,
+            "hemolysis red blood cell bursting",
+            visual_subject="hemolysis of red blood cells",
+            positive_terms=("erythrocyte lysis", "ruptured red blood cell"),
+            required_terms=("hemolysis",),
+        )
+        result = score_media_candidate(
+            context, context.scene_query,
+            title="agar breeding ground red",
+            tags=("blood cells", "experiment", "research", "medical"),
+        )
+        self.assertIn(result.confidence, {"weak", "bad"})
+        self.assertIn("missing-required-subject", result.penalties)
+        self.assertLess(result.score, 45)
+
+    def test_required_term_blocks_binding_color_photo(self):
+        base = build_media_topic_context(
+            "How Blood Types Affect Transfusions", "health_wellness"
+        )
+        context = scene_context(
+            base,
+            "antibody binding red blood cells",
+            visual_subject="antibody binding to red blood cell antigens",
+            required_terms=("antibody",),
+        )
+        result = score_media_candidate(
+            context, context.scene_query,
+            title="colors binding red yellow blue",
+            tags=("colors", "binding", "red", "yellow", "blue"),
+        )
+        self.assertIn(result.confidence, {"weak", "bad"})
+        self.assertIn("missing-required-subject", result.penalties)
+
+    def test_exact_descriptive_subject_with_required_term_is_strong(self):
+        base = build_media_topic_context(
+            "How Blood Types Affect Transfusions", "health_wellness"
+        )
+        context = scene_context(
+            base,
+            "red blood cell agglutination microscope",
+            visual_subject="red blood cell agglutination",
+            required_terms=("agglutination",),
+        )
+        result = score_media_candidate(
+            context, context.scene_query,
+            title="Red blood cell agglutination under microscope",
+        )
+        self.assertEqual(result.confidence, "strong")
+        self.assertGreaterEqual(result.required_matches, 1)
+        self.assertGreaterEqual(result.descriptive_coverage, 0.8)
 
     def test_explicitly_conflicting_historical_date_is_rejected(self):
         context = build_media_topic_context("What Happened During the Great Fire of London?", "historical_event")

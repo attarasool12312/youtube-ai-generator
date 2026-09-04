@@ -2,6 +2,7 @@
 import unittest
 
 from app.media_relevance import build_media_topic_context, score_media_candidate
+from app.media_relevance import build_media_query_candidates, scene_context
 
 # (profile, title, scene_query, better_metadata, worse_metadata)
 RANKINGS = [
@@ -73,7 +74,9 @@ class MediaScoringStrengthTests(unittest.TestCase):
         context = build_media_topic_context("How Nuclear Submarines Stay Hidden Underwater", "automotive_transport")
         for meta in ("Toy submarine in aquarium", "Underwater fish coral", "Navy sonar operator control room"):
             self.assertTrue(score_media_candidate(context, "nuclear submarine periscope sonar room", title=meta).accepted)
-        self.assertFalse(score_media_candidate(context, "nuclear submarine periscope", title="Golden retriever park").accepted)
+        unrelated = score_media_candidate(context, "nuclear submarine periscope", title="Golden retriever park")
+        self.assertTrue(unrelated.accepted)
+        self.assertEqual(unrelated.confidence, "bad")
 
 
 class MediaTitleEvidenceTests(unittest.TestCase):
@@ -160,6 +163,74 @@ class SoftAnchorTests(unittest.TestCase):
         self.assertEqual(repaired.final_query, "detailed close view berlin wall")
         self.assertNotIn("fall of", repaired.final_query)
         self.assertEqual(validate_scene_query("", context).final_query, "berlin wall")
+
+
+class RichSceneUnderstandingTests(unittest.TestCase):
+    def test_negative_meaning_guards_demote_cable_word_sense_traps(self):
+        job = build_media_topic_context(
+            "How Deep Sea Cables Carry the Internet", "educational_how_it_works"
+        )
+        scene = scene_context(
+            job,
+            "submarine fiber optic cable ocean floor",
+            visual_subject="submarine fiber optic cable",
+            positive_terms=("seabed", "internet data", "cable landing station"),
+            negative_terms=("cable car", "cable-stayed bridge", "electrical cable"),
+        )
+        good = score_media_candidate(
+            scene,
+            scene.scene_query,
+            title="Submarine fiber optic cable on ocean floor seabed",
+        )
+        cable_car = score_media_candidate(
+            scene,
+            scene.scene_query,
+            title="Cable car climbing mountain",
+        )
+        bridge = score_media_candidate(
+            scene,
+            scene.scene_query,
+            title="Cable-stayed bridge traffic city",
+        )
+        self.assertEqual(good.confidence, "strong")
+        self.assertGreater(good.score, cable_car.score)
+        self.assertGreater(good.score, bridge.score)
+        self.assertTrue(any(value.startswith("negative:") for value in cable_car.penalties))
+        self.assertTrue(any(value.startswith("negative:") for value in bridge.penalties))
+
+    def test_scene_visual_subject_beats_title_on_concrete_cutaway(self):
+        job = build_media_topic_context(
+            "Why the Roman Aqueducts Still Stand", "architecture_engineering"
+        )
+        scene = scene_context(
+            job,
+            "lime mortar masonry mixing",
+            visual_subject="lime mortar masonry",
+            positive_terms=("mortar", "stone", "mixing"),
+        )
+        cutaway = score_media_candidate(
+            scene, scene.scene_query, title="Lime mortar masonry mixing stone"
+        )
+        title_only = score_media_candidate(
+            scene, scene.scene_query, title="Roman aqueduct ruins aerial view"
+        )
+        self.assertGreater(cutaway.score, title_only.score)
+        self.assertTrue(cutaway.entity_match)
+
+    def test_cutaway_query_variants_do_not_force_video_title_subject(self):
+        job = build_media_topic_context(
+            "Why the Roman Aqueducts Still Stand", "architecture_engineering"
+        )
+        scene = scene_context(
+            job,
+            "lime mortar masonry",
+            visual_subject="lime mortar",
+            search_variants=("historic lime mortar", "stone mortar mixing"),
+        )
+        variants = build_media_query_candidates(scene.scene_query, scene, limit=6)
+        self.assertIn("lime mortar masonry", variants)
+        self.assertIn("historic lime mortar", variants)
+        self.assertFalse(any("aqueduct" in value.lower() for value in variants))
 
 
 class SceneQueryScoringTests(unittest.TestCase):

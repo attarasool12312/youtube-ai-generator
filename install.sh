@@ -409,6 +409,66 @@ PYHFVERIFY
 done
 
 
+log "Installing isolated Z-Image-Turbo runtime"
+
+ZIMAGE_HOME="$APP_HOME/zimage-turbo"
+ZIMAGE_VENV="$ZIMAGE_HOME/venv"
+ZIMAGE_PYTHON="$ZIMAGE_VENV/bin/python"
+ZIMAGE_PIP="$ZIMAGE_VENV/bin/pip"
+ZIMAGE_HF_HOME="$ZIMAGE_HOME/hf"
+
+mkdir -p "$ZIMAGE_HOME" "$ZIMAGE_HF_HOME"
+chown -R "$APP_USER:$APP_GROUP" "$ZIMAGE_HOME"
+
+if [[ ! -x "$ZIMAGE_PYTHON" ]]; then
+    run_as_user /usr/bin/python3 -m venv "$ZIMAGE_VENV"
+fi
+
+run_as_user "$ZIMAGE_PIP" install --upgrade pip setuptools wheel
+
+# Keep Z-Image completely isolated from the application's pinned Torch stack.
+# These versions are the production-proven A10G/CUDA 13 runtime.
+run_as_user "$ZIMAGE_PIP" install \
+    torch==2.14.0 \
+    accelerate==1.14.0 \
+    transformers==5.16.1 \
+    safetensors==0.8.0 \
+    numpy==2.5.2 \
+    pillow==12.3.0 \
+    nvidia-cudnn-cu13==9.24.0.43
+
+run_as_user "$ZIMAGE_PIP" install \
+    "git+https://github.com/huggingface/diffusers.git@09e4f5e4950c4eb156c8b9e5486176c431d53be5"
+
+log "Downloading Z-Image-Turbo model"
+
+run_as_user env \
+    HF_HOME="$ZIMAGE_HF_HOME" \
+    HF_HUB_DISABLE_XET=1 \
+    HF_TOKEN_FILE="$HF_TOKEN_FILE" \
+    "$ZIMAGE_PYTHON" -c 'from pathlib import Path; import os; from huggingface_hub import snapshot_download; token=Path(os.environ["HF_TOKEN_FILE"]).read_text().strip(); path=snapshot_download(repo_id="Tongyi-MAI/Z-Image-Turbo", token=token); print("ZIMAGE_MODEL_READY", path)'
+
+log "Verifying Z-Image isolated runtime"
+
+run_as_user env \
+    HF_HOME="$ZIMAGE_HF_HOME" \
+    "$ZIMAGE_PYTHON" -c 'import torch, diffusers, transformers; from diffusers import ZImagePipeline; print("ZIMAGE_RUNTIME_OK", torch.__version__, diffusers.__version__, transformers.__version__)'
+
+ZIMAGE_CUDNN_LIB="$ZIMAGE_VENV/lib/python3.12/site-packages/nvidia/cudnn/lib"
+[[ -d "$ZIMAGE_CUDNN_LIB" ]] || fail "Z-Image cuDNN runtime directory is missing."
+
+run_as_user env \
+    HF_HOME="$ZIMAGE_HF_HOME" \
+    LD_LIBRARY_PATH="$ZIMAGE_CUDNN_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$ZIMAGE_PYTHON" -c 'import ctypes; ctypes.CDLL("libcudnn_engines_runtime_compiled.so.9"); print("ZIMAGE_CUDNN_OK")'
+
+run_as_user env \
+    HF_HOME="$ZIMAGE_HF_HOME" \
+    HF_HUB_OFFLINE=1 \
+    "$ZIMAGE_PYTHON" -c 'from diffusers import ZImagePipeline; p=ZImagePipeline.download("Tongyi-MAI/Z-Image-Turbo", local_files_only=True); print("ZIMAGE_LOCAL_CACHE_OK", p)'
+
+
+
 
 log "Preparing Whisper caption model"
 

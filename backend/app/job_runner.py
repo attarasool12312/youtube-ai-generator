@@ -14,8 +14,9 @@ from app.audio_timing import sync_scenes_to_audio
 from app.caption_service import generate_caption_files
 from app.database import SessionLocal
 from app.models import Avatar, VideoJob
-from app.kokoro_service import generate_narration
+from app.kokoro_service import generate_narration, unload_pipelines
 from app.scene_media import download_scene_images
+from app.zimage_fallback import apply_zimage_fallbacks
 from app.video_renderer import render_video, overlay_avatar_video
 from app.paths import OUTPUT_ROOT
 from app.avatar_service import generate_avatar_video
@@ -57,6 +58,14 @@ def _record_timing(
         flush=True,
     )
 
+    return seconds
+
+
+def _record_timing_seconds(output_dir, timings, stage, seconds):
+    seconds = round(float(seconds), 3)
+    timings["stages"][stage] = seconds
+    _save_job_timings(output_dir, timings)
+    print(f"JOB_TIMING {stage}={seconds:.3f}s", flush=True)
     return seconds
 
 
@@ -281,6 +290,16 @@ def run_job(job_id: int) -> None:
                     outline=caption_outline,
                 )
 
+            def _media_progress(completed, total):
+                total = max(1, int(total or 0))
+                completed = max(0, min(int(completed or 0), total))
+                progress = 60 + int((completed / total) * 24)
+                update_job_progress(
+                    job_id,
+                    "media_collection",
+                    min(84, max(60, progress)),
+                )
+
             def _do_media():
                 return download_scene_images(
                     package["scenes"],
@@ -290,24 +309,33 @@ def run_job(job_id: int) -> None:
                     package.get("detected_style", video_style),
                     package.get("title", title),
                     duration_minutes,
+                    progress_callback=_media_progress,
                 )
 
             caption_result = [None]
             media_result = [None]
             caption_error = [None]
             media_error = [None]
+            caption_elapsed = [0.0]
+            media_elapsed = [0.0]
 
             def _run_captions():
+                started = time.perf_counter()
                 try:
                     caption_result[0] = _do_captions()
                 except Exception as e:
                     caption_error[0] = e
+                finally:
+                    caption_elapsed[0] = time.perf_counter() - started
 
             def _run_media():
+                started = time.perf_counter()
                 try:
                     media_result[0] = _do_media()
                 except Exception as e:
                     media_error[0] = e
+                finally:
+                    media_elapsed[0] = time.perf_counter() - started
 
             print(
                 "PARALLEL_PREP: captions + media download",
@@ -325,11 +353,11 @@ def run_job(job_id: int) -> None:
             else:
                 captions = caption_result[0]
 
-            _record_timing(
+            _record_timing_seconds(
                 output_dir,
                 timings,
                 "captions",
-                caption_started,
+                caption_elapsed[0],
             )
 
             if media_error[0]:
@@ -337,16 +365,26 @@ def run_job(job_id: int) -> None:
 
             package["scenes"] = media_result[0]
 
-            _record_timing(
+            _record_timing_seconds(
                 output_dir,
                 timings,
                 "stock_media_collection",
-                media_started,
+                media_elapsed[0],
             )
 
         else:
             # No captions, just download media
             update_job_progress(job_id, "media_collection", 68)
+
+            def _media_only_progress(completed, total):
+                total = max(1, int(total or 0))
+                completed = max(0, min(int(completed or 0), total))
+                progress = 68 + int((completed / total) * 16)
+                update_job_progress(
+                    job_id,
+                    "media_collection",
+                    min(84, max(68, progress)),
+                )
 
             package["scenes"] = download_scene_images(
                 package["scenes"],
@@ -356,6 +394,7 @@ def run_job(job_id: int) -> None:
                 package.get("detected_style", video_style),
                 package.get("title", title),
                 duration_minutes,
+                progress_callback=_media_only_progress,
             )
 
             _record_timing(
@@ -365,9 +404,65 @@ def run_job(job_id: int) -> None:
                 media_started,
             )
 
+        zimage_targets = sum(
+            1 for scene in package["scenes"]
+            if scene.get("needs_ai_fallback")
+        )
+        if zimage_targets:
+            # Reliability first: do not overlap the ~20 GB Z-Image model with
+            # narration/caption GPU residents.  Stock search is complete here,
+            # so explicitly release cached TTS state before loading Z-Image once
+            # for the entire AI-image batch.
+            if narrator_voice.startswith("cloned:"):
+                try:
+                    from app.chatterbox_service import unload_model as unload_chatterbox_model
+                    unload_chatterbox_model()
+                except Exception as error:
+                    logger.info("ZIMAGE Chatterbox cleanup skipped: %s", error)
+            else:
+                try:
+                    unload_pipelines()
+                except Exception as error:
+                    logger.info("ZIMAGE Kokoro cleanup skipped: %s", error)
+
+            update_job_progress(job_id, "media_collection", 84)
+            zimage_started = time.perf_counter()
+
+            def _zimage_progress(completed, total):
+                total = max(1, int(total or 0))
+                completed = max(0, min(int(completed or 0), total))
+                progress = 84 + int((completed / total) * 4)
+                update_job_progress(
+                    job_id,
+                    "media_collection",
+                    min(88, max(84, progress)),
+                )
+
+            package["scenes"] = apply_zimage_fallbacks(
+                package["scenes"],
+                output_dir,
+                orientation=orientation,
+                video_title=package.get("title", title),
+                video_profile=package.get("detected_style", video_style),
+                progress_callback=_zimage_progress,
+            )
+            _record_timing(
+                output_dir,
+                timings,
+                "zimage_generation",
+                zimage_started,
+            )
+        else:
+            _record_timing_seconds(
+                output_dir,
+                timings,
+                "zimage_generation",
+                0.0,
+            )
+
         package["captions"] = captions
 
-        update_job_progress(job_id, "media_collection", 86)
+        update_job_progress(job_id, "media_collection", 88)
 
         # ========================================================
         # GPU-HEAVY STAGES: Render + Avatar

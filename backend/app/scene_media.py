@@ -137,14 +137,39 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
         )
         if result:
             return result
-        raise RuntimeError(
-            f"Scene {number} stock exhausted after normal providers and emergency topic/reuse fallback."
+        # Stock exhaustion is not fatal.  Hand the scene to the isolated
+        # Z-Image batch instead of aborting the whole video before the AI
+        # fallback stage gets a chance to run.
+        logger.info(
+            "MEDIA scene=%d result=ai_fallback reason=stock_exhausted query=%r",
+            number, query,
         )
+        return {
+            "provider": "stock-exhausted",
+            "source": None,
+            "media_file": "",
+            "media_type": "image",
+            "asset_key": None,
+            "matched_query": query,
+            "relevance_score": 0,
+            "relevance_confidence": "none",
+            "relevance_reason": (
+                "No usable stock candidate remained after normal, broad-topic, "
+                "and local-reuse attempts."
+            ),
+            "relevance_penalties": ["stock_exhausted"],
+            "subject_coverage": 0.0,
+            "descriptive_coverage": 0.0,
+            "required_matches": [],
+            "needs_ai_fallback": True,
+            "stock_decision": "ai_fallback_pending_no_stock",
+        }
 
 
 def download_scene_images(scenes, output_dir, orientation="landscape",
                           media_source="stock_only", video_profile="general_explainer",
-                          video_title="", duration_minutes=10):
+                          video_title="", duration_minutes=10,
+                          progress_callback=None):
     media_dir = Path(output_dir) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     attributions = []
@@ -163,7 +188,9 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
     history_sources = set(history[-500:])
     used_sources, new_sources, asset_usage = set(), [], {}
 
-    for scene in scenes:
+    total_scenes = len(scenes)
+
+    for scene_index, scene in enumerate(scenes, start=1):
         number = int(scene["scene_number"])
         keywords = scene.get("stock_keywords") or []
         if isinstance(keywords, str):
@@ -176,7 +203,17 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
             result = _select_scene_media(
                 query, media_dir, number, scene.get("media_type", "video"),
                 orientation, used_sources, scene.get("image_prompt") or query,
-                media_source, prefer_wikimedia, scene_context(topic_context, query), history_sources,
+                media_source, prefer_wikimedia,
+                scene_context(
+                    topic_context,
+                    query,
+                    visual_subject=scene.get("visual_subject") or "",
+                    positive_terms=keywords,
+                    negative_terms=scene.get("negative_keywords") or (),
+                    required_terms=scene.get("required_terms") or (),
+                    search_variants=scene.get("search_variants") or (),
+                ),
+                history_sources,
                 asset_usage, duration_minutes,
             )
         except Exception as error:
@@ -195,9 +232,18 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
             )
         result["query"] = query
         scene.update(result)
-        attributions.append(result)
+        # Placeholder AI-fallback rows have no licensable stock source and
+        # therefore must not leak into publishing attributions.
+        if result.get("source"):
+            attributions.append(result)
         manifest_entry = {
             "scene_number": number,
+            "narration": scene.get("narration"),
+            "visual_subject": scene.get("visual_subject"),
+            "search_query": query,
+            "required_terms": scene.get("required_terms") or [],
+            "search_variants": scene.get("search_variants") or [],
+            "negative_keywords": scene.get("negative_keywords") or [],
             "provider": result.get("provider"),
             "source": result.get("source"),
             "matched_query": result.get("matched_query") or query,
@@ -207,7 +253,14 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
             "emergency": bool(result.get("emergency")),
             "asset_key": result.get("asset_key"),
             "relevance_score": result.get("relevance_score"),
+            "relevance_confidence": result.get("relevance_confidence"),
             "relevance_reason": result.get("relevance_reason"),
+            "relevance_penalties": result.get("relevance_penalties") or [],
+            "subject_coverage": result.get("subject_coverage"),
+            "descriptive_coverage": result.get("descriptive_coverage"),
+            "required_matches": result.get("required_matches"),
+            "needs_ai_fallback": bool(result.get("needs_ai_fallback")),
+            "stock_decision": result.get("stock_decision"),
             "author": result.get("author"),
             "license": result.get("license"),
             "license_url": result.get("license_url"),
@@ -219,6 +272,9 @@ def download_scene_images(scenes, output_dir, orientation="landscape",
                 used_sources.add(key)
         if result.get("source"):
             new_sources.append(result["source"])
+
+        if progress_callback:
+            progress_callback(scene_index, total_scenes)
 
     history_path.parent.mkdir(parents=True, exist_ok=True)
     history_path.write_text(json.dumps((history + new_sources)[-1000:], indent=2))

@@ -161,7 +161,7 @@ def _candidate_from_page(page, search_query, topic_context, current_sources, his
         topic_context, search_query, title=title, description=metadata_text,
         categories=page.get("categories") or (),
     )
-    if not relevance.accepted:
+    if not relevance.accepted or relevance.confidence == "bad":
         return None, "relevance"
     entity_match = relevance.entity_match
     score = relevance.score
@@ -174,6 +174,9 @@ def _candidate_from_page(page, search_query, topic_context, current_sources, his
         "license_url": _clean(_value(meta.get("LicenseUrl"))),
         "image_url": image_url, "expected_mime": mime,
         "search_query_used": search_query, "relevance_score": score,
+        "relevance_reason": relevance.reason,
+        "relevance_confidence": relevance.confidence,
+        "relevance_penalties": list(relevance.penalties),
         "title_match_count": title_entity_matches + context_title,
         "entity_match": entity_match,
         "context_match_count": context_title + context_metadata,
@@ -308,7 +311,10 @@ def download_image(query, output_path, orientation=None, used_sources=None, offs
                 "wikimedia_query": candidate["search_query_used"],
                 "matched_query": candidate["search_query_used"],
                 "relevance_score": candidate["relevance_score"],
+                "relevance_reason": candidate["relevance_reason"],
                 "relevance_entity_match": candidate["entity_match"],
+                "relevance_confidence": candidate["relevance_confidence"],
+                "relevance_penalties": candidate["relevance_penalties"],
                 "wikimedia_relevance_score": candidate["relevance_score"],
                 "wikimedia_title_matches": candidate["title_match_count"],
                 "wikimedia_entity_match": candidate["entity_match"],

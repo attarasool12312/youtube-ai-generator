@@ -67,6 +67,7 @@ AI_MEDIA_PROVIDERS = {
     "openai",
     "stability",
     "local_ai",
+    "z-image-turbo",
 }
 
 

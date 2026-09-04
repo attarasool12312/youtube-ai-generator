@@ -72,6 +72,13 @@ class MediaTopicContext:
     # Per-scene: the scene's own query, so candidates found by a broadened
     # search variant are still judged against what the scene actually needs.
     scene_query: str = ""
+    # Rich scene understanding produced by the scene AI.  These fields are
+    # optional so older callers/tests keep working unchanged.
+    scene_visual_subject: str = ""
+    scene_positive_terms: tuple[str, ...] = ()
+    scene_negative_terms: tuple[str, ...] = ()
+    scene_required_terms: tuple[str, ...] = ()
+    scene_search_variants: tuple[str, ...] = ()
     # Per-job: years named anywhere in the script's scene queries. Lets a
     # historical video down-rank present-day media even for undated scenes.
     era_years: tuple[str, ...] = ()
@@ -243,6 +250,11 @@ class MediaCandidateRelevance:
     reason: str
     entity_match: bool
     context_matches: int
+    confidence: str = "bad"
+    penalties: tuple[str, ...] = ()
+    subject_coverage: float = 0.0
+    descriptive_coverage: float = 0.0
+    required_matches: int = 0
 
 
 _SCENE_GENERIC = _FILLER | frozenset({
@@ -354,6 +366,82 @@ def _token_forms(tokens):
     return forms
 
 
+def _term_phrases(values) -> tuple[str, ...]:
+    phrases = []
+    for value in values or ():
+        normalized = normalize_media_text(str(value or ""))
+        if normalized and normalized not in phrases:
+            phrases.append(normalized)
+    return tuple(phrases)
+
+
+def _confidence_for(
+    score, entity_match, context_strong, penalties,
+    *, subject_coverage=0.0, subject_terms=0, exact_subject=False,
+    descriptive_coverage=0.0, required_terms=0, required_matches=0,
+):
+    """Map lexical evidence to a conservative stock confidence.
+
+    Strong requires broad coverage of the actual scene subject plus descriptive
+    evidence from a provider title/description.  Loose tag bags can still be an
+    emergency candidate, but they cannot claim near-certain relevance.
+    """
+    major_conflict = any(
+        value.startswith("negative:")
+        or value in {"compound-word-sense", "missing-required-subject"}
+        for value in penalties
+    )
+    if major_conflict:
+        return "weak" if score >= 20 else "bad"
+
+    required_ok = not required_terms or required_matches > 0
+    if subject_terms <= 1:
+        if score >= 78 and entity_match and required_ok and descriptive_coverage >= 1.0:
+            return "strong"
+        if score >= 45 and required_ok and (entity_match or context_strong >= 2):
+            return "acceptable"
+    else:
+        descriptive_proof = exact_subject or descriptive_coverage >= 0.60
+        if (
+            score >= 78 and entity_match and required_ok
+            and subject_coverage >= 0.80 and descriptive_proof
+        ):
+            return "strong"
+        if (
+            score >= 45 and entity_match and required_ok
+            and subject_coverage >= 0.50
+        ):
+            return "acceptable"
+
+    if score >= 20:
+        return "weak"
+    return "bad"
+
+
+def _compound_word_sense_conflict(title, subject_strong, known_forms):
+    """Detect when the only subject word is acting as a modifier of another noun.
+
+    This is intentionally soft.  It catches generic word-sense traps such as
+    "cable car" and "cable-stayed bridge" without building topic-specific ban
+    lists.  If the following words are also part of the scene/query vocabulary,
+    no conflict is recorded.
+    """
+    words = [token for token in media_text_tokens(title) if token not in _SCENE_GENERIC]
+    if not words or not subject_strong:
+        return False
+    for index, token in enumerate(words):
+        token_forms = _token_forms((token,))
+        if not any(token_forms & forms for forms in subject_strong):
+            continue
+        for following in words[index + 1:index + 3]:
+            forms = _token_forms((following,))
+            if following in _WEAK_EVIDENCE or forms & known_forms:
+                continue
+            if following not in _PROVIDER_VISUAL_WORDS and following not in _FILE_NOISE:
+                return True
+    return False
+
+
 def score_media_candidate(
     context: MediaTopicContext,
     scene_query: str,
@@ -363,7 +451,13 @@ def score_media_candidate(
     tags=(),
     categories=(),
 ) -> MediaCandidateRelevance:
-    """Rank like a stock editor; reject only clear evidence of a wrong subject."""
+    """One universal scene-first ranking model for every licensed provider.
+
+    The scene's visual subject is primary evidence.  The video title is only
+    supporting context.  Only explicit named-date contradictions are hard
+    rejects; weak/unrelated provider results remain available as low-confidence
+    emergency candidates so media lookup itself cannot unnecessarily kill a job.
+    """
     tag_text = " ".join(
         str(item.get("name") or "") if isinstance(item, dict) else str(item)
         for item in (tags or ())
@@ -372,27 +466,63 @@ def score_media_candidate(
         str(item.get("title") or "") if isinstance(item, dict) else str(item)
         for item in (categories or ())
     )
-    metadata = normalize_media_text(" ".join((title, description, tag_text, category_text)))
+    descriptive_fields = tuple(
+        normalize_media_text(value)
+        for value in (title, description)
+        if str(value or "").strip()
+    )
+    metadata_fields = descriptive_fields + tuple(
+        normalize_media_text(value)
+        for value in (tag_text, category_text)
+        if str(value or "").strip()
+    )
+    metadata = " ".join(metadata_fields)
     metadata_tokens = _token_forms(metadata.split())
+    descriptive_tokens = _token_forms(" ".join(descriptive_fields).split())
     if context.scene_query:
         scene_query = context.scene_query
+    scene_query = " ".join(str(scene_query or "").split()).strip()
+
     query_years = set(re.findall(r"\b(?:1[0-9]{3}|20[0-9]{2})\b", normalize_media_text(scene_query)))
     metadata_years = set(re.findall(r"\b(?:1[0-9]{3}|20[0-9]{2})\b", metadata))
     if query_years and metadata_years and query_years.isdisjoint(metadata_years):
-        return MediaCandidateRelevance(False, 0, "conflicting-named-date", False, 0)
+        return MediaCandidateRelevance(
+            False, 0, "conflicting-named-date", False, 0, "bad", ("named-date-conflict",)
+        )
+
+    if not metadata_tokens:
+        return MediaCandidateRelevance(
+            True, 5, "provider-result-sparse-metadata", False, 0, "bad", ()
+        )
+
+    penalties = []
     era_penalty = 0
     if not query_years and metadata_years and context.era_years:
         era = {int(year) for year in context.era_years}
         if all(abs(int(year) - nearest) > 15 for year in metadata_years for nearest in era):
-            # Present-day anniversary/memorial photos for a 1960s-1980s story.
             era_penalty = 30
+            penalties.append("era-mismatch")
+
+    # Scene-first: rich visual_subject when available, otherwise the exact scene
+    # query.  The title never replaces a concrete cutaway subject.
+    subject_text = context.scene_visual_subject or scene_query or context.primary_topic
     subject_strong, subject_weak = _split_by_strength(
-        token for token in media_text_tokens(context.primary_topic)
+        token for token in media_text_tokens(subject_text)
         if token not in _SCENE_GENERIC
     )
-    subject_tokens = set().union(*subject_strong, *subject_weak) if (subject_strong or subject_weak) else set()
+    if not subject_strong and not subject_weak:
+        subject_strong, subject_weak = _split_by_strength(
+            token for token in media_text_tokens(context.primary_topic)
+            if token not in _SCENE_GENERIC
+        )
+    subject_tokens = (
+        set().union(*subject_strong, *subject_weak)
+        if (subject_strong or subject_weak) else set()
+    )
+
+    query_and_positive = " ".join((scene_query, *context.scene_positive_terms))
     query_strong, query_weak = _split_by_strength(
-        token for token in media_text_tokens(scene_query)
+        token for token in media_text_tokens(query_and_positive)
         if token not in _SCENE_GENERIC
     )
     strong_matches = _count_word_matches(subject_strong, metadata_tokens)
@@ -400,59 +530,162 @@ def score_media_candidate(
     context_strong = _count_word_matches(query_strong, metadata_tokens, exclude=subject_tokens)
     context_weak = _count_word_matches(query_weak, metadata_tokens, exclude=subject_tokens)
     context_matches = context_strong + context_weak
-    # Only a concrete subject noun proves the subject; "egyptian" or "ancient"
-    # alone merely suggests the setting.
+
+    subject_term_count = len(subject_strong)
+    subject_coverage = (strong_matches / subject_term_count) if subject_term_count else 0.0
+    descriptive_matches = _count_word_matches(subject_strong, descriptive_tokens)
+    descriptive_coverage = (
+        descriptive_matches / subject_term_count if subject_term_count else 0.0
+    )
+    # Preserve soft entity semantics: one concrete subject-word match keeps the
+    # candidate available, while confidence below decides whether it is truly
+    # strong enough to use without AI fallback.
     entity_match = bool(strong_matches)
-    subject_weight = 30
-    if strong_matches == 1 and len(subject_strong) >= 2:
-        # One noun of a multi-noun subject ("black" of "black hole") is real but
-        # partial evidence; rank it under candidates naming the whole subject.
-        subject_weight = 18
-    score = strong_matches * subject_weight + weak_matches * 8 + context_strong * 6 + context_weak * 3
-    padded = f" {metadata} "
-    if any(
-        f" {phrase} " in padded
-        for phrase in context.required_anchor_phrases
-        if phrase and " " in phrase
-    ):
-        score += 20
+    subject_weight = 28
+    if strong_matches == 1 and subject_term_count >= 2:
+        subject_weight = 22
+    score = (
+        strong_matches * subject_weight
+        + weak_matches * 6
+        + context_strong * 7
+        + context_weak * 2
+    )
 
-    if not metadata_tokens:
-        return MediaCandidateRelevance(True, 5, "provider-result-sparse-metadata", False, 0)
+    subject_phrase = normalize_media_text(context.scene_visual_subject or "")
+    if not subject_phrase:
+        query_words = [
+            token for token in media_text_tokens(scene_query)
+            if token not in _SCENE_GENERIC
+        ]
+        if 1 <= len(query_words) <= 7:
+            subject_phrase = " ".join(query_words)
+    exact_subject = bool(
+        subject_phrase
+        and any(f" {subject_phrase} " in f" {field} " for field in descriptive_fields)
+    )
+    exact_subject_anywhere = bool(
+        subject_phrase
+        and any(f" {subject_phrase} " in f" {field} " for field in metadata_fields)
+    )
+    if exact_subject:
+        score += 32
+        entity_match = True
+    elif exact_subject_anywhere:
+        # Tags help retrieval but do not prove the pixels show the whole subject.
+        score += 10
+    title_normalized = normalize_media_text(title)
+    if subject_phrase and f" {subject_phrase} " in f" {title_normalized} ":
+        score += 12
 
-    # The title names what the asset is; description and tags only surround it.
+    # Asset title is stronger evidence than provider tags/description.
     title_tokens = _token_forms(
         token for token in media_text_tokens(title) if token not in _SCENE_GENERIC
     )
     if title_tokens:
         score += 6 * _count_word_matches(subject_strong, title_tokens)
-        # Title words naming something outside both subject and scene are mild
-        # evidence the asset is about something else ("desert fox" for mummies).
-        known = subject_tokens | set().union(*query_strong, *query_weak) if (query_strong or query_weak) else subject_tokens
+
+    # Whole-video subject is context only.  This lets a scene about a landing
+    # station, laboratory, artifact, etc. win even if it does not repeat title words.
+    video_strong, video_weak = _split_by_strength(
+        token for token in media_text_tokens(context.primary_topic)
+        if token not in _SCENE_GENERIC
+    )
+    video_context = (
+        _count_word_matches(video_strong, metadata_tokens)
+        + _count_word_matches(video_weak, metadata_tokens)
+    )
+    score += min(video_context, 2) * 4
+
+    known_forms = subject_tokens
+    if query_strong or query_weak:
+        known_forms |= set().union(*query_strong, *query_weak)
+    if title_tokens:
         foreign = [
             token for token in media_text_tokens(title)
             if token not in _SCENE_GENERIC and token not in _WEAK_EVIDENCE
             and token not in _PROVIDER_VISUAL_WORDS and token not in _FILE_NOISE
-            and not token.isdigit() and not (_token_forms((token,)) & known)
+            and not token.isdigit() and not (_token_forms((token,)) & known_forms)
         ]
         score -= min(len(foreign), 3) * 2
         hints = _PROFILE_DOMAIN_HINTS.get(context.profile, ())
         if hints:
-            hint_forms = _token_forms(hints)
-            score += min(len(title_tokens & hint_forms), 2) * 3
-    score -= era_penalty
-    if entity_match:
-        reason = "subject-and-context" if context_matches else "main-subject-b-roll"
-        return MediaCandidateRelevance(True, score, reason, True, context_matches)
-    if context_strong:
-        return MediaCandidateRelevance(True, max(score, 12), "contextual-b-roll", False, context_matches)
-    if weak_matches or context_weak:
-        # Setting-only overlap: keep as a last resort, ranked below real matches.
-        return MediaCandidateRelevance(True, max(score, 6), "setting-only-b-roll", False, context_matches)
+            score += min(len(title_tokens & _token_forms(hints)), 2) * 3
 
-    # Search-provider inclusion is useful evidence, but populated metadata naming
-    # no part of either the main subject or scene is strong evidence it is wrong.
-    return MediaCandidateRelevance(False, 0, "clearly-unrelated-metadata", False, 0)
+    # AI-provided ambiguity guards are soft penalties, never giant reject walls.
+    negative_hits = []
+    for phrase in _term_phrases(context.scene_negative_terms):
+        phrase_words = [word for word in media_text_tokens(phrase) if word not in _SCENE_GENERIC]
+        phrase_match = f" {phrase} " in f" {metadata} "
+        if not phrase_match and phrase_words:
+            phrase_match = all(_token_forms((word,)) & metadata_tokens for word in phrase_words)
+        if phrase_match:
+            negative_hits.append(phrase)
+    if negative_hits:
+        score -= min(len(negative_hits), 2) * 30
+        penalties.extend(f"negative:{value}" for value in negative_hits[:2])
+
+    required_phrases = _term_phrases(context.scene_required_terms)
+    required_matches = 0
+    for phrase in required_phrases:
+        words = [word for word in media_text_tokens(phrase) if word not in _SCENE_GENERIC]
+        if words and all(_token_forms((word,)) & metadata_tokens for word in words):
+            required_matches += 1
+    if required_phrases and required_matches == 0:
+        score -= 30
+        score = min(score, 39)
+        entity_match = False
+        penalties.append("missing-required-subject")
+
+    # Universal compound demotion: if the only subject evidence is a word acting
+    # as a modifier of a different noun ("cable car", "cable-stayed bridge"),
+    # do not treat it as proof of the requested scene subject.
+    if (
+        context.scene_visual_subject
+        and strong_matches == 1
+        and len(subject_strong) >= 2
+        and context_strong == 0
+    ):
+        if _compound_word_sense_conflict(title, subject_strong, known_forms):
+            score -= 24
+            entity_match = False
+            penalties.append("compound-word-sense")
+
+    # Missing words from a multi-word visual subject are meaningful evidence.
+    # A single generic overlap can never be inflated to a strong result by tags.
+    if subject_term_count >= 2 and context.scene_visual_subject:
+        missing_subject_terms = max(0, subject_term_count - strong_matches)
+        score -= min(missing_subject_terms, 3) * 8
+        if not exact_subject:
+            if subject_coverage < 0.50:
+                score = min(score, 44)
+            elif subject_coverage < 0.80:
+                score = min(score, 71)
+
+    score -= era_penalty
+    score = max(0, min(100, int(round(score))))
+    confidence = _confidence_for(
+        score, entity_match, context_strong, penalties,
+        subject_coverage=subject_coverage, subject_terms=subject_term_count,
+        exact_subject=exact_subject, descriptive_coverage=descriptive_coverage,
+        required_terms=len(required_phrases), required_matches=required_matches,
+    )
+
+    if entity_match and context_matches:
+        reason = "scene-subject-and-context"
+    elif entity_match:
+        reason = "scene-subject-b-roll"
+    elif context_strong:
+        reason = "contextual-b-roll"
+    elif weak_matches or context_weak:
+        reason = "setting-only-b-roll"
+    elif video_context:
+        reason = "weak-context-b-roll"
+    else:
+        reason = "unrelated-emergency-candidate"
+    return MediaCandidateRelevance(
+        True, score, reason, entity_match, context_matches, confidence, tuple(penalties),
+        round(subject_coverage, 3), round(descriptive_coverage, 3), required_matches,
+    )
 
 _PROVIDER_VISUAL_WORDS = _FILLER | frozenset({
     "archival", "archive", "black", "early", "famous", "historic", "historical",
@@ -509,11 +742,27 @@ def practical_head_query(query: str, context: MediaTopicContext | None = None) -
     return singular_form(nouns[0]) if nouns else ""
 
 
-def scene_context(context: MediaTopicContext | None, scene_query: str) -> MediaTopicContext | None:
-    """Per-scene copy of the job context carrying the scene's own query."""
+def scene_context(
+    context: MediaTopicContext | None,
+    scene_query: str,
+    visual_subject: str = "",
+    positive_terms=(),
+    negative_terms=(),
+    required_terms=(),
+    search_variants=(),
+) -> MediaTopicContext | None:
+    """Per-scene copy carrying the AI's richer visual understanding."""
     if context is None:
         return None
-    return replace(context, scene_query=str(scene_query or "").strip())
+    return replace(
+        context,
+        scene_query=str(scene_query or "").strip(),
+        scene_visual_subject=str(visual_subject or "").strip(),
+        scene_positive_terms=tuple(str(value or "").strip() for value in (positive_terms or ()) if str(value or "").strip()),
+        scene_negative_terms=tuple(str(value or "").strip() for value in (negative_terms or ()) if str(value or "").strip()),
+        scene_required_terms=tuple(str(value or "").strip() for value in (required_terms or ()) if str(value or "").strip()),
+        scene_search_variants=tuple(str(value or "").strip() for value in (search_variants or ()) if str(value or "").strip()),
+    )
 
 
 def with_era_years(context: MediaTopicContext | None, queries) -> MediaTopicContext | None:
@@ -531,7 +780,7 @@ def build_media_query_candidates(
     context: MediaTopicContext | None,
     limit: int = 4,
 ) -> list[str]:
-    """Build bounded variants while retaining the required primary subject."""
+    """Build bounded scene-first variants without changing word sense."""
     variants: list[str] = []
 
     def append(value: str) -> None:
@@ -544,19 +793,35 @@ def build_media_query_candidates(
 
     full = " ".join(str(query or "").split()).strip()
     append(full)
+    for value in getattr(context, "scene_search_variants", ()) or ():
+        append(value)
+    visual_subject = " ".join(str(getattr(context, "scene_visual_subject", "") or "").split())
+    append(visual_subject)
+    useful = []
+    for raw in full.split():
+        normalized = normalize_media_text(raw)
+        if not normalized or normalized in _PROVIDER_VISUAL_WORDS:
+            continue
+        useful.append(raw.strip(" ,.;:!?()[]{}\"'"))
+    append(" ".join(useful[:4]))
+    head_source = visual_subject or full
     primary = " ".join(str(getattr(context, "primary_topic", "") or "").split())
+    primary_normalized = normalize_media_text(primary)
+    full_normalized = normalize_media_text(full)
+    primary_is_preserved_entity = (
+        len(primary_normalized.split()) >= 2
+        and f" {primary_normalized} " in f" {full_normalized} "
+    )
+    if not primary_is_preserved_entity:
+        append(practical_head_query(head_source, None))
     if not primary:
         return variants[:limit]
-    full_tokens = list(media_text_tokens(full))
-    primary_tokens = list(media_text_tokens(primary))
-    if full_tokens[:len(primary_tokens)] == primary_tokens:
-        full_tokens = full_tokens[len(primary_tokens):]
-    useful_words = [token for token in full_tokens if token not in _PROVIDER_VISUAL_WORDS]
-    useful_context = " ".join(useful_words[:4])
-    append(f"{primary} {useful_context}")
-    append(primary)
-    optional = list(getattr(context, "optional_context_tokens", ()) or ())
-    broad = next((token for token in optional if token not in _PROVIDER_VISUAL_WORDS), "")
-    if broad:
-        append(f"{primary} {broad}")
+
+    # The video topic is only a safe broadening path when the scene itself still
+    # overlaps that topic.  A concrete cutaway must not be pulled back toward an
+    # unrelated title subject.
+    scene_forms = _token_forms(media_text_tokens(visual_subject or full))
+    topic_forms = _token_forms(media_text_tokens(primary))
+    if scene_forms & topic_forms:
+        append(primary)
     return variants[:limit]

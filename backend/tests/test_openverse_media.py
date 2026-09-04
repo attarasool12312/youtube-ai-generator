@@ -67,7 +67,7 @@ class HistoricalRoutingTests(unittest.TestCase):
 
     def test_wikimedia_then_openverse_and_no_ai(self):
         wiki = Mock(side_effect=RuntimeError("exhausted"))
-        openverse = Mock(return_value={"provider": "openverse", "source": "ov"})
+        openverse = Mock(return_value={"provider": "openverse", "source": "ov", "relevance_score": 90, "relevance_confidence": "strong", "relevance_penalties": []})
         with patch(
             "app.media_selector.LICENSED_HISTORICAL_PROVIDERS",
             (("wikimedia", wiki), ("openverse", openverse)),

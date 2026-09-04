@@ -206,6 +206,108 @@ def call_qwen_json(prompt: str) -> dict:
 
     raise ValueError("All JSON attempts failed: " + " | ".join(errors))
 
+
+def _call_media_context_json(prompt: str) -> dict:
+    """Ollama-first JSON call for media understanding.
+
+    Scene/media planning intentionally prefers the local qwen model so the
+    video does not become dependent on a remote provider.  Remote providers are
+    fallbacks only, matching the existing scene-metadata policy.
+    """
+    prompt += (
+        "\nReturn only complete valid JSON. No Markdown. "
+        "Keep every field concise."
+    )
+    errors = []
+    attempts = [
+        (call_ollama, 2),
+        (call_gemini, 2),
+        (call_together, 1),
+    ]
+    for provider, total in attempts:
+        for attempt in range(total):
+            try:
+                result = provider(prompt, json_mode=True)
+                return _decode_ai_json(result.text)
+            except Exception as error:
+                errors.append(f"{provider.__name__} #{attempt + 1}: {error}")
+    raise ValueError("All media-context JSON attempts failed: " + " | ".join(errors))
+
+
+def _clean_media_list(value, limit=10, maximum=120):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    for item in value:
+        text = " ".join(str(item or "").split()).strip()[:maximum]
+        if text and text.casefold() not in {entry.casefold() for entry in cleaned}:
+            cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _clean_media_script_context(data):
+    if not isinstance(data, dict):
+        return {}
+    summary = " ".join(str(data.get("summary") or "").split()).strip()[:650]
+    main_subject = " ".join(str(data.get("main_subject") or "").split()).strip()[:180]
+    entities = _clean_media_list(data.get("entities"), 14)
+    visual_terms = _clean_media_list(data.get("visual_terms"), 18)
+    ambiguities = []
+    for item in data.get("ambiguities") or []:
+        if not isinstance(item, dict):
+            continue
+        term = " ".join(str(item.get("term") or "").split()).strip()[:90]
+        meaning = " ".join(str(item.get("meaning") or "").split()).strip()[:180]
+        avoid = _clean_media_list(item.get("avoid"), 8)
+        if term and meaning:
+            ambiguities.append({"term": term, "meaning": meaning, "avoid": avoid})
+        if len(ambiguities) >= 10:
+            break
+    result = {
+        "summary": summary,
+        "main_subject": main_subject,
+        "entities": entities,
+        "visual_terms": visual_terms,
+        "ambiguities": ambiguities,
+    }
+    return {key: value for key, value in result.items() if value}
+
+
+def build_media_script_context(title, video_style, script):
+    """Create one compact visual brief from the complete narration.
+
+    Failure is deliberately non-fatal.  If every AI provider is unavailable,
+    scene enrichment falls back to the existing title + narration behaviour.
+    """
+    script = " ".join(str(script or "").split()).strip()
+    if not script:
+        return {}
+    prompt = (
+        f"Video title: {title}\n"
+        f"Style: {video_style}\n"
+        "Read the complete narration and create a MEDIA CONTEXT BRIEF for "
+        "finding accurate real-world visuals. This is context for later scene "
+        "queries, not a list of queries itself.\n"
+        "Return JSON with: summary (max 90 words), main_subject, entities, "
+        "visual_terms, ambiguities.\n"
+        "For ambiguities, use objects/words whose ordinary stock-search meaning "
+        "could be wrong. Each ambiguity has term, intended meaning, and avoid "
+        "(wrong meanings/subjects). Example: submarine cable should avoid cable "
+        "car, bridge cable and electrical extension cable.\n"
+        "Do not invent facts, brands, people, places, dates or objects not "
+        "supported by the title or narration. Prefer concrete visible nouns.\n"
+        f"Complete narration:\n{script}"
+    )
+    try:
+        return _clean_media_script_context(_call_media_context_json(prompt))
+    except Exception as error:
+        logger.warning("MEDIA_CONTEXT_FAILED: %s", error)
+        return {}
+
 def split_script_into_scenes(script, duration_minutes):
     words = script.strip().split()
 
@@ -297,20 +399,52 @@ def split_script_into_scenes(script, duration_minutes):
     return scenes
 
 
-def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
+def _scene_continuity_rows(all_scenes, batch):
+    positions = {int(scene["scene_number"]): index for index, scene in enumerate(all_scenes)}
+    rows = []
+    for scene in batch:
+        index = positions[int(scene["scene_number"])]
+        previous = all_scenes[index - 1]["narration"] if index > 0 else ""
+        following = all_scenes[index + 1]["narration"] if index + 1 < len(all_scenes) else ""
+        rows.append({
+            "scene_number": scene["scene_number"],
+            "previous_narration": previous,
+            "current_narration": scene["narration"],
+            "next_narration": following,
+        })
+    return rows
+
+
+def _enrich_scene_batch_once(
+    title,
+    video_style,
+    scenes,
+    topic_context=None,
+    media_script_context=None,
+    all_scenes=None,
+):
     topic_context = topic_context or build_media_topic_context(
         title, video_style
     )
+    media_script_context = media_script_context or {}
+    all_scenes = all_scenes or scenes
+    continuity = _scene_continuity_rows(all_scenes, scenes)
     prompt = (
         f"Video title: {title}\n"
         f"Style: {video_style}\n"
+        "Whole-video media context (use for disambiguation, never to override "
+        "what the current scene actually says):\n"
+        f"{json.dumps(media_script_context, ensure_ascii=False)}\n"
         "Profile-specific media instructions:\n"
         f"{media_profile_instructions(video_style)}\n"
         "Create media metadata for the supplied scenes.\n"
         "Do not rewrite narration.\n"
         "Return JSON with key scenes.\n"
-        "Each scene needs scene_number, search_query, stock_keywords "
-        "and media_type.\n"
+        "Each scene needs scene_number, visual_subject, search_query, "
+        "required_terms, search_variants, stock_keywords, negative_keywords and media_type.\n"
+        "visual_subject is the exact visible real-world subject the viewer should "
+        "see for THIS scene, normally 2-8 words. The current narration has higher "
+        "priority than the whole-video topic.\n"
         "search_query must be one concise search phrase describing the "
         "most visually important real subject in that scene.\n"
         "When a scene involves a named person, place, monument, event, "
@@ -336,10 +470,27 @@ def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
         "of the story instead: a counter, a boardroom, a warehouse, a document, "
         "a machine, a street.\n"
         "- Two to five words is ideal; the video title is context, not the query.\n"
-        "media_type is video by default; use image when a still such as an "
-        "archival photo, artifact, map, diagram, document or portrait shows "
-        "the scene subject better than generic stock video would.\n"
+        "- Resolve ambiguous words before searching. Add the distinguishing noun "
+        "or qualifier needed to force the intended meaning (for example submarine "
+        "fiber optic cable, not just cable; network data traffic, not traffic).\n"
+        "- required_terms: 1-3 discriminating concrete terms or short phrases that "
+        "prove the intended subject. Choose the distinctive mechanism/entity, not "
+        "generic colors/settings. For example hemolysis, antibody, agglutination, "
+        "submarine fiber optic, cable landing station.\n"
+        "- search_variants: give at most 2 alternative VIDEO searches for the SAME visual "
+        "subject. The first variant should be the best practical synonym/component query. "
+        "Never change the subject or word sense.\n"
+        "- negative_keywords: 0-6 short wrong subjects/meanings that a stock "
+        "search could confuse with this scene. Use only real ambiguity risks, not "
+        "a huge rejection list.\n"
+        "media_type MUST be video for normal scenes; use image when the scene "
+        "specifically needs a map, document, portrait, archival photograph, labeled "
+        "diagram, or artifact where moving stock footage would be misleading. Even for "
+        "history, prefer relevant video of the actual ruins, site, museum object, excavation, "
+        "or reconstruction before choosing an archival still.\n"
         "stock_keywords should support the same exact subject and context.\n"
+        "Local continuity context (previous/current/next narration): "
+        f"{json.dumps(continuity, ensure_ascii=False)}\n"
         f"Scenes: {json.dumps(scenes)}"
     )
 
@@ -372,10 +523,20 @@ def _enrich_scene_batch_once(title, video_style, scenes, topic_context=None):
                 validation.final_query,
             )
 
+        visual_subject = " ".join(str(item.get("visual_subject") or validation.final_query).split()).strip()[:180]
+        required_terms = _clean_media_list(item.get("required_terms"), 3, 80)
+        search_variants = _clean_media_list(item.get("search_variants"), 3, 100)
+        stock_keywords = _clean_media_list(item.get("stock_keywords"), 10, 80)
+        negative_keywords = _clean_media_list(item.get("negative_keywords"), 8, 100)
+
         enriched.append({
             **scene,
             "search_query": validation.final_query,
-            "stock_keywords": item.get("stock_keywords", []),
+            "visual_subject": visual_subject,
+            "required_terms": required_terms,
+            "search_variants": search_variants,
+            "stock_keywords": stock_keywords,
+            "negative_keywords": negative_keywords,
             "media_type": item.get("media_type", "stock_video"),
         })
 
@@ -410,15 +571,18 @@ def detect_video_style(title, requested_style):
 
 
 
-def enrich_scene_batch(title, video_style, scenes):
+def enrich_scene_batch(title, video_style, scenes, script=None):
     enriched = []
     topic_context = build_media_topic_context(title, video_style)
+    complete_script = script or " ".join(scene.get("narration", "") for scene in scenes)
+    media_script_context = build_media_script_context(title, video_style, complete_script)
 
     for start in range(0, len(scenes), 6):
         batch = scenes[start:start + 6]
         enriched.extend(
             _enrich_scene_batch_once(
-                title, video_style, batch, topic_context
+                title, video_style, batch, topic_context,
+                media_script_context, scenes,
             )
         )
 
@@ -500,6 +664,7 @@ def generate_video_package_from_script(
         title,
         detected_style,
         scenes,
+        cleaned_script,
     )
 
     scenes = assign_scene_durations(
@@ -553,6 +718,7 @@ def generate_video_package(title, duration_minutes, video_style, progress_callba
         title,
         detected_style,
         scenes,
+        script_result["script"],
     )
 
     scenes = assign_scene_durations(

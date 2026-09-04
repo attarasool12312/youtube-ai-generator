@@ -1,3 +1,4 @@
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
@@ -5,6 +6,124 @@ import shutil
 import subprocess
 from functools import lru_cache
 from pathlib import Path
+
+
+def _stable_fraction(value):
+    digest = hashlib.sha256(str(value).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(2**64 - 1)
+
+
+def _cinematic_motion_enabled():
+    value = os.getenv("VIDEO_IMAGE_MOTION", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _transitions_enabled():
+    value = os.getenv("VIDEO_TRANSITIONS", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _image_motion_filter(width, height, duration, scene_number):
+    """Return a smooth, deterministic Ken Burns style motion filter.
+
+    The source is first enlarged to a 2x working canvas.  The extra sampling
+    resolution avoids the integer-pixel stepping that makes basic zoompan
+    effects look jerky at 1080p.  Motion is intentionally subtle and uses a
+    cosine ease-in/ease-out curve so it never snaps at scene boundaries.
+    """
+    duration = max(0.5, float(duration))
+    total_frames = max(2, int(round(duration * 30.0)))
+    end_frame = max(1, total_frames - 1)
+    work_width = width * 2
+    work_height = height * 2
+
+    # Keep zoom intentionally restrained.  Different scenes get small
+    # variations while staying in a documentary-safe 4.5-6.0% range.
+    fraction = _stable_fraction(f"motion:{scene_number}")
+    zoom_amount = 0.045 + (fraction * 0.015)
+    preset = int(fraction * 6.0) % 6
+    ease = f"(0.5-0.5*cos(PI*min(on\\,{end_frame})/{end_frame}))"
+
+    if preset == 0:  # slow centered push in
+        zoom = f"1+{zoom_amount:.6f}*{ease}"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    elif preset == 1:  # slow pull out
+        zoom = f"1+{zoom_amount:.6f}*(1-{ease})"
+        x = "iw/2-(iw/zoom/2)"
+        y = "ih/2-(ih/zoom/2)"
+    elif preset == 2:  # left to right drift
+        zoom = f"1+{zoom_amount:.6f}*(0.55+0.45*{ease})"
+        x = f"(iw-iw/zoom)*(0.18+0.64*{ease})"
+        y = "ih/2-(ih/zoom/2)"
+    elif preset == 3:  # right to left drift
+        zoom = f"1+{zoom_amount:.6f}*(0.55+0.45*{ease})"
+        x = f"(iw-iw/zoom)*(0.82-0.64*{ease})"
+        y = "ih/2-(ih/zoom/2)"
+    elif preset == 4:  # gentle rising diagonal
+        zoom = f"1+{zoom_amount:.6f}*(0.60+0.40*{ease})"
+        x = f"(iw-iw/zoom)*(0.24+0.52*{ease})"
+        y = f"(ih-ih/zoom)*(0.72-0.44*{ease})"
+    else:  # gentle falling diagonal
+        zoom = f"1+{zoom_amount:.6f}*(0.60+0.40*{ease})"
+        x = f"(iw-iw/zoom)*(0.76-0.52*{ease})"
+        y = f"(ih-ih/zoom)*(0.28+0.44*{ease})"
+
+    return (
+        f"scale={work_width}:{work_height}:"
+        "force_original_aspect_ratio=increase:"
+        "flags=lanczos,"
+        f"crop={work_width}:{work_height},"
+        "zoompan="
+        f"z='{zoom}':x='{x}':y='{y}':"
+        "d=1:"
+        f"s={width}x{height}:fps=30,"
+        "format=yuv420p"
+    )
+
+
+def _transition_spec(scene, next_scene):
+    """Choose a restrained Filmora-style transition deterministically.
+
+    Most boundaries use a cross-dissolve.  Stronger directional transitions
+    are deliberately uncommon so the edit does not feel like a template pack.
+    """
+    if not _transitions_enabled():
+        return None
+
+    current_duration = max(0.5, float(scene.get("duration_seconds") or 0.5))
+    next_duration = max(0.5, float(next_scene.get("duration_seconds") or 0.5))
+    duration = min(0.38, current_duration * 0.12, next_duration * 0.12)
+    duration = max(0.12, duration)
+
+    seed = (
+        f"{scene.get('scene_number')}|{next_scene.get('scene_number')}|"
+        f"{scene.get('media_file', '')}|{next_scene.get('media_file', '')}"
+    )
+    fraction = _stable_fraction(f"transition:{seed}")
+
+    # 70% cross-dissolve, 20% smooth slides, 10% restrained wipes.
+    if fraction < 0.70:
+        name = "fade"
+    elif fraction < 0.80:
+        name = "smoothleft"
+    elif fraction < 0.90:
+        name = "smoothright"
+    elif fraction < 0.95:
+        name = "wipeleft"
+    else:
+        name = "wiperight"
+
+    return {"name": name, "duration": duration}
+
+
+def _build_transition_plan(scenes):
+    plan = {}
+    for index, scene in enumerate(scenes[:-1]):
+        spec = _transition_spec(scene, scenes[index + 1])
+        if spec:
+            plan[int(scene["scene_number"])] = spec
+    return plan
 
 
 def _run(command, timeout=None):
@@ -480,6 +599,151 @@ def _render_final_video(
     return "libx264"
 
 
+def _build_transition_filter_graph(scenes, transition_plan, captions_ass=None):
+    """Build a timing-preserving xfade graph for pre-rendered scene clips.
+
+    Each source clip keeps its original narration-aligned duration.  FFmpeg
+    clones only the outgoing final frame for the short transition overlap, so
+    the xfade does not shorten the finished timeline or move caption timing.
+    """
+    if len(scenes) < 2 or not transition_plan:
+        return None, None
+
+    parts = []
+    labels = {}
+
+    for index, scene in enumerate(scenes):
+        number = int(scene["scene_number"])
+        spec = transition_plan.get(number)
+        if spec and index < len(scenes) - 1:
+            label = f"pad{index}"
+            parts.append(
+                f"[{index}:v]tpad=stop_mode=clone:"
+                f"stop_duration={float(spec['duration']):.3f}[{label}]"
+            )
+            labels[index] = f"[{label}]"
+        else:
+            labels[index] = f"[{index}:v]"
+
+    current_label = labels[0]
+    cumulative_duration = 0.0
+
+    for index in range(1, len(scenes)):
+        previous = scenes[index - 1]
+        previous_number = int(previous["scene_number"])
+        spec = transition_plan.get(previous_number)
+        if not spec:
+            return None, None
+
+        cumulative_duration += max(
+            0.5,
+            float(previous.get("duration_seconds") or 0.5),
+        )
+        output_label = f"xf{index}"
+        parts.append(
+            f"{current_label}{labels[index]}"
+            "xfade="
+            f"transition={spec['name']}:"
+            f"duration={float(spec['duration']):.3f}:"
+            f"offset={cumulative_duration:.3f}"
+            f"[{output_label}]"
+        )
+        current_label = f"[{output_label}]"
+
+    if captions_ass:
+        parts.append(
+            f"{current_label}{_subtitle_filter(captions_ass)}[vout]"
+        )
+        current_label = "[vout]"
+
+    return ";\n".join(parts), current_label
+
+
+def _render_transition_video(
+    scenes,
+    clip_map,
+    narration,
+    output_path,
+    transition_plan,
+    captions_ass,
+    width,
+    height,
+):
+    graph, video_label = _build_transition_filter_graph(
+        scenes,
+        transition_plan,
+        captions_ass=captions_ass,
+    )
+    if not graph or not video_label:
+        return False
+
+    output_path = Path(output_path)
+    filter_file = output_path.parent / ".transition-filter.txt"
+    filter_file.write_text(graph, encoding="utf-8")
+
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+    ]
+    for scene in scenes:
+        number = int(scene["scene_number"])
+        command += ["-i", clip_map[number]]
+
+    audio_index = len(scenes)
+    command += [
+        "-i",
+        str(narration),
+        "-filter_complex_script",
+        str(filter_file),
+        "-map",
+        video_label,
+        "-map",
+        f"{audio_index}:a:0",
+    ]
+
+    common_tail = [
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+
+    output_path.unlink(missing_ok=True)
+
+    try:
+        if _nvenc_available():
+            try:
+                _run(command + _nvenc_encoder_arguments() + common_tail)
+                _validate_video(output_path, width, height)
+                return "h264_nvenc+xfade"
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                RuntimeError,
+                OSError,
+            ) as error:
+                print(
+                    "NVENC transition render failed; retrying with CPU. "
+                    f"{_error_tail(error)}",
+                    flush=True,
+                )
+                output_path.unlink(missing_ok=True)
+
+        _run(command + _cpu_encoder_arguments() + common_tail)
+        _validate_video(output_path, width, height)
+        return "libx264+xfade"
+    finally:
+        filter_file.unlink(missing_ok=True)
+
+
 def render_video(
     scenes,
     narration,
@@ -518,6 +782,7 @@ def render_video(
     clips.mkdir(parents=True)
 
     timeline = []
+    transition_plan = _build_transition_plan(scenes)
     video_types = {
         ".mp4",
         ".mov",
@@ -528,9 +793,12 @@ def render_video(
     try:
         def _render_one_clip(scene):
             number = int(scene["scene_number"])
-            media = Path(
-                scene["media_file"]
-            ).resolve()
+            raw_media = str(scene.get("media_file") or "").strip()
+            if not raw_media:
+                raise RuntimeError(f"Scene {number} has no media_file")
+            media = Path(raw_media).resolve()
+            if not media.is_file():
+                raise RuntimeError(f"Scene {number} media file is missing or invalid: {media}")
 
             clip = clips / (
                 f"scene-{number:03d}.mp4"
@@ -541,42 +809,40 @@ def render_video(
                 float(scene["duration_seconds"]),
             )
 
+            is_video = media.suffix.lower() in video_types
+
             base_vf = (
                 f"scale={width}:{height}:"
                 "force_original_aspect_ratio="
                 "increase,"
-                f"crop={width}:{height}"
-            )
-
-            fade_duration = min(
-                0.18,
-                duration / 4,
-            )
-
-            fade_out_start = max(
-                0.0,
-                duration - fade_duration,
-            )
-
-            fade_vf = (
-                f"fade=t=in:st=0:"
-                f"d={fade_duration:.3f},"
-                f"fade=t=out:"
-                f"st={fade_out_start:.3f}:"
-                f"d={fade_duration:.3f}"
-            )
-
-            vf = (
-                f"{base_vf},"
+                f"crop={width}:{height},"
                 "fps=30,"
-                f"{fade_vf},"
                 "format=yuv420p"
             )
 
-            if (
-                media.suffix.lower()
-                in video_types
-            ):
+            if not is_video and _cinematic_motion_enabled():
+                vf = _image_motion_filter(
+                    width,
+                    height,
+                    duration,
+                    number,
+                )
+            else:
+                vf = base_vf
+
+            # When transitions are disabled retain a very short safety fade.
+            # With xfade enabled, per-clip fades would create visible dark
+            # flashes, so the scene clips stay clean edge-to-edge.
+            if not transition_plan:
+                fade_duration = min(0.12, duration / 5)
+                fade_out_start = max(0.0, duration - fade_duration)
+                vf += (
+                    f",fade=t=in:st=0:d={fade_duration:.3f},"
+                    f"fade=t=out:st={fade_out_start:.3f}:"
+                    f"d={fade_duration:.3f}"
+                )
+
+            if is_video:
                 command = [
                     "ffmpeg",
                     "-hide_banner",
@@ -604,6 +870,8 @@ def render_video(
                     "-y",
                     "-loop",
                     "1",
+                    "-framerate",
+                    "30",
                     "-i",
                     str(media),
                     "-t",
@@ -664,65 +932,91 @@ def render_video(
                 number, clip_path = future.result()
                 clip_map[number] = clip_path
 
-        for scene in scenes:
-            number = int(scene["scene_number"])
-            timeline.append(
-                f"file '{clip_map[number]}'"
-            )
-
-        if not timeline:
+        if not clip_map:
             raise RuntimeError(
                 "No renderable scenes were provided."
             )
 
-        timeline_file.write_text(
-            "\n".join(timeline),
-            encoding="utf-8",
-        )
+        encoder_used = None
+        if transition_plan and len(scenes) > 1:
+            try:
+                encoder_used = _render_transition_video(
+                    scenes=scenes,
+                    clip_map=clip_map,
+                    narration=narration,
+                    output_path=temporary_output,
+                    transition_plan=transition_plan,
+                    captions_ass=captions_ass,
+                    width=width,
+                    height=height,
+                )
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                RuntimeError,
+                OSError,
+            ) as error:
+                print(
+                    "Transition render failed; falling back to clean cuts. "
+                    f"{_error_tail(error)}",
+                    flush=True,
+                )
+                temporary_output.unlink(missing_ok=True)
+                encoder_used = None
 
-        final_base_command = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(timeline_file),
-            "-i",
-            str(narration),
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-        ]
+        if not encoder_used:
+            for scene in scenes:
+                number = int(scene["scene_number"])
+                timeline.append(
+                    f"file '{clip_map[number]}'"
+                )
 
-        common_tail = [
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-shortest",
-            "-movflags",
-            "+faststart",
-        ]
+            timeline_file.write_text(
+                "\n".join(timeline),
+                encoding="utf-8",
+            )
 
-        encoder_used = _render_final_video(
-            base_command=final_base_command,
-            common_tail=common_tail,
-            temporary_output=temporary_output,
-            subtitle_path=captions_ass,
-            width=width,
-            height=height,
-        )
+            final_base_command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(timeline_file),
+                "-i",
+                str(narration),
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+            ]
 
-        temporary_output.replace(
-            output_path
-        )
+            common_tail = [
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-shortest",
+                "-movflags",
+                "+faststart",
+            ]
+
+            encoder_used = _render_final_video(
+                base_command=final_base_command,
+                common_tail=common_tail,
+                temporary_output=temporary_output,
+                subtitle_path=captions_ass,
+                width=width,
+                height=height,
+            )
+
+        temporary_output.replace(output_path)
 
         print(
             f"Video render completed using "

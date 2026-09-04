@@ -78,7 +78,7 @@ def _candidate(item, search_query, topic_context, current_sources, history_sourc
         topic_context, search_query, title=title, description=description,
         tags=item.get("tags") or (),
     )
-    if not relevance.accepted:
+    if not relevance.accepted or relevance.confidence == "bad":
         return None, "relevance"
     entity_match = relevance.entity_match
     score = relevance.score
@@ -95,6 +95,9 @@ def _candidate(item, search_query, topic_context, current_sources, history_sourc
         "image_url": image_url,
         "search_query_used": search_query,
         "relevance_score": score,
+        "relevance_reason": relevance.reason,
+        "relevance_confidence": relevance.confidence,
+        "relevance_penalties": list(relevance.penalties),
         "title_match_count": title_entity_matches + context_title,
         "entity_match": entity_match,
         "context_match_count": context_title + context_support,
@@ -194,6 +197,12 @@ def download_historical_image(query, output_path, orientation=None, used_sources
                 "title": candidate["title"], "author": candidate["author"],
                 "license": candidate["license"], "license_url": candidate["license_url"],
                 "matched_query": candidate["search_query_used"],
+                "relevance_score": candidate["relevance_score"],
+                "relevance_reason": candidate["relevance_reason"],
+                "relevance_entity_match": candidate["entity_match"],
+                "relevance_context_matches": candidate["context_match_count"],
+                "relevance_confidence": candidate["relevance_confidence"],
+                "relevance_penalties": candidate["relevance_penalties"],
                 "openverse_query": candidate["search_query_used"],
                 "openverse_relevance_score": candidate["relevance_score"],
                 "openverse_entity_match": candidate["entity_match"],

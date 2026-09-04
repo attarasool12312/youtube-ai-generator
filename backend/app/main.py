@@ -105,6 +105,8 @@ from app.voice_registry import (
     validate_voice_speed, validated_voice_pool, voice_template_context,
 )
 
+from app.zimage_debug_routes import router as zimage_debug_router
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -115,6 +117,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app.include_router(zimage_debug_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,

@@ -155,6 +155,19 @@ class SynthesisTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 service.generate_narration("Useful text.", "am_michael", 1.0, target, pipeline_override=FakePipeline(empty=True))
 
+
+    def test_unload_pipelines_clears_cached_instances(self):
+        sentinel = object()
+        original = dict(service._pipelines)
+        try:
+            service._pipelines.clear()
+            service._pipelines["a"] = sentinel
+            service.unload_pipelines()
+            self.assertEqual(service._pipelines, {})
+        finally:
+            service._pipelines.clear()
+            service._pipelines.update(original)
+
     def test_british_voice_selects_british_pipeline(self):
         self.assertEqual(get_narrator_voice("bf_emma").pipeline_language, "b")
         self.assertEqual(get_narrator_voice("af_heart").pipeline_language, "a")

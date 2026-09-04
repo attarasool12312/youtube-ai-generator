@@ -1,33 +1,42 @@
 import logging
 from pathlib import Path
+import time
 import httpx
 
 from app.media_relevance import MediaTopicContext
 from app.openverse_media import download_historical_image
 from app.stock_providers import (
     pexels_video, pixabay_video, coverr_video,
-    pexels_image, pixabay_image, openverse_image,
-    provider_query_candidates,
+    pexels_image, pixabay_image, provider_query_candidates,
 )
 from app.wikimedia_media import download_image
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Final stock policy: motion footage first.  Openverse/Wikimedia are NOT normal
+# providers; they are reserved for scenes that explicitly request an archival
+# still/map/document/diagram in a historical profile.
 VIDEO_PROVIDERS = (pexels_video, pixabay_video, coverr_video)
-IMAGE_PROVIDERS = (pexels_image, pixabay_image, openverse_image)
+IMAGE_PROVIDERS = (pexels_image, pixabay_image)
 LICENSED_HISTORICAL_PROVIDERS = (
     ("wikimedia", download_image),
     ("historical_openverse", download_historical_image),
 )
 
+VIDEO_ACCEPT_SCORE = 80
+IMAGE_ACCEPT_SCORE = 80
+SCENE_STOCK_BUDGET_SECONDS = 8.0
+MAX_EXTRA_CANDIDATES = 3
+CONFIDENCE_ORDER = {"bad": 0, "weak": 1, "acceptable": 2, "strong": 3}
+
 
 def normalize_media_source(value):
-    # AI scene media is preserved for later but currently disabled.
+    # Z-Image will be wired behind needs_ai_fallback in the next module.
     return "stock_only"
 
 
 def provider_order(cycle, scene_number=None):
-    """Compatibility helper: routing is fixed and no longer rotates by scene."""
     return list(dict.fromkeys(cycle))
 
 
@@ -35,101 +44,70 @@ def _provider_name(provider):
     return provider.__name__.removesuffix("_image").removesuffix("_video")
 
 
-# A result at or above this score (or any subject match at the lower bar) ends
-# the search immediately; anything weaker is kept only as best-so-far while the
-# remaining variants and providers get a chance to beat it.
-GOOD_SCORE = 30
-GOOD_ENTITY_SCORE = 24
-# How many additional downloaded candidates a weak scene may collect before we
-# settle for the best seen. Bounds quota and download cost per scene.
-MAX_EXTRA_CANDIDATES = 3
-
-
 def _result_score(result):
-    score = result.get("relevance_score")
+    score = (result or {}).get("relevance_score")
     return score if isinstance(score, (int, float)) else 0
 
 
-def _is_good_result(result):
+def _result_confidence(result):
+    value = str((result or {}).get("relevance_confidence") or "").lower()
+    if value in CONFIDENCE_ORDER:
+        return value
     score = _result_score(result)
-    if score >= GOOD_SCORE:
-        return True
-    return bool(result.get("relevance_entity_match")) and score >= GOOD_ENTITY_SCORE
+    if score >= VIDEO_ACCEPT_SCORE:
+        return "strong"
+    if score >= 55:
+        return "acceptable"
+    if score >= 25:
+        return "weak"
+    return "bad"
 
 
-def try_providers(providers, query, folder, number, extension, orientation,
-                  used_sources, topic_context=None):
-    """Search providers/variants until a good result appears; otherwise best-of.
+def _meets_threshold(result, minimum_score=VIDEO_ACCEPT_SCORE):
+    return bool(
+        result
+        and _result_confidence(result) == "strong"
+        and _result_score(result) >= minimum_score
+        and not (result.get("relevance_penalties") or [])
+    )
 
-    A weak first hit no longer wins by default: the search continues (bounded)
-    and the highest-scoring candidate is kept. Candidates download to temp
-    names; only the winner is moved onto the scene path.
-    """
-    final_path = folder / f"scene-{number:03d}.{extension}"
-    best = None
-    best_path = None
-    extra = 0
-    for index, provider in enumerate(providers):
-        queries = [query] if provider in {pixabay_video, pixabay_image} else provider_query_candidates(query, topic_context)
-        provider_name = provider.__name__
-        provider_rate_limited = False
-        for provider_query in queries:
-            path = folder / f"scene-{number:03d}-cand{extra}.{extension}" if best else final_path
-            try:
-                result = provider(
-                    provider_query, path, orientation, used_sources=used_sources,
-                    offset=index, topic_context=topic_context,
-                )
-            except Exception as error:
-                if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
-                    retry_after = error.response.headers.get("Retry-After")
-                    logger.info(
-                        "MEDIA scene=%d provider=%s result=rate_limited status=429 retry_after=%s",
-                        number, _provider_name(provider), retry_after or "not_exposed",
-                    )
-                    provider_rate_limited = True
-                    break
-                logger.debug(
-                    "MEDIA candidate scene=%d provider=%s query=%r rejected=%s",
-                    number, provider_name, provider_query, error,
-                )
-                continue
-            if not result:
-                continue
-            result["media_file"] = str(path)
-            result.setdefault("matched_query", provider_query)
-            if _is_good_result(result):
-                if best_path is not None and path != final_path:
-                    Path(path).replace(final_path)
-                    result["media_file"] = str(final_path)
-                _discard_candidate_files(best_path, final_path)
-                logger.info(
-                    "MEDIA scene=%d provider=%s query=%r result=selected score=%s source=%s",
-                    number, provider_name, provider_query,
-                    result.get("relevance_score", "provider"), result.get("source", ""),
-                )
-                return result
-            if best is None or _result_score(result) > _result_score(best):
-                if best_path is not None:
-                    _discard_candidate_files(best_path, final_path)
-                best, best_path = result, Path(path)
-            else:
-                _discard_candidate_files(Path(path), final_path)
-            extra += 1
-            logger.info(
-                "MEDIA scene=%d provider=%s query=%r result=weak score=%s continuing=%s",
-                number, provider_name, provider_query,
-                result.get("relevance_score"), extra <= MAX_EXTRA_CANDIDATES,
-            )
-            if extra > MAX_EXTRA_CANDIDATES:
-                return _finish_best(best, best_path, final_path, number)
-        if provider_rate_limited:
-            continue
-        logger.info(
-            "MEDIA scene=%d provider=%s query=%r result=exhausted",
-            number, provider_name, query,
-        )
-    return _finish_best(best, best_path, final_path, number)
+
+def _is_good_result(result):
+    return _meets_threshold(result, VIDEO_ACCEPT_SCORE)
+
+
+def _better_result(first, second):
+    if not first:
+        return second
+    if not second:
+        return first
+    first_key = (CONFIDENCE_ORDER[_result_confidence(first)], _result_score(first))
+    second_key = (CONFIDENCE_ORDER[_result_confidence(second)], _result_score(second))
+    return second if second_key > first_key else first
+
+
+def _discard_result_media(result):
+    if not result:
+        return
+    try:
+        Path(result.get("media_file") or "").unlink(missing_ok=True)
+    except (OSError, TypeError):
+        pass
+
+
+def _adopt_result_media(result, folder, number):
+    if not result:
+        return result
+    source_path = Path(result.get("media_file") or "")
+    if not source_path.is_file():
+        return result
+    suffix = source_path.suffix or ".jpg"
+    final_path = Path(folder) / f"scene-{number:03d}{suffix}"
+    if source_path != final_path:
+        final_path.unlink(missing_ok=True)
+        source_path.replace(final_path)
+        result["media_file"] = str(final_path)
+    return result
 
 
 def _discard_candidate_files(path, final_path):
@@ -146,16 +124,129 @@ def _finish_best(best, best_path, final_path, number):
         return None
     if best_path is not None and best_path != final_path:
         try:
+            final_path.unlink(missing_ok=True)
             best_path.replace(final_path)
         except OSError as error:
             logger.debug("MEDIA scene=%d best-of move failed: %s", number, error)
             return None
         best["media_file"] = str(final_path)
     logger.info(
-        "MEDIA scene=%d result=best_of score=%s source=%s",
-        number, best.get("relevance_score"), best.get("source", ""),
+        "MEDIA scene=%d result=best_of score=%s confidence=%s source=%s",
+        number, best.get("relevance_score"), _result_confidence(best), best.get("source", ""),
     )
     return best
+
+
+def try_providers(providers, query, folder, number, extension, orientation,
+                  used_sources, topic_context=None, deadline=None):
+    """Search one exact query across providers, video-first and bounded.
+
+    The scene-AI query is already the semantic search plan.  Provider-specific
+    broadening here previously multiplied API calls and changed word sense.  We
+    now search the exact query once per provider, rank each provider internally,
+    and stop only on a genuinely strong >=80 result.
+    """
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    final_path = folder / f"scene-{number:03d}.{extension}"
+    deadline = deadline or (time.monotonic() + SCENE_STOCK_BUDGET_SECONDS)
+    best = None
+    best_path = None
+    candidate_index = 0
+
+    for index, provider in enumerate(providers):
+        if time.monotonic() >= deadline:
+            logger.info("MEDIA scene=%d result=search_budget_exhausted query=%r", number, query)
+            break
+        path = final_path if best is None else folder / f"scene-{number:03d}-cand{candidate_index}.{extension}"
+        try:
+            result = provider(
+                query, path, orientation, used_sources=used_sources,
+                offset=index, topic_context=topic_context,
+            )
+        except Exception as error:
+            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code == 429:
+                logger.info(
+                    "MEDIA scene=%d provider=%s result=rate_limited status=429",
+                    number, _provider_name(provider),
+                )
+            else:
+                logger.debug(
+                    "MEDIA candidate scene=%d provider=%s query=%r rejected=%s",
+                    number, _provider_name(provider), query, error,
+                )
+            continue
+        if not result:
+            continue
+
+        result["media_file"] = str(path)
+        result.setdefault("matched_query", query)
+        candidate_index += 1
+
+        if _meets_threshold(result, VIDEO_ACCEPT_SCORE):
+            if path != final_path:
+                final_path.unlink(missing_ok=True)
+                Path(path).replace(final_path)
+                result["media_file"] = str(final_path)
+            _discard_candidate_files(best_path, final_path)
+            logger.info(
+                "MEDIA scene=%d provider=%s query=%r result=accepted score=%s source=%s",
+                number, _provider_name(provider), query,
+                result.get("relevance_score"), result.get("source", ""),
+            )
+            return result
+
+        if best is None or _better_result(best, result) is result:
+            if best_path is not None:
+                _discard_candidate_files(best_path, final_path)
+            best, best_path = result, Path(path)
+        else:
+            _discard_candidate_files(Path(path), final_path)
+
+        logger.info(
+            "MEDIA scene=%d provider=%s query=%r result=below_threshold score=%s confidence=%s",
+            number, _provider_name(provider), query,
+            result.get("relevance_score"), _result_confidence(result),
+        )
+
+    return _finish_best(best, best_path, final_path, number)
+
+
+def _first_search_variant(query, topic_context):
+    if topic_context is None:
+        return ""
+    normalized_query = " ".join(str(query or "").lower().split())
+    for value in getattr(topic_context, "scene_search_variants", ()) or ():
+        value = " ".join(str(value or "").split()).strip()
+        if value and value.lower() != normalized_query:
+            return value
+    return ""
+
+
+def _search_exact_then_one_variant(providers, query, folder, number, extension,
+                                   orientation, excluded, topic_context, deadline):
+    first = try_providers(
+        providers, query, folder, number, extension, orientation, excluded,
+        topic_context, deadline=deadline,
+    )
+    if _meets_threshold(first, VIDEO_ACCEPT_SCORE):
+        return first
+
+    variant = _first_search_variant(query, topic_context)
+    if not variant or time.monotonic() >= deadline:
+        return first
+
+    alt_folder = Path(folder) / f"alt-{extension}"
+    second = try_providers(
+        providers, variant, alt_folder, number, extension, orientation, excluded,
+        topic_context, deadline=deadline,
+    )
+    winner = _better_result(first, second)
+    loser = second if winner is first else first
+    _discard_result_media(loser)
+    if winner is second:
+        winner = _adopt_result_media(winner, folder, number)
+    return winner
 
 
 def _try_licensed_historical_sources(query, folder, number, orientation,
@@ -163,86 +254,69 @@ def _try_licensed_historical_sources(query, folder, number, orientation,
     for provider_name, provider in LICENSED_HISTORICAL_PROVIDERS:
         try:
             result = provider(
-                query, folder / f"scene-{number:03d}.jpg", orientation,
+                query, Path(folder) / f"scene-{number:03d}.jpg", orientation,
                 used_sources=used_sources, offset=number - 1,
                 topic_context=topic_context, history_sources=history_sources,
             )
         except Exception as error:
             logger.debug("MEDIA historical candidate scene=%d provider=%s rejected=%s", number, provider_name, error)
-            logger.info("MEDIA scene=%d provider=%s query=%r result=exhausted", number, provider_name, query)
             continue
         if result:
             result.setdefault("matched_query", query)
-            logger.info(
-                "MEDIA scene=%d provider=%s query=%r result=selected score=%s source=%s",
-                number, provider_name, query, result.get("relevance_score", "provider"), result.get("source", ""),
-            )
             return result
     return None
 
 
 def _stock_pass(query, folder, number, requested, orientation, excluded, topic_context):
-    if requested in {"video", "stock_video"}:
-        result = try_providers(
-            VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded, topic_context,
-        )
-        if result:
-            return result
-    return try_providers(
-        IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded, topic_context,
+    """Always search video first. Images are an explicit-still fallback only."""
+    deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
+
+    video_result = _search_exact_then_one_variant(
+        VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
+        topic_context, deadline,
     )
+    if video_result and _result_confidence(video_result) in {"acceptable", "strong"} and not (video_result.get("relevance_penalties") or []):
+        video_result["needs_ai_fallback"] = False
+        video_result["stock_decision"] = "video_accepted"
+        return video_result
+
+    # Normal scenes remain video-first even if the AI mistakenly requested an
+    # image.  Only explicit still-type scenes may use Pexels/Pixabay photos.
+    explicit_still = requested in {"image", "stock_image"}
+    image_result = None
+    if explicit_still and time.monotonic() < deadline:
+        image_result = _search_exact_then_one_variant(
+            IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded,
+            topic_context, deadline,
+        )
+        if image_result and _result_confidence(image_result) in {"acceptable", "strong"} and not (image_result.get("relevance_penalties") or []):
+            _discard_result_media(video_result)
+            image_result["needs_ai_fallback"] = False
+            image_result["stock_decision"] = "explicit_still_accepted"
+            return image_result
+
+    # Until Z-Image is wired, retain the best available stock file so a job never
+    # fails.  The manifest marks it for AI replacement; the next module will
+    # replace these scenes instead of rendering weak stock.
+    winner = _better_result(video_result, image_result)
+    loser = image_result if winner is video_result else video_result
+    _discard_result_media(loser)
+    if winner:
+        winner["needs_ai_fallback"] = True
+        winner["stock_decision"] = "ai_fallback_pending"
+    return winner
 
 
 def _is_weak_result(result):
-    if result.get("relevance_entity_match") is True:
-        return False
-    score = result.get("relevance_score")
-    return not isinstance(score, (int, float)) or score < 18
+    return not _meets_threshold(result, VIDEO_ACCEPT_SCORE)
 
 
 def _stock_with_history_preference(query, folder, number, requested, orientation,
                                    used_sources, provider_used_sources, history_sources,
                                    topic_context):
-    """Fresh media is preferred, but a weak fresh pick loses to a strong older one.
-
-    History is an exclusion on the first pass. Only when that pass yields a
-    non-subject result do we search again with history allowed (same-job
-    duplicates still excluded), keeping whichever candidate scores higher.
-    """
-    result = _stock_pass(query, folder, number, requested, orientation, provider_used_sources, topic_context)
-    if not result or not history_sources or not _is_weak_result(result):
-        return result
-    alt_folder = folder / "history-alt"
-    alt_folder.mkdir(parents=True, exist_ok=True)
-    try:
-        alternative = _stock_pass(
-            query, alt_folder, number, requested, orientation, set(used_sources), topic_context,
-        )
-    except Exception as error:  # never let the retry break the normal path
-        logger.debug("MEDIA scene=%d history-preference retry failed: %s", number, error)
-        alternative = None
-    alt_score = (alternative or {}).get("relevance_score")
-    if alternative and isinstance(alt_score, (int, float)) and alt_score > (result.get("relevance_score") or 0):
-        alt_path = Path(alternative["media_file"])
-        final_path = folder / alt_path.name
-        try:
-            alt_path.replace(final_path)
-        except OSError as error:
-            logger.debug("MEDIA scene=%d history-preference move failed: %s", number, error)
-            return result
-        alternative["media_file"] = str(final_path)
-        alternative["history_reuse"] = True
-        logger.info(
-            "MEDIA scene=%d history-preference=reused_older score=%s over fresh score=%s",
-            number, alt_score, result.get("relevance_score"),
-        )
-        return alternative
-    if alternative:
-        try:
-            Path(alternative["media_file"]).unlink(missing_ok=True)
-        except OSError:
-            pass
-    return result
+    return _stock_pass(
+        query, folder, number, requested, orientation, set(used_sources), topic_context,
+    )
 
 
 def select_media(query, folder, number, requested, orientation, used_sources=None,
@@ -252,47 +326,34 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
     folder.mkdir(parents=True, exist_ok=True)
     used_sources = set(used_sources or ())
     provider_used_sources = used_sources | set(history_sources or ())
-    if prefer_wikimedia:
-        result = _try_licensed_historical_sources(
-            query, folder, number, orientation, provider_used_sources,
-            history_sources, topic_context,
-        )
-        if result:
-            return result
 
     result = _stock_with_history_preference(
         query, folder, number, requested, orientation,
         used_sources, provider_used_sources, history_sources, topic_context,
     )
-    if result and not _is_weak_result(result):
+    if result and _meets_threshold(result, VIDEO_ACCEPT_SCORE) and not result.get("needs_ai_fallback"):
         return result
-    if not prefer_wikimedia:
-        # Commons often has the branded/entity subjects stock libraries lack
-        # (storefronts, products, race teams). Last resort for weak scenes only.
-        try:
-            licensed = _try_licensed_historical_sources(
-                query, folder, number, orientation, provider_used_sources,
-                history_sources, topic_context,
-            )
-        except Exception as error:
-            logger.debug("MEDIA scene=%d licensed fallback failed: %s", number, error)
-            licensed = None
-        if licensed and _result_score(licensed) > (_result_score(result) if result else 0):
-            logger.info(
-                "MEDIA scene=%d result=licensed_fallback score=%s source=%s",
-                number, licensed.get("relevance_score"), licensed.get("source", ""),
-            )
+
+    # Wikimedia/Openverse are no longer a generic fallback.  They may compete
+    # only for an explicitly requested historical still, which prevents modern
+    # explainer videos from turning into old-image slideshows.
+    if prefer_wikimedia and requested in {"image", "stock_image"} and topic_context is not None:
+        licensed_folder = folder / "licensed-historical"
+        licensed_folder.mkdir(parents=True, exist_ok=True)
+        licensed = _try_licensed_historical_sources(
+            query, licensed_folder, number, orientation, provider_used_sources,
+            history_sources, topic_context,
+        )
+        if _meets_threshold(licensed, IMAGE_ACCEPT_SCORE):
+            _discard_result_media(result)
+            licensed = _adopt_result_media(licensed, folder, number)
+            licensed["needs_ai_fallback"] = False
+            licensed["stock_decision"] = "historical_still_accepted"
             return licensed
+        _discard_result_media(licensed)
+
     if result:
         return result
 
-    if not prefer_wikimedia:
-        result = _try_licensed_historical_sources(
-            query, folder, number, orientation, provider_used_sources,
-            history_sources, topic_context,
-        )
-        if result:
-            return result
-
     logger.info("MEDIA scene=%d result=stock_exhausted query=%r", number, query)
-    raise RuntimeError(f"Scene {number} stock exhausted after normal providers and emergency topic/reuse fallback.")
+    raise RuntimeError(f"Scene {number} stock exhausted after bounded video-first search.")

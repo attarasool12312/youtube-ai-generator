@@ -30,7 +30,7 @@ def decode_json(text):
 
 def call_scene_json(prompt):
     strict_prompt = prompt + """
-Return only JSON: {"scenes":[{"scene_number":1,"search_query":"specific visual subject","stock_keywords":["keyword"],"media_type":"video"}]}. Include every scene number. No Markdown.
+Return only JSON: {"scenes":[{"scene_number":1,"visual_subject":"exact visible subject","search_query":"specific visual subject","required_terms":["distinctive subject proof"],"search_variants":["same subject alternate search"],"stock_keywords":["keyword"],"negative_keywords":["wrong meaning to avoid"],"media_type":"video"}]}. Include every scene number. No Markdown.
 """
 
     providers = [

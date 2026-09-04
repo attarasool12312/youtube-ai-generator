@@ -10,9 +10,10 @@ from app.api_settings import get_api_key
 from app.openverse_client import openverse_headers
 from app.media_relevance import build_media_query_candidates, concrete_subject_words, practical_head_query, score_media_candidate
 
-CLIENT = httpx.Client(timeout=60, follow_redirects=True)
+SEARCH_CLIENT = httpx.Client(timeout=httpx.Timeout(5.0, connect=3.0), follow_redirects=True)
+DOWNLOAD_CLIENT = httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True)
 logger = logging.getLogger(__name__)
-MAX_SCORED_CANDIDATES = 30
+MAX_SCORED_CANDIDATES = 10
 
 
 def orientation_ok(width, height, orientation):
@@ -97,45 +98,47 @@ def provider_query_candidates(query, topic_context=None):
     if topic_context is not None:
         return build_media_query_candidates(
             query, topic_context,
-            limit=4,
+            limit=2,
         )
     return [query]
 
 
 def pixabay_query_candidates(query, topic_context=None):
-    """Exact scene query first, then a practical head noun, then topic broadening.
+    """Tightly bound Pixabay broadening because its tag matching is loose."""
+    candidates = build_media_query_candidates(query, topic_context, limit=2)
+    if len(candidates) < 2:
+        head = practical_head_query(query, topic_context)
+        if head:
+            candidates.append(head)
+    result = []
+    for candidate in candidates:
+        candidate = " ".join(str(candidate or "").split()).strip()
+        if not candidate or len(candidate) > 60 or len(candidate.split()) > 5:
+            continue
+        if candidate not in result:
+            result.append(candidate)
+        if len(result) >= 2:
+            break
+    return result
 
-    Pixabay matches tags loosely, so the most specific query goes first and the
-    broad topic query is a last resort rather than the default.
-    """
-    normalized = normalized_query(query)
-    words = normalized.split()
-    concrete = concrete_subject_words(query)
-    head = practical_head_query(query, topic_context)
 
-    candidates = [
-        " ".join(words[:4]),
-        " ".join(concrete[:2]) if len(concrete) >= 2 else " ".join(words[:2]),
-        head,
-    ]
-    if topic_context is not None:
-        topic_concrete = concrete_subject_words(topic_context.primary_topic)
-        topic_words = topic_concrete or normalized_query(topic_context.primary_topic).split()
-        candidates.append(" ".join(topic_words[:2]))
-
-    return [
-        candidate
-        for index, candidate in enumerate(candidates)
-        if candidate and len(candidate) <= 60 and len(candidate.split()) <= 4
-        and candidate not in candidates[:index]
-    ]
+def _pixabay_descriptive_title(item):
+    page_url = str(item.get("pageURL") or "")
+    match = re.search(r"/(?:photos|illustrations|vectors|videos)/([^/?#]+)/?$", page_url)
+    if not match:
+        return ""
+    slug = re.sub(r"-\d+$", "", match.group(1)).strip("-")
+    if not slug or slug.startswith("id-"):
+        return ""
+    return slug.replace("-", " ")
 
 
 def _provider_metadata(provider, item):
     if provider == "pexels":
         return item.get("alt") or item.get("url", ""), "", ()
     if provider == "pixabay":
-        return str(item.get("tags") or ""), "", str(item.get("tags") or "").split(",")
+        tags = str(item.get("tags") or "")
+        return _pixabay_descriptive_title(item), "", [value.strip() for value in tags.split(",") if value.strip()]
     if provider == "coverr":
         return item.get("title") or item.get("slug", ""), item.get("description", ""), item.get("tags") or ()
     return item.get("title", ""), item.get("description", ""), item.get("tags") or ()
@@ -162,7 +165,10 @@ def rank_provider_items(items, provider, query, topic_context, used_sources, off
             provider, topic_context.profile, topic_context.primary_topic, query,
             relevance.score, relevance.accepted, relevance.reason,
         )
-        if not relevance.accepted:
+        if not relevance.accepted or (
+            relevance.confidence == "bad"
+            and relevance.reason != "provider-result-sparse-metadata"
+        ):
                 continue
         item["_media_relevance"] = relevance
         item["_media_title"] = str(title or "")
@@ -193,6 +199,11 @@ def _relevance_fields(item):
             "relevance_reason": relevance.reason,
             "relevance_entity_match": relevance.entity_match,
             "relevance_context_matches": relevance.context_matches,
+                "relevance_confidence": relevance.confidence,
+                "relevance_penalties": list(relevance.penalties),
+                "subject_coverage": relevance.subject_coverage,
+                "descriptive_coverage": relevance.descriptive_coverage,
+                "required_matches": relevance.required_matches,
         })
     return fields
 
@@ -271,7 +282,7 @@ def try_save_media(url, output_path, headers=None):
 
 
 def save_media(url, output_path, headers=None):
-    response = CLIENT.get(url, headers=headers)
+    response = DOWNLOAD_CLIENT.get(url, headers=headers)
     response.raise_for_status()
 
     path = Path(output_path)
@@ -281,7 +292,7 @@ def save_media(url, output_path, headers=None):
 
 
 def pexels_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
-    response = CLIENT.get(
+    response = SEARCH_CLIENT.get(
         "https://api.pexels.com/videos/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
         params={"query": query, "per_page": 15},
@@ -328,12 +339,12 @@ def pexels_video(query, output_path, orientation, used_sources=None, offset=0, t
 
 def pixabay_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
     for candidate in pixabay_query_candidates(query, topic_context):
-        response = CLIENT.get(
+        response = SEARCH_CLIENT.get(
             "https://pixabay.com/api/videos/",
             params={
                 "key": get_api_key("pixabay_api_key"),
                 "q": candidate,
-                "per_page": 50,
+                "per_page": 30,
                 "order": "popular",
                 "safesearch": "true",
             },
@@ -385,7 +396,7 @@ def pixabay_video(query, output_path, orientation, used_sources=None, offset=0, 
 
 
 def coverr_video(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
-    response = CLIENT.get(
+    response = SEARCH_CLIENT.get(
         "https://api.coverr.co/videos",
         headers={"Authorization":
                  f"Bearer {get_api_key('coverr_api_key')}"},
@@ -424,7 +435,7 @@ def coverr_video(query, output_path, orientation, used_sources=None, offset=0, t
 
 
 def pexels_image(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
-    response = CLIENT.get(
+    response = SEARCH_CLIENT.get(
         "https://api.pexels.com/v1/search",
         headers={"Authorization": get_api_key("pexels_api_key")},
         params={"query": query, "per_page": 15},
@@ -457,7 +468,7 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0, 
     )
 
     for candidate in pixabay_query_candidates(query, topic_context):
-        response = CLIENT.get(
+        response = SEARCH_CLIENT.get(
             "https://pixabay.com/api/",
             params={
                 "key": get_api_key("pixabay_api_key"),
@@ -468,7 +479,7 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0, 
                 ),
                 "min_width": minimum_width,
                 "min_height": minimum_height,
-                "per_page": 50,
+                "per_page": 30,
                 "order": "popular",
                 "safesearch": "true",
             },
@@ -513,10 +524,10 @@ def pixabay_image(query, output_path, orientation, used_sources=None, offset=0, 
 
 
 def openverse_image(query, output_path, orientation, used_sources=None, offset=0, topic_context=None):
-    response = CLIENT.get(
+    response = SEARCH_CLIENT.get(
         "https://api.openverse.org/v1/images/",
         headers=openverse_headers(),
-        params={"q": query, "page_size": 20, "mature": "false"},
+        params={"q": query, "page_size": 12, "mature": "false"},
     )
     response.raise_for_status()
 
