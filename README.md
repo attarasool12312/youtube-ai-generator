@@ -111,7 +111,7 @@ ollama list
 Test:
 
 ```bash
-ollama run qwen3:14b "Say hello"
+ollama run qwen3:30b "Say hello"
 ```
 
 
@@ -124,7 +124,7 @@ GEMINI_API_KEY=
 
 OLLAMA_URL=http://127.0.0.1:11434
 
-OLLAMA_MODEL=qwen3:14b
+OLLAMA_MODEL=qwen3:30b
 
 SETTINGS_ENCRYPTION_KEY=
 ```

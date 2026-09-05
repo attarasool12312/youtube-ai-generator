@@ -40,7 +40,7 @@ PIP="$VENV/bin/pip"
 
 SERVICE_NAME="youtube-ai-generator"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-OLLAMA_MODEL="qwen3:14b"
+OLLAMA_MODEL="qwen3:30b"
 
 RECOVERY_ARCHIVE="$PROJECT_ROOT/recovery/runtime-state.tar.gz"
 RECOVERY_CHECKSUM="$PROJECT_ROOT/recovery/runtime-state.sha256"
