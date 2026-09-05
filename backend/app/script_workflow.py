@@ -1,12 +1,13 @@
 import math
+import os
+import time
 import re
 import logging
 
 from app.ai_provider import (
     call_gemini,
-    call_ollama,
-    call_ollama_length_repair,
-    call_together,
+    call_deepseek_script_pro,
+    call_deepseek_script_flash,
 )
 from app.script_validator import (
     deduplicate_cta_intents,
@@ -292,6 +293,26 @@ def _looks_like_generation_meta(text):
         "current draft length:",
         "previous repair length:",
         "word count is",
+        "hmm, the user",
+        "the user has given me",
+        "the user has asked",
+        "the user asked me",
+        "they need me to",
+        "looking at the requirements",
+        "looking at these requirements",
+        "looking at the instructions",
+        "my task is to",
+        "i need to adjust",
+        "i need to revise",
+        "i should revise",
+        "i should write",
+        "the current draft is",
+        "the draft is exactly",
+        "this is for a ",
+        "let me review",
+        "let me check",
+        "i'll revise",
+        "i will revise",
     )
     if any(value in lowered for value in suspicious):
         return True
@@ -311,20 +332,41 @@ def _valid_outline(text, section_count):
     if not text or _looks_like_generation_meta(text):
         return False
 
-    # Require exactly the requested numbered items, but allow an item's
-    # description to wrap onto additional lines.
-    matches = list(
-        re.finditer(
-            r"(?m)^\s*(\d+)[.)]\s+\S+",
-            text,
-        )
+    # Accept normal, Markdown-bold and inline numbering:
+    # 1. item
+    # 1) item
+    # **1.** item
+    # **1)** item
+    pattern = re.compile(
+        r"(?:^|\n|\s)"
+        r"(?:\*\*)?"
+        r"(\d+)"
+        r"[.)]"
+        r"(?:\*\*)?"
+        r"\s+",
+        re.MULTILINE,
     )
 
-    if len(matches) != section_count:
+    matches = list(pattern.finditer(text))
+    numbers = [int(match.group(1)) for match in matches]
+
+    if numbers != list(range(1, section_count + 1)):
         return False
 
-    numbers = [int(match.group(1)) for match in matches]
-    return numbers == list(range(1, section_count + 1))
+    # Ensure every numbered item contains actual content.
+    for index, match in enumerate(matches):
+        content_start = match.end()
+        content_end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(text)
+        )
+
+        if len(text[content_start:content_end].strip()) < 8:
+            return False
+
+    return True
+
 
 
 def has_broken_opening(text):
@@ -353,11 +395,29 @@ def needs_chunk_retry(text):
     )
 
 
+def _script_api_delay():
+    """Small pacing delay to avoid Together burst rate limits."""
+    try:
+        return max(
+            0.0,
+            float(os.getenv("SCRIPT_API_DELAY_SECONDS", "4")),
+        )
+    except (TypeError, ValueError):
+        return 4.0
+
+
+def _pace_script_api():
+    delay = _script_api_delay()
+    if delay > 0:
+        time.sleep(delay)
+
+
 def provider_chain():
+    # Premium cloud script path. No local GPU model is required.
     return [
+        ("deepseek-v4-pro", call_deepseek_script_pro),
+        ("deepseek-v4-flash", call_deepseek_script_flash),
         ("gemini", call_gemini),
-        ("ollama", call_ollama),
-        ("together", call_together),
     ]
 
 
@@ -367,13 +427,14 @@ def first_success(
     require_complete_start=False,
     validator=None,
     validation_name="output",
+    cleaner=clean_script,
 ):
     errors = []
 
     for name, provider in providers or provider_chain():
         try:
             result = provider(prompt, json_mode=False)
-            text = clean_script(result.text)
+            text = cleaner(result.text)
 
             if text and require_complete_start and has_broken_opening(text):
                 message = (
@@ -456,6 +517,7 @@ Rules:
         require_complete_start=True,
         validator=lambda text: _valid_outline(text, section_count),
         validation_name=f"{section_count}-line numbered outline",
+        cleaner=lambda text: str(text or "").strip(),
     )
 
 
@@ -657,21 +719,26 @@ Rules:
 {ending_rules}
 """
 
-    result = call_ollama_length_repair(
+    repaired, provider = first_success(
         prompt,
-        maximum_words=maximum_words,
+        providers=[
+            ("deepseek-v4-pro", call_deepseek_script_pro),
+            ("deepseek-v4-flash", call_deepseek_script_flash),
+            ("gemini", call_gemini),
+        ],
+        require_complete_start=True,
+        validator=lambda text: not _looks_like_generation_meta(text),
+        validation_name="narration-only repair",
     )
-    repaired = clean_script(result.text)
 
-    if has_broken_opening(repaired):
-        repaired = clean_script(source_text)
+    repaired = clean_script(repaired)
 
-    if not repaired:
+    if not repaired or _looks_like_generation_meta(repaired):
         raise RuntimeError(
-            "Ollama length repair returned empty output."
+            "Cloud script repair returned invalid narration."
         )
 
-    return repaired, result.provider
+    return repaired, provider
 
 
 def generate_expansion(
@@ -1121,6 +1188,8 @@ def generate_initial_script(title, duration, style, progress_callback=None):
     )
 
     for index, target_words in enumerate(targets, start=1):
+        _pace_script_api()
+
         section, provider = generate_section(
             title=title,
             style=style,
@@ -1134,6 +1203,8 @@ def generate_initial_script(title, duration, style, progress_callback=None):
         combined = "\n\n".join(sections + [section])
 
         if needs_chunk_retry(combined):
+            _pace_script_api()
+
             retry_section, retry_provider = generate_section(
                 title=title,
                 style=style,
@@ -1395,6 +1466,12 @@ def create_validated_script(title, duration, style, progress_callback=None):
     )
 
     script = clean_script(script)
+
+    if _looks_like_generation_meta(script):
+        raise RuntimeError(
+            "Script rejected: AI planning/reasoning leaked into narration."
+        )
+
     final_validation = validate_script(script, duration)
 
     ending_issues = [

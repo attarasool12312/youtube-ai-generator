@@ -8,6 +8,8 @@ import httpx
 from app.config import settings
 from app.ai_provider import (
     call_ai, call_gemini, call_ollama, call_together,
+    call_gemini_35_flash_lite, call_gemini_31_flash_lite,
+    call_deepseek_metadata_flash,
 )
 from app.scene_ai import call_scene_json
 from app.media_relevance import (
@@ -220,9 +222,9 @@ def _call_media_context_json(prompt: str) -> dict:
     )
     errors = []
     attempts = [
-        (call_ollama, 2),
-        (call_gemini, 2),
-        (call_together, 1),
+        (call_gemini_35_flash_lite, 1),
+        (call_gemini_31_flash_lite, 1),
+        (call_deepseek_metadata_flash, 1),
     ]
     for provider, total in attempts:
         for attempt in range(total):
@@ -441,7 +443,8 @@ def _enrich_scene_batch_once(
         "Do not rewrite narration.\n"
         "Return JSON with key scenes.\n"
         "Each scene needs scene_number, visual_subject, action, environment, search_query, "
-        "required_terms, search_variants, stock_keywords, negative_keywords and media_type.\n"
+        "required_terms, search_variants, stock_keywords, negative_keywords, media_type, "
+        "shot_type, camera_angle, focal_detail, visual_distinction and zimage_prompt.\n"
         "visual_subject is the exact visible real-world subject the viewer should "
         "see for THIS scene, normally 2-8 words. The current narration has higher "
         "priority than the whole-video topic.\n"
@@ -502,6 +505,13 @@ def _enrich_scene_batch_once(
         "history, prefer relevant video of the actual ruins, site, museum object, excavation, "
         "or reconstruction before choosing an archival still.\n"
         "stock_keywords should support the same exact subject and context.\n"
+        "shot_type must choose a concrete composition such as wide establishing, medium, close-up, macro detail, overhead, aerial, tracking or low-angle.\n"
+        "camera_angle must describe the actual viewpoint and should vary from nearby scenes.\n"
+        "focal_detail must state the exact visible physical detail that distinguishes this scene.\n"
+        "visual_distinction must explain how this scene should look different from adjacent visuals without inventing new facts.\n"
+        "zimage_prompt must be a concise photorealistic documentary-still prompt grounded only in this scene's subject, action and environment. Never request text, labels, captions, logos, screens, UI, posters, fake maps, title cards or written diagrams.\n"
+        "Never output placeholder values such as none, n/a, unknown or not applicable for visual planning fields.\n"
+        "Across adjacent scenes, vary framing, viewpoint and focal detail while preserving factual accuracy.\n"
         "Local continuity context (previous/current/next narration): "
         f"{json.dumps(continuity, ensure_ascii=False)}\n"
         f"Scenes: {json.dumps(scenes)}"
@@ -550,6 +560,61 @@ def _enrich_scene_batch_once(
         stock_keywords = _clean_media_list(item.get("stock_keywords"), 10, 80)
         negative_keywords = _clean_media_list(item.get("negative_keywords"), 8, 100)
 
+        def clean_visual_field(value, maximum):
+            text = " ".join(str(value or "").split()).strip()
+            if text.casefold() in {
+                "none", "n/a", "na", "unknown",
+                "not applicable", "null",
+            }:
+                return ""
+            return text[:maximum]
+
+        shot_type = clean_visual_field(
+            item.get("shot_type"), 100
+        )
+        camera_angle = clean_visual_field(
+            item.get("camera_angle"), 100
+        )
+        focal_detail = clean_visual_field(
+            item.get("focal_detail"), 180
+        )
+        visual_distinction = clean_visual_field(
+            item.get("visual_distinction"), 220
+        )
+        zimage_prompt = clean_visual_field(
+            item.get("zimage_prompt"), 700
+        )
+
+        # A model may turn a broad conclusion into the literal video
+        # title, a digital globe, map, infographic, or other generated
+        # editorial graphic. Keep AI imagery grounded in a physical
+        # subject instead; Remotion will handle maps/UI/text later.
+        if (
+            _looks_like_title_visual(visual_subject, title)
+            or _looks_like_title_visual(final_query, title)
+            or _looks_like_generated_graphic(zimage_prompt)
+        ):
+            anchor = _scene_topic_anchor(topic_context)
+
+            if anchor:
+                anchor_validation = validate_scene_query(
+                    anchor,
+                    topic_context,
+                )
+                final_query = anchor_validation.final_query
+                visual_subject = final_query
+
+            action = ""
+            environment = ""
+            focal_detail = ""
+            visual_distinction = (
+                "topic-focused documentary closing visual"
+            )
+            zimage_prompt = ""
+
+            if _looks_like_generated_graphic(camera_angle):
+                camera_angle = ""
+
         # CTA narration/metadata must stay on the real video topic.
         # Remotion will later add the actual subscribe/comment graphics.
         if (
@@ -558,14 +623,50 @@ def _enrich_scene_batch_once(
             or _looks_like_cta_visual(final_query)
         ):
             anchor = _scene_topic_anchor(topic_context)
+
+            previous_environment = ""
+            if enriched:
+                previous_environment = " ".join(
+                    str(
+                        enriched[-1].get("environment")
+                        or ""
+                    ).split()
+                ).strip()
+
             if anchor:
-                anchor_validation = validate_scene_query(
-                    anchor, topic_context
-                )
-                final_query = anchor_validation.final_query
-                visual_subject = final_query
+                visual_subject = anchor
+
+                # Keep broad conclusion/CTA visuals physical rather than
+                # turning them into maps, globes, dashboards or fake UI.
+                if previous_environment:
+                    environment = previous_environment
+
+                query_parts = [anchor]
+                if (
+                    environment
+                    and environment.casefold()
+                    not in anchor.casefold()
+                ):
+                    query_parts.append(environment)
+
+                final_query = " ".join(query_parts)[:180]
+
                 action = ""
-                environment = ""
+                focal_detail = (
+                    f"physical details of {anchor}"
+                )[:180]
+                visual_distinction = (
+                    "clean physical documentary closing shot "
+                    "focused on the real subject"
+                )
+
+                # Ignore any AI-generated CTA/map/display image plan.
+                zimage_prompt = ""
+
+                # Conclusion/CTA fallback must remain physically coherent.
+                # Do not preserve a map-style/aerial angle from the rejected plan.
+                shot_type = "wide documentary"
+                camera_angle = "eye-level"
 
                 if _narration_is_cta(scene.get("narration")):
                     negative_keywords = []
@@ -652,6 +753,11 @@ def _enrich_scene_batch_once(
             "stock_keywords": stock_keywords,
             "negative_keywords": negative_keywords,
             "media_type": media_type,
+            "shot_type": shot_type,
+            "camera_angle": camera_angle,
+            "focal_detail": focal_detail,
+            "visual_distinction": visual_distinction,
+            "zimage_prompt": zimage_prompt,
         })
 
     return enriched
@@ -818,6 +924,9 @@ def _scene_topic_anchor(topic_context):
         " support life",
         " supports life",
         " supporting life",
+        " connect the world",
+        " connects the world",
+        " connecting the world",
         " explained",
         " explanation",
         " why it matters",
@@ -829,6 +938,42 @@ def _scene_topic_anchor(topic_context):
             break
 
     return value[:180]
+
+
+def _looks_like_title_visual(value, title):
+    value_text = _normalized_visual_text(value)
+    title_text = _normalized_visual_text(title)
+
+    if not value_text or not title_text:
+        return False
+
+    return value_text == title_text
+
+
+def _looks_like_generated_graphic(value):
+    text = _normalized_visual_text(value)
+
+    risky = (
+        "digital globe",
+        "world map",
+        "interactive map",
+        "global scale map",
+        "glowing routes",
+        "glowing lines tracing",
+        "control room display",
+        "display showing",
+        "network lines spanning",
+        "routes connecting continents",
+        "global transoceanic",
+        "title card",
+        "subscribe button",
+        "social media interface",
+        "fake interface",
+        "infographic",
+        "poster layout",
+    )
+
+    return bool(text and any(term in text for term in risky))
 
 
 def _remove_conflicting_negative_keywords(values, *protected_values):

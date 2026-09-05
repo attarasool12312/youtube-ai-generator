@@ -1,9 +1,9 @@
 import json
 
 from app.ai_provider import (
-    call_ollama,
-    call_gemini,
-    call_together,
+    call_gemini_35_flash_lite,
+    call_gemini_31_flash_lite,
+    call_deepseek_metadata_flash,
 )
 
 
@@ -42,13 +42,35 @@ Scene metadata quality rules:
 - required_terms must prove the intended real subject.
 - Do not include reasoning or explanations.
 
-Return only JSON: {"scenes":[{"scene_number":1,"visual_subject":"concrete visible subject","action":"visible physical action","environment":"real visible setting","search_query":"specific stock-footage search","required_terms":["distinctive subject proof"],"search_variants":["same subject alternate search"],"stock_keywords":["keyword"],"negative_keywords":["wrong meaning only"],"media_type":"video"}]}. Include every scene number. No Markdown.
+Additional visual-planning rules:
+- shot_type must name a practical composition such as wide establishing, medium close-up, macro detail, overhead, tracking, aerial, or low-angle.
+- camera_angle must specify a clearly visible viewpoint.
+- focal_detail must identify the exact detail the viewer should notice.
+- visual_distinction must state how this shot must differ from nearby scenes.
+- zimage_prompt must describe one photorealistic documentary still matching this exact scene.
+- Never request text, labels, captions, logos, UI, screens, title cards, posters, diagrams with writing, or fake interface elements in zimage_prompt.
+- Never return "none", "n/a", "unknown", or placeholders for visual fields.
+- Avoid repeating the same shot type, camera angle, environment and composition across adjacent scenes.
+
+Return only JSON: {"scenes":[{"scene_number":1,"visual_subject":"concrete visible subject","action":"visible physical action","environment":"real visible setting","search_query":"specific stock-footage search","required_terms":["distinctive subject proof"],"search_variants":["same subject alternate search"],"stock_keywords":["keyword"],"negative_keywords":["wrong meaning only"],"media_type":"video","shot_type":"wide establishing","camera_angle":"low angle","focal_detail":"specific visible detail","visual_distinction":"how this shot differs from neighboring scenes","zimage_prompt":"photorealistic documentary still with no text"}]}. Include every scene number. No Markdown.
 """
 
     providers = [
-        ("ollama", call_ollama, 2),
-        ("gemini", call_gemini, 2),
-        ("together", call_together, 1),
+        (
+            "gemini-3.5-flash-lite",
+            call_gemini_35_flash_lite,
+            1,
+        ),
+        (
+            "gemini-3.1-flash-lite",
+            call_gemini_31_flash_lite,
+            1,
+        ),
+        (
+            "deepseek-v4-flash",
+            call_deepseek_metadata_flash,
+            1,
+        ),
     ]
 
     errors = []

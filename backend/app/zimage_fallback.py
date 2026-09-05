@@ -115,38 +115,209 @@ def _warmup_alive(handle):
 
 
 
+def _zimage_title_anchor(video_title):
+    value = " ".join(str(video_title or "").split()).strip()
+    lowered = value.casefold()
+
+    for prefix in ("how ", "why ", "what is ", "what are "):
+        if lowered.startswith(prefix):
+            value = value[len(prefix):].strip()
+            lowered = value.casefold()
+            break
+
+    for suffix in (
+        " support life",
+        " supports life",
+        " supporting life",
+        " connect the world",
+        " connects the world",
+        " connecting the world",
+        " explained",
+        " explanation",
+        " why it matters",
+        " what it means",
+    ):
+        if lowered.endswith(suffix):
+            value = value[:-len(suffix)].strip()
+            lowered = value.casefold()
+            break
+
+    return value
+
+
+def _zimage_graphic_risk(value):
+    text = " ".join(str(value or "").lower().split())
+
+    risky = (
+        "digital globe",
+        "globe showing",
+        "world map",
+        "interactive map",
+        "map visualization",
+        "global scale map",
+        "glowing routes",
+        "glowing lines tracing",
+        "control room display",
+        "display showing",
+        "network lines spanning",
+        "routes connecting continents",
+        "global transoceanic",
+        "title card",
+        "subscribe button",
+        "social media interface",
+        "fake interface",
+        "infographic",
+        "poster layout",
+        "presentation slide",
+    )
+
+    return any(term in text for term in risky)
+
+
 def build_zimage_prompt(scene, video_title="", video_profile=""):
-    subject = " ".join(str(scene.get("visual_subject") or scene.get("search_query") or "").split()).strip()
-    action = " ".join(str(scene.get("action") or "").split()).strip()
-    environment = " ".join(str(scene.get("environment") or "").split()).strip()
+    subject = " ".join(
+        str(
+            scene.get("visual_subject")
+            or scene.get("search_query")
+            or ""
+        ).split()
+    ).strip()
+
+    action = " ".join(
+        str(scene.get("action") or "").split()
+    ).strip()
+
+    environment = " ".join(
+        str(scene.get("environment") or "").split()
+    ).strip()
+
+    shot_type = " ".join(
+        str(scene.get("shot_type") or "").split()
+    ).strip()
+
+    camera_angle = " ".join(
+        str(scene.get("camera_angle") or "").split()
+    ).strip()
+
+    focal_detail = " ".join(
+        str(scene.get("focal_detail") or "").split()
+    ).strip()
+
+    visual_distinction = " ".join(
+        str(scene.get("visual_distinction") or "").split()
+    ).strip()
+
+    planned_prompt = " ".join(
+        str(scene.get("zimage_prompt") or "").split()
+    ).strip()
+
     negatives = scene.get("negative_keywords") or []
     if isinstance(negatives, str):
         negatives = [negatives]
-    negatives = [str(value).strip() for value in negatives if str(value).strip()]
+
+    negatives = [
+        str(value).strip()
+        for value in negatives
+        if str(value).strip()
+    ]
+
+    # Never let Z-Image manufacture maps, globes, title cards,
+    # fake UI, infographic layouts or similar editorial graphics.
+    if _zimage_graphic_risk(subject):
+        subject = ""
+
+    if _zimage_graphic_risk(planned_prompt):
+        planned_prompt = ""
+
+    if not subject:
+        subject = _zimage_title_anchor(video_title)
 
     lower = subject.lower()
-    visual_type = "photorealistic real-world scene"
-    if any(word in lower for word in ("cross-section", "cross section", "cutaway", "schematic")):
-        visual_type = "high-detail realistic scientific cutaway visualization with no labels"
-    elif "map" in lower:
-        visual_type = "clean realistic scientific map visualization with no labels, legends, interface, borders, or writing"
-    elif "animation" in lower:
-        visual_type = "realistic scientific visualization, not a cartoon or presentation slide"
+
+    visual_type = "photorealistic real-world documentary scene"
+
+    if any(
+        word in lower
+        for word in (
+            "cross-section",
+            "cross section",
+            "cutaway",
+            "schematic",
+        )
+    ):
+        visual_type = (
+            "high-detail realistic scientific cutaway visualization "
+            "with no labels"
+        )
 
     parts = [
         f"Create a {visual_type} showing exactly: {subject}.",
-        "The requested subject must be the clear main focus and accurately match its real environment, scale, materials, geography, and physical context.",
-        "Use natural realistic lighting, believable detail, clean composition, realistic colors, and high visual fidelity.",
-        "Do not add unrelated objects or concepts that are not required by the subject.",
-        "No text. No readable words, letters, numbers, labels, logos, captions, signs, watermarks, interface elements, article layouts, poster layouts, or presentation layouts.",
     ]
+
+    if planned_prompt:
+        parts.append(
+            "Scene-specific visual plan: "
+            + planned_prompt
+            + "."
+        )
+
     if action:
-        parts.insert(1, f"Visible action: {action}.")
+        parts.append(f"Visible action: {action}.")
+
     if environment:
-        parts.insert(2 if action else 1, f"Environment: {environment}.")
+        parts.append(f"Environment: {environment}.")
+
+    if shot_type:
+        parts.append(f"Shot composition: {shot_type}.")
+
+    if camera_angle:
+        parts.append(f"Camera viewpoint: {camera_angle}.")
+
+    if focal_detail:
+        parts.append(
+            f"Primary focal detail: {focal_detail}."
+        )
+
+    if visual_distinction:
+        parts.append(
+            "Visual distinction from nearby scenes: "
+            + visual_distinction
+            + "."
+        )
+
+    parts.extend([
+        (
+            "The requested subject must be the clear main focus and "
+            "accurately match its real environment, scale, materials, "
+            "geography, and physical context."
+        ),
+        (
+            "Use realistic documentary photography, natural believable "
+            "lighting, physically plausible materials, clean composition, "
+            "realistic colors, and high visual fidelity."
+        ),
+        (
+            "Do not add unrelated objects, symbolic concepts, generic "
+            "filler imagery, or invented events."
+        ),
+        (
+            "No maps, digital globes, route diagrams, title cards, "
+            "infographics, fake screens, fake UI, posters, or "
+            "presentation layouts."
+        ),
+        (
+            "No text. No readable words, letters, numbers, labels, "
+            "logos, captions, signs, watermarks, or interface elements."
+        ),
+    ])
+
     if negatives:
-        parts.append("Exclude: " + ", ".join(negatives[:8]) + ".")
+        parts.append(
+            "Exclude: " + ", ".join(negatives[:8]) + "."
+        )
+
     return " ".join(parts)
+
 
 
 def _release_ollama_gpu():

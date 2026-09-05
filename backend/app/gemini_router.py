@@ -90,6 +90,96 @@ def cooldown(status, message):
         return time.time() + 86400
     return time.time() + 180
 
+def generate_model(prompt, model, json_mode=False):
+    """Call one exact Gemini model while retaining quota cooldown state."""
+    key = get_api_key("gemini_api_key")
+    if not key:
+        raise RuntimeError("Gemini key missing.")
+
+    state = load_state()
+    record = state.get(model, {})
+
+    if record.get("disabled_until", 0) > time.time():
+        raise RuntimeError(
+            f"{model} temporarily disabled by quota/cooldown."
+        )
+
+    config = {
+        "temperature": 0.45,
+        "maxOutputTokens": 8192,
+    }
+    if json_mode:
+        config["responseMimeType"] = "application/json"
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": config,
+    }
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/"
+        f"models/{model}:generateContent"
+    )
+
+    try:
+        response = httpx.post(
+            url,
+            headers={"x-goog-api-key": key},
+            json=payload,
+            timeout=180,
+        )
+    except Exception as error:
+        raise RuntimeError(f"{model}: {error}") from error
+
+    if response.status_code != 200:
+        message = response.text[:800]
+        state[model] = {
+            "disabled_until": cooldown(
+                response.status_code,
+                message,
+            ),
+            "last_error": message[:300],
+        }
+        save_state(state)
+        raise RuntimeError(
+            f"{model}: HTTP {response.status_code}"
+        )
+
+    data = response.json()
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"{model}: empty candidates.")
+
+    parts = (
+        candidates[0]
+        .get("content", {})
+        .get("parts", [])
+    )
+
+    text = "".join(
+        str(item.get("text") or "")
+        for item in parts
+    ).strip()
+
+    if not text:
+        raise RuntimeError(f"{model}: empty final content.")
+
+    usage = data.get("usageMetadata", {})
+
+    state[model] = {
+        "disabled_until": 0,
+        "last_success": time.time(),
+    }
+    save_state(state)
+
+    return {
+        "text": text,
+        "model": model,
+        "input_tokens": usage.get("promptTokenCount", 0),
+        "output_tokens": usage.get("candidatesTokenCount", 0),
+    }
+
+
 def generate(prompt, json_mode=False):
     key = get_api_key("gemini_api_key")
     state = load_state()
