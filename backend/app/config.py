@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen3:14b"
+    ollama_model: str = "qwen3:30b"
     session_days: int = 7
     default_duration_minutes: int = 10
     default_language: str = "English"

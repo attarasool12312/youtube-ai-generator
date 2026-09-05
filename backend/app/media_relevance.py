@@ -396,14 +396,14 @@ def _confidence_for(
 
     required_ok = not required_terms or required_matches > 0
     if subject_terms <= 1:
-        if score >= 78 and entity_match and required_ok and descriptive_coverage >= 1.0:
+        if score >= 80 and entity_match and required_ok and descriptive_coverage >= 1.0:
             return "strong"
         if score >= 45 and required_ok and (entity_match or context_strong >= 2):
             return "acceptable"
     else:
         descriptive_proof = exact_subject or descriptive_coverage >= 0.60
         if (
-            score >= 78 and entity_match and required_ok
+            score >= 80 and entity_match and required_ok
             and subject_coverage >= 0.80 and descriptive_proof
         ):
             return "strong"

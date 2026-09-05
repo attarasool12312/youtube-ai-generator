@@ -1,5 +1,6 @@
 import math
 import re
+import logging
 
 from app.ai_provider import (
     call_gemini,
@@ -17,7 +18,7 @@ from app.script_validator import (
 WORDS_PER_MINUTE = 145
 MAX_EXPANSION_ATTEMPTS = 2
 MAX_SHORTEN_ATTEMPTS = 1
-MAX_CHUNK_WORDS = 800
+MAX_CHUNK_WORDS = 350
 SECTION_MIN_RATIO = 0.93
 SECTION_MAX_RATIO = 1.10
 CADENCE_LONG_SENTENCE_WORDS = 30
@@ -25,6 +26,8 @@ CADENCE_EXTREME_SENTENCE_WORDS = 40
 
 
 from app.video_profiles import script_profile_instructions
+
+logger = logging.getLogger(__name__)
 
 
 def word_count(text):
@@ -274,6 +277,56 @@ def clean_script(text):
     return text.strip()
 
 
+
+def _looks_like_generation_meta(text):
+    lowered = " ".join(str(text or "").lower().split())
+    suspicious = (
+        "this ensures standard word counters",
+        "let's review the content against instructions",
+        "review the content against instructions",
+        "required length:",
+        "cover outline item",
+        "section 1 mentioned:",
+        "section 2 does",
+        "against instructions:",
+        "current draft length:",
+        "previous repair length:",
+        "word count is",
+    )
+    if any(value in lowered for value in suspicious):
+        return True
+
+    # Edit/reasoning notation should never appear in narration.
+    if " -> " in str(text or "") and (
+        "word" in lowered or "replace" in lowered or "count" in lowered
+    ):
+        return True
+
+    return False
+
+
+def _valid_outline(text, section_count):
+    text = str(text or "").strip()
+
+    if not text or _looks_like_generation_meta(text):
+        return False
+
+    # Require exactly the requested numbered items, but allow an item's
+    # description to wrap onto additional lines.
+    matches = list(
+        re.finditer(
+            r"(?m)^\s*(\d+)[.)]\s+\S+",
+            text,
+        )
+    )
+
+    if len(matches) != section_count:
+        return False
+
+    numbers = [int(match.group(1)) for match in matches]
+    return numbers == list(range(1, section_count + 1))
+
+
 def has_broken_opening(text):
     stripped = text.lstrip(" \t\r\n\"'([{")
     return bool(
@@ -308,7 +361,13 @@ def provider_chain():
     ]
 
 
-def first_success(prompt, providers=None, require_complete_start=False):
+def first_success(
+    prompt,
+    providers=None,
+    require_complete_start=False,
+    validator=None,
+    validation_name="output",
+):
     errors = []
 
     for name, provider in providers or provider_chain():
@@ -316,19 +375,32 @@ def first_success(prompt, providers=None, require_complete_start=False):
             result = provider(prompt, json_mode=False)
             text = clean_script(result.text)
 
-            if text and (
-                not require_complete_start
-                or not has_broken_opening(text)
-            ):
-                return text, result.provider
-
-            if text:
-                errors.append(
+            if text and require_complete_start and has_broken_opening(text):
+                message = (
                     f"{name}: output began with a broken "
                     "lowercase sentence fragment"
                 )
+                errors.append(message)
+                logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
+                continue
+
+            if text and validator is not None and not validator(text):
+                message = f"{name}: invalid {validation_name}"
+                errors.append(message)
+                logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
+                continue
+
+            if text:
+                return text, result.provider
+
+            message = f"{name}: empty output"
+            errors.append(message)
+            logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
+
         except Exception as error:
-            errors.append(f"{name}: {error}")
+            message = f"{name}: {error}"
+            errors.append(message)
+            logger.warning("SCRIPT_PROVIDER_FAILED %s", message)
 
     raise RuntimeError(
         "All providers failed: " + " | ".join(errors)
@@ -363,10 +435,15 @@ Profile-specific instructions:
 Number of sections: {section_count}
 
 Rules:
-- Return exactly {section_count} numbered lines
-- Each line must cover a distinct part of the topic
-- Arrange sections in a logical narrative order
-- Avoid repeating the same information
+- Return exactly {section_count} numbered lines using the format "1. ...", "2. ...", etc.
+- Output no introduction, explanation, paragraph, heading, note or prose before/after those numbered lines
+- Treat the outline as a strict coverage contract for the final script
+- Each line must cover a clearly distinct, non-overlapping part of the topic
+- Assign each major fact, mechanism, example, process, challenge or consequence to ONE section only
+- Do not assign the same explanation or mechanism to multiple sections using different wording
+- Make section boundaries specific enough that the writer knows exactly what belongs there
+- Arrange sections in a logical narrative order: hook/context -> mechanisms/process -> consequences/application -> conclusion
+- Later sections may briefly refer back to earlier information, but must never explain it again
 - For factual topics, avoid unsupported claims, exaggerated consequences and false certainty
 - The first section must contain the opening hook
 - The final section must contain the conclusion and viewer CTA
@@ -374,7 +451,12 @@ Rules:
 - Return the outline only
 """
 
-    return first_success(prompt, require_complete_start=True)
+    return first_success(
+        prompt,
+        require_complete_start=True,
+        validator=lambda text: _valid_outline(text, section_count),
+        validation_name=f"{section_count}-line numbered outline",
+    )
 
 
 def generate_section(
@@ -430,8 +512,11 @@ Required length for this section: between {minimum_words} and
 Full outline:
 {outline}
 
-Continuity from the previous section:
+Previously written narration / continuity:
 {continuity}
+
+IMPORTANT: Everything in the previous narration above is already covered.
+Use it for continuity and as a strict DO-NOT-REPEAT ledger.
 
 Rules:
 - Write only section {section_number}
@@ -457,12 +542,23 @@ Rules:
 - Frame predicted social, economic, technological or environmental reactions as possibilities when they are not established
 - Preserve an engaging tone through explanation and meaningful stakes, not factual exaggeration
 - Do not repeat information from earlier sections
+- Never re-explain a fact, mechanism, analogy, statistic, process or example that appears in the previous narration, even using different wording
+- If earlier information must be referenced for continuity, use only a short linking phrase and immediately move to genuinely new material
+- Begin this section with the new material assigned to its own outline item; never restart the introduction or re-establish concepts already explained
+- Before returning the section, silently check that its core sentences add new information rather than paraphrasing previous sections
 - Do not use headings, labels, bullet points or visual directions
-- Return narration only
+- Never output planning, analysis, self-review, instruction checks, editing notes, word-count calculations, substitutions, arrows, or commentary about the draft
+- Do not mention the prompt, outline rules, section rules, required word range, or how you counted words
+- Return ONLY the finished narration
 {ending_rules}
 """
 
-    return first_success(prompt, require_complete_start=True)
+    return first_success(
+        prompt,
+        require_complete_start=True,
+        validator=lambda text: not _looks_like_generation_meta(text),
+        validation_name="narration-only section",
+    )
 
 
 def shorten_section(
@@ -1105,7 +1201,10 @@ def generate_initial_script(title, duration, style, progress_callback=None):
 
         sections.append(section)
         section_providers.append(provider)
-        previous_tail = tail_words(section)
+        previous_tail = tail_words(
+            "\n\n".join(sections),
+            limit=900,
+        )
 
         emit_progress(
             progress_callback,

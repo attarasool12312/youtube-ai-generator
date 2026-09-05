@@ -70,9 +70,11 @@ def call_ollama(prompt, json_mode=False):
         "model": settings.ollama_model,
         "prompt": prompt,
         "stream": False,
+        "keep_alive": "30m",
     }
     if json_mode:
         payload["format"] = "json"
+        payload["think"] = False
 
     response = httpx.post(
         f"{settings.ollama_url}/api/generate",

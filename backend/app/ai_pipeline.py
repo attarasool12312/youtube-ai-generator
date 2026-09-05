@@ -440,11 +440,16 @@ def _enrich_scene_batch_once(
         "Create media metadata for the supplied scenes.\n"
         "Do not rewrite narration.\n"
         "Return JSON with key scenes.\n"
-        "Each scene needs scene_number, visual_subject, search_query, "
+        "Each scene needs scene_number, visual_subject, action, environment, search_query, "
         "required_terms, search_variants, stock_keywords, negative_keywords and media_type.\n"
         "visual_subject is the exact visible real-world subject the viewer should "
         "see for THIS scene, normally 2-8 words. The current narration has higher "
         "priority than the whole-video topic.\n"
+        "action is the concrete physical action visible in the shot, normally 2-8 words. "
+        "Do not describe an idea, emotion, implication or editorial meaning as an action.\n"
+        "environment is the concrete visible location or physical setting surrounding "
+        "the subject, normally 2-8 words.\n"
+        "visual_subject + action + environment must describe one coherent photographable shot.\n"
         "search_query must be one concise search phrase describing the "
         "most visually important real subject in that scene.\n"
         "When a scene involves a named person, place, monument, event, "
@@ -467,6 +472,11 @@ def _enrich_scene_batch_once(
         "- Never search for an abstract concept, metaphor, emotion or business idea.\n"
         "- When narration describes a consequence, forecast, implication, or abstract effect, keep the visual anchored to the video core physical subject, mechanism, location, or entity unless the narration explicitly makes a different concrete place or object the main subject.\n"
         "- Do not jump to generic illustrative B-roll such as random streets, crowds, offices, people walking, traffic, skylines, or unrelated environments merely because they symbolize an effect.\n"
+        "- Never invent a specific physical action, animal behavior, person, vehicle, instrument, experiment, meeting, conference, or event unless it is stated in the current narration or clearly established by the immediately adjacent scene context.\n"
+        "- For broad conclusions such as an ecosystem surviving, a discovery changing scientific understanding, or a process influencing an environment, show the actual physical subject or system itself. Do not invent feeding, grazing, meetings, presentations, or symbolic activity.\n"
+        "- Preserve physical plausibility. For deep-ocean seafloor sampling or inspection, never place an unprotected researcher or scientist physically on the seafloor. Use the ROV, submersible, robotic sampler, sampling arm, or instrument established by the narration/context.\n"
+        "- When narration says researchers study, measure, sample, observe, or investigate something remotely, make the visible subject the real specimen, process, instrument, ROV, sample, or physical environment rather than inventing a human performing the action at an impossible location.\n"
+        "- Do not invent a research vessel, laboratory, conference, control room, display, or scientific meeting merely to visualize research or an implication. Use one only when the current narration or adjacent context actually establishes it.\n"
         "- Example: if Antarctic ice flow causes future sea-level rise, prefer Antarctic glacier flow, ice shelf movement, grounding-line retreat, or a physically relevant Antarctic visualization rather than a generic flooded city street.\n"
         "- Two to five words is ideal; the video title is context, not the query.\n"
         "- Resolve ambiguous words before searching. Add the distinguishing noun "
@@ -481,7 +491,11 @@ def _enrich_scene_batch_once(
         "Never change the subject or word sense.\n"
         "- negative_keywords: 0-6 short wrong subjects/meanings that a stock "
         "search could confuse with this scene. Use only real ambiguity risks, not "
-        "a huge rejection list.\n"
+        "a huge rejection list. NEVER include the requested subject, its required "
+        "entity, action, environment, or a direct synonym of them in negative_keywords.\n"
+        "- For like, subscribe, comment, or viewer-engagement narration, do NOT create "
+        "a visual subject involving buttons, screens, social-media UI, laptops, phones, "
+        "advertising graphics or call-to-action text. Keep showing the real video topic.\n"
         "media_type MUST be video for normal scenes; use image when the scene "
         "specifically needs a map, document, portrait, archival photograph, labeled "
         "diagram, or artifact where moving stock footage would be misleading. Even for "
@@ -522,24 +536,340 @@ def _enrich_scene_batch_once(
                 validation.final_query,
             )
 
-        visual_subject = " ".join(str(item.get("visual_subject") or validation.final_query).split()).strip()[:180]
+        final_query = validation.final_query
+        visual_subject = " ".join(
+            str(item.get("visual_subject") or final_query).split()
+        ).strip()[:180]
+        action = " ".join(str(item.get("action") or "").split()).strip()[:160]
+        environment = " ".join(
+            str(item.get("environment") or "").split()
+        ).strip()[:160]
+
         required_terms = _clean_media_list(item.get("required_terms"), 3, 80)
         search_variants = _clean_media_list(item.get("search_variants"), 3, 100)
         stock_keywords = _clean_media_list(item.get("stock_keywords"), 10, 80)
         negative_keywords = _clean_media_list(item.get("negative_keywords"), 8, 100)
 
+        # CTA narration/metadata must stay on the real video topic.
+        # Remotion will later add the actual subscribe/comment graphics.
+        if (
+            _narration_is_cta(scene.get("narration"))
+            or _looks_like_cta_visual(visual_subject)
+            or _looks_like_cta_visual(final_query)
+        ):
+            anchor = _scene_topic_anchor(topic_context)
+            if anchor:
+                anchor_validation = validate_scene_query(
+                    anchor, topic_context
+                )
+                final_query = anchor_validation.final_query
+                visual_subject = final_query
+                action = ""
+                environment = ""
+
+                if _narration_is_cta(scene.get("narration")):
+                    negative_keywords = []
+
+        # Abstract AI subjects are unsuitable for stock retrieval or
+        # text-to-image generation. Prefer the concrete validated query;
+        # if that is abstract too, fall back to the video's physical topic.
+        if _looks_like_abstract_visual(visual_subject):
+            if not _looks_like_abstract_visual(final_query):
+                visual_subject = final_query
+            else:
+                anchor = _scene_topic_anchor(topic_context)
+                if anchor:
+                    anchor_validation = validate_scene_query(
+                        anchor, topic_context
+                    )
+                    final_query = anchor_validation.final_query
+                    visual_subject = final_query
+
+        narration_text = _normalized_visual_text(scene.get("narration"))
+
+        # Reject invented editorial scenes unless the narration actually
+        # mentions scientists/research/labs/conferences.
+        if _looks_like_editorial_drift(action, environment):
+            narration_allows_editorial = any(
+                term in narration_text
+                for term in (
+                    "scientist",
+                    "researcher",
+                    "research team",
+                    "laboratory",
+                    "lab ",
+                    "conference",
+                )
+            )
+            if not narration_allows_editorial:
+                anchor = _scene_topic_anchor(topic_context)
+                if anchor:
+                    anchor_validation = validate_scene_query(
+                        anchor, topic_context
+                    )
+                    final_query = anchor_validation.final_query
+                    visual_subject = final_query
+                    action = ""
+                    environment = ""
+
+        visual_subject = _strengthen_generic_subject(
+            visual_subject,
+            final_query,
+            environment,
+        )
+
+        final_query = _concrete_scene_query(
+            visual_subject,
+            environment,
+            final_query,
+        )
+
+        negative_keywords = _remove_conflicting_negative_keywords(
+            negative_keywords,
+            visual_subject,
+            final_query,
+            action,
+            environment,
+            *required_terms,
+        )
+
+        media_type = str(
+            item.get("media_type") or "video"
+        ).strip().lower()
+        if media_type not in {
+            "video", "stock_video", "image", "stock_image"
+        }:
+            media_type = "video"
+
         enriched.append({
             **scene,
-            "search_query": validation.final_query,
+            "search_query": final_query,
             "visual_subject": visual_subject,
+            "action": action,
+            "environment": environment,
             "required_terms": required_terms,
             "search_variants": search_variants,
             "stock_keywords": stock_keywords,
             "negative_keywords": negative_keywords,
-            "media_type": item.get("media_type", "stock_video"),
+            "media_type": media_type,
         })
 
     return enriched
+
+
+
+_ABSTRACT_QUERY_TERMS = (
+    "chemistry",
+    "resilience",
+    "importance",
+    "implication",
+    "implications",
+    "engagement",
+    "call-to-action",
+    "call to action",
+    "supporting life",
+    "scientific significance",
+    "global impact",
+    "social impact",
+    "economic impact",
+)
+
+_EDITORIAL_DRIFT_TERMS = (
+    "conference",
+    "presentation",
+    "meeting",
+    "seminar",
+    "panel discussion",
+    "research implications",
+    "scientific implications",
+    "concept",
+)
+
+
+def _query_has_abstract_terms(value):
+    text = _normalized_visual_text(value)
+    return bool(text and any(term in text for term in _ABSTRACT_QUERY_TERMS))
+
+
+def _looks_like_editorial_drift(action, environment):
+    text = _normalized_visual_text(f"{action} {environment}")
+    return bool(text and any(term in text for term in _EDITORIAL_DRIFT_TERMS))
+
+
+def _strengthen_generic_subject(subject, search_query, environment):
+    subject = " ".join(str(subject or "").split()).strip()
+    query = " ".join(str(search_query or "").split()).strip()
+    environment = " ".join(str(environment or "").split()).strip()
+
+    if len(subject.split()) > 1:
+        return subject
+
+    # Single nouns such as "larvae", "scientists", "plume" are too ambiguous.
+    # Prefer the existing concrete query, otherwise attach the real setting.
+    if query and len(query.split()) >= 2 and not _query_has_abstract_terms(query):
+        return query[:180]
+
+    if environment:
+        return f"{subject} in {environment}"[:180]
+
+    return subject
+
+
+def _concrete_scene_query(subject, environment, original):
+    subject = " ".join(str(subject or "").split()).strip()
+    environment = " ".join(str(environment or "").split()).strip()
+    original = " ".join(str(original or "").split()).strip()
+
+    if original and not _query_has_abstract_terms(original):
+        return original
+
+    words = []
+    for value in (subject, environment):
+        for word in value.split():
+            if word.casefold() not in {x.casefold() for x in words}:
+                words.append(word)
+
+    return " ".join(words[:9]) or subject or original
+
+
+_ABSTRACT_VISUAL_PHRASES = (
+    "viewer engagement",
+    "call-to-action",
+    "call to action",
+    "subscription call",
+    "engagement prompt",
+    "global ocean chemistry",
+    "nutrient distribution",
+    "ecosystem resilience",
+    "organism-environment interaction",
+)
+
+_CTA_VISUAL_PHRASES = (
+    "subscribe",
+    "subscription",
+    "like button",
+    "comment prompt",
+    "viewer engagement",
+    "call-to-action",
+    "call to action",
+)
+
+
+def _normalized_visual_text(value):
+    return " ".join(str(value or "").lower().replace("_", " ").split())
+
+
+def _looks_like_cta_visual(value):
+    text = _normalized_visual_text(value)
+    return bool(text and any(term in text for term in _CTA_VISUAL_PHRASES))
+
+
+def _narration_is_cta(value):
+    text = _normalized_visual_text(value)
+    if not text:
+        return False
+    terms = (
+        "subscribe",
+        "share your thoughts",
+        "comment below",
+        "let us know below",
+        "like this video",
+        "follow for more",
+        "hit the bell",
+    )
+    return any(term in text for term in terms)
+
+
+def _looks_like_abstract_visual(value):
+    text = _normalized_visual_text(value)
+    if not text:
+        return True
+    if any(term in text for term in _ABSTRACT_VISUAL_PHRASES):
+        return True
+    endings = (
+        " resilience",
+        " distribution",
+        " interaction",
+        " importance",
+        " implication",
+        " engagement",
+        " concept",
+        " prompt",
+    )
+    return any(text.endswith(term) for term in endings)
+
+
+def _scene_topic_anchor(topic_context):
+    value = " ".join(
+        str(getattr(topic_context, "primary_topic", "") or "").split()
+    ).strip()
+
+    # Turn explanatory/video-title wording into a concrete physical
+    # stock/image subject, especially for CTA and abstract fallback scenes.
+    lowered = value.casefold()
+
+    for prefix in ("how ", "why ", "what is ", "what are "):
+        if lowered.startswith(prefix):
+            value = value[len(prefix):].strip()
+            lowered = value.casefold()
+            break
+
+    for suffix in (
+        " support life",
+        " supports life",
+        " supporting life",
+        " explained",
+        " explanation",
+        " why it matters",
+        " what it means",
+    ):
+        if lowered.endswith(suffix):
+            value = value[:-len(suffix)].strip()
+            lowered = value.casefold()
+            break
+
+    return value[:180]
+
+
+def _remove_conflicting_negative_keywords(values, *protected_values):
+    protected = [
+        _normalized_visual_text(value)
+        for value in protected_values
+        if _normalized_visual_text(value)
+    ]
+
+    cleaned = []
+    for value in values:
+        candidate = _normalized_visual_text(value)
+        if not candidate:
+            continue
+
+        candidate_tokens = set(candidate.split())
+        conflicts = False
+
+        for text in protected:
+            protected_tokens = set(text.split())
+
+            # Exact phrase or a complete negative phrase embedded in the
+            # requested subject/query is a direct contradiction.
+            if candidate == text or candidate in text:
+                conflicts = True
+                break
+
+            # If every meaningful token in the negative is already part of
+            # the requested subject, it is also contradictory.
+            meaningful = {
+                token for token in candidate_tokens
+                if len(token) >= 4
+            }
+            if meaningful and meaningful.issubset(protected_tokens):
+                conflicts = True
+                break
+
+        if not conflicts:
+            cleaned.append(value)
+
+    return cleaned
 
 
 def detect_video_style(title, requested_style):
@@ -576,8 +906,8 @@ def enrich_scene_batch(title, video_style, scenes, script=None):
     complete_script = script or " ".join(scene.get("narration", "") for scene in scenes)
     media_script_context = build_media_script_context(title, video_style, complete_script)
 
-    for start in range(0, len(scenes), 6):
-        batch = scenes[start:start + 6]
+    for start in range(0, len(scenes), 8):
+        batch = scenes[start:start + 8]
         enriched.extend(
             _enrich_scene_batch_once(
                 title, video_style, batch, topic_context,

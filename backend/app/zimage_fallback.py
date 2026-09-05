@@ -117,6 +117,8 @@ def _warmup_alive(handle):
 
 def build_zimage_prompt(scene, video_title="", video_profile=""):
     subject = " ".join(str(scene.get("visual_subject") or scene.get("search_query") or "").split()).strip()
+    action = " ".join(str(scene.get("action") or "").split()).strip()
+    environment = " ".join(str(scene.get("environment") or "").split()).strip()
     negatives = scene.get("negative_keywords") or []
     if isinstance(negatives, str):
         negatives = [negatives]
@@ -138,6 +140,10 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
         "Do not add unrelated objects or concepts that are not required by the subject.",
         "No text. No readable words, letters, numbers, labels, logos, captions, signs, watermarks, interface elements, article layouts, poster layouts, or presentation layouts.",
     ]
+    if action:
+        parts.insert(1, f"Visible action: {action}.")
+    if environment:
+        parts.insert(2 if action else 1, f"Environment: {environment}.")
     if negatives:
         parts.append("Exclude: " + ", ".join(negatives[:8]) + ".")
     return " ".join(parts)

@@ -76,6 +76,26 @@ def _is_good_result(result):
     return _meets_threshold(result, VIDEO_ACCEPT_SCORE)
 
 
+def _verified_acceptable_result(result):
+    """Allow only unusually well-proven acceptable stock below strong threshold.
+
+    This preserves genuinely relevant common stock while preventing generic
+    55-score matches from bypassing Z-Image.
+    """
+    if not result or (result.get("relevance_penalties") or []):
+        return False
+
+    if _meets_threshold(result, VIDEO_ACCEPT_SCORE):
+        return True
+
+    return bool(
+        _result_confidence(result) == "acceptable"
+        and _result_score(result) >= 60
+        and float(result.get("subject_coverage") or 0) >= 1.0
+        and float(result.get("descriptive_coverage") or 0) >= 1.0
+    )
+
+
 def _better_result(first, second):
     if not first:
         return second
@@ -275,9 +295,13 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
         topic_context, deadline,
     )
-    if video_result and _result_confidence(video_result) in {"acceptable", "strong"} and _result_score(video_result) >= 55 and not (video_result.get("relevance_penalties") or []):
+    if _verified_acceptable_result(video_result):
         video_result["needs_ai_fallback"] = False
-        video_result["stock_decision"] = "video_accepted"
+        video_result["stock_decision"] = (
+            "video_accepted_strong"
+            if _meets_threshold(video_result, VIDEO_ACCEPT_SCORE)
+            else "video_accepted_verified"
+        )
         return video_result
 
     # Normal scenes remain video-first even if the AI mistakenly requested an
@@ -289,15 +313,19 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
             IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded,
             topic_context, deadline,
         )
-        if image_result and _result_confidence(image_result) in {"acceptable", "strong"} and _result_score(image_result) >= 55 and not (image_result.get("relevance_penalties") or []):
+        if _verified_acceptable_result(image_result):
             _discard_result_media(video_result)
             image_result["needs_ai_fallback"] = False
-            image_result["stock_decision"] = "explicit_still_accepted"
+            image_result["stock_decision"] = (
+                "explicit_still_accepted_strong"
+                if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE)
+                else "explicit_still_accepted_verified"
+            )
             return image_result
 
-    # Until Z-Image is wired, retain the best available stock file so a job never
-    # fails.  The manifest marks it for AI replacement; the next module will
-    # replace these scenes instead of rendering weak stock.
+    # Keep the best below-threshold candidate only long enough for diagnostics.
+    # select_media will discard it and trigger the bounded broad-query pass;
+    # if that also fails, scene_media hands the scene to Z-Image.
     winner = _better_result(video_result, image_result)
     loser = image_result if winner is video_result else video_result
     _discard_result_media(loser)
@@ -331,7 +359,7 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
         query, folder, number, requested, orientation,
         used_sources, provider_used_sources, history_sources, topic_context,
     )
-    if result and _meets_threshold(result, VIDEO_ACCEPT_SCORE) and not result.get("needs_ai_fallback"):
+    if result and _verified_acceptable_result(result) and not result.get("needs_ai_fallback"):
         return result
 
     # Wikimedia/Openverse are no longer a generic fallback.  They may compete
@@ -353,7 +381,11 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
         _discard_result_media(licensed)
 
     if result:
-        return result
+        logger.info(
+            "MEDIA scene=%d result=below_strong_threshold score=%s confidence=%s query=%r action=try_broad_or_ai",
+            number, _result_score(result), _result_confidence(result), query,
+        )
+        _discard_result_media(result)
 
     logger.info("MEDIA scene=%d result=stock_exhausted query=%r", number, query)
     raise RuntimeError(f"Scene {number} stock exhausted after bounded video-first search.")

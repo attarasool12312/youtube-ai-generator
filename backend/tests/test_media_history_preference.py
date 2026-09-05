@@ -29,9 +29,9 @@ class HistoryPreferenceTests(unittest.TestCase):
         fake, calls = _fake_try_providers([weak])
         with tempfile.TemporaryDirectory() as folder, patch("app.media_selector.try_providers", side_effect=fake), \
                 patch("app.media_selector._try_licensed_historical_sources", return_value=None):
-            result = select_media("mummy", folder, 2, "video", "landscape",
-                                  used_sources={"same-job"}, history_sources={"old-mummy"})
-            self.assertEqual(result["source"], "old-mummy")
+            with self.assertRaises(RuntimeError):
+                select_media("mummy", folder, 2, "video", "landscape",
+                             used_sources={"same-job"}, history_sources={"old-mummy"})
         self.assertEqual(calls, [{"same-job"}])
 
     def test_same_job_source_stays_excluded(self):
@@ -48,5 +48,6 @@ class HistoryPreferenceTests(unittest.TestCase):
         fake, calls = _fake_try_providers([weak])
         with tempfile.TemporaryDirectory() as folder, patch("app.media_selector.try_providers", side_effect=fake), \
                 patch("app.media_selector._try_licensed_historical_sources", return_value=None):
-            select_media("x", folder, 1, "video", "landscape")
+            with self.assertRaises(RuntimeError):
+                select_media("x", folder, 1, "video", "landscape")
         self.assertEqual(len(calls), 1)
