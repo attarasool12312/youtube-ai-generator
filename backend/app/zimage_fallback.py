@@ -301,13 +301,13 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
             "filler imagery, or invented events."
         ),
         (
-            "No maps, digital globes, route diagrams, title cards, "
-            "infographics, fake screens, fake UI, posters, or "
-            "presentation layouts."
+            "Keep the frame as one coherent real-world physical scene "
+            "captured by a documentary camera, with no composited panels, "
+            "editorial overlays, or artificial visual inserts."
         ),
         (
-            "No text. No readable words, letters, numbers, labels, "
-            "logos, captions, signs, watermarks, or interface elements."
+            "Use clean unbranded physical objects and surfaces without "
+            "readable writing or visible branding."
         ),
     ])
 

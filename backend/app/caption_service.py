@@ -361,8 +361,29 @@ def generate_caption_files(
 
     segments = list(segment_iterator)
 
+    word_timestamps = []
+    for segment in segments:
+        for word in (getattr(segment, "words", None) or []):
+            text = str(getattr(word, "word", "") or "").strip()
+            start = getattr(word, "start", None)
+            end = getattr(word, "end", None)
+
+            if text and start is not None and end is not None:
+                word_timestamps.append({
+                    "word": text,
+                    "start": round(float(start), 3),
+                    "end": round(float(end), 3),
+                })
+
     del model
     gc.collect()
+
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
     cues = _build_cues(segments, orientation)
 
@@ -398,4 +419,5 @@ def generate_caption_files(
         "position": position,
         "background": bool(background),
         "outline": outline,
+        "word_timestamps": word_timestamps,
     }

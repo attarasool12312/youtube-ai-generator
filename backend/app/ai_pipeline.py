@@ -191,9 +191,9 @@ def call_qwen_json(prompt: str) -> dict:
     errors = []
 
     attempts = [
-        (call_gemini, 3),
-        (call_ollama, 2),
-        (call_together, 1),
+        (call_gemini_35_flash_lite, 1),
+        (call_gemini_31_flash_lite, 1),
+        (call_deepseek_metadata_flash, 1),
     ]
 
     for provider, total in attempts:

@@ -40,7 +40,6 @@ PIP="$VENV/bin/pip"
 
 SERVICE_NAME="youtube-ai-generator"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-OLLAMA_MODEL="qwen3:30b"
 
 RECOVERY_ARCHIVE="$PROJECT_ROOT/recovery/runtime-state.tar.gz"
 RECOVERY_CHECKSUM="$PROJECT_ROOT/recovery/runtime-state.sha256"
@@ -574,29 +573,7 @@ systemctl enable --now redis-server
 redis-cli ping | grep -q PONG || \
     fail "Redis did not start."
 
-if ! command -v ollama >/dev/null 2>&1; then
-    log "Installing Ollama"
-    curl -fsSL https://ollama.com/install.sh | sh
-fi
-
-log "Starting Ollama"
-
-systemctl enable --now ollama
-
-for _ in $(seq 1 60); do
-    if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-        break
-    fi
-
-    sleep 2
-done
-
-curl -fsS http://127.0.0.1:11434/api/tags >/dev/null || \
-    fail "Ollama did not start."
-
-log "Downloading Ollama model: $OLLAMA_MODEL"
-
-run_as_user ollama pull "$OLLAMA_MODEL"
+log "Using cloud AI providers; Ollama/Qwen installation skipped."
 
 ENV_FILE="$PROJECT_ROOT/.env"
 
@@ -620,7 +597,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
     export GENERATED_ADMIN_PASSWORD
     export SECRET_KEY
     export FERNET_KEY
-    export OLLAMA_MODEL
 
     "$PYTHON" - <<'PYENV'
 import json
@@ -651,8 +627,6 @@ values = {
     "DEFAULT_DURATION_MINUTES": "10",
     "DEFAULT_LANGUAGE": "English",
     "DEFAULT_VOICE": "male",
-    "OLLAMA_URL": "http://127.0.0.1:11434",
-    "OLLAMA_MODEL": os.environ["OLLAMA_MODEL"],
 }
 
 content = "\n".join(
@@ -868,7 +842,7 @@ log "Installing permanent dashboard service"
 cat > "$SERVICE_FILE" <<SERVICE
 [Unit]
 Description=YouTube AI Video Generator
-After=network-online.target redis-server.service ollama.service
+After=network-online.target redis-server.service
 Wants=network-online.target
 
 [Service]
@@ -963,9 +937,6 @@ print("APPLICATION_IMPORTS_OK")
 print("AVATAR_SERVICE_IMPORT_OK")
 print("FACEBOOK_PUBLISHING_IMPORTS_OK")
 PYAPP
-
-ollama list | grep -F "$OLLAMA_MODEL" >/dev/null || \
-    fail "Ollama model is missing."
 
 log "Checking video encoder availability"
 

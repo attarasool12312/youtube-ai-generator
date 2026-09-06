@@ -10,7 +10,10 @@ from app.ai_pipeline import (
     generate_video_package,
     generate_video_package_from_script,
 )
-from app.audio_timing import sync_scenes_to_audio
+from app.audio_timing import (
+    sync_scenes_to_audio,
+    sync_scenes_to_word_timestamps,
+)
 from app.caption_service import generate_caption_files
 from app.database import SessionLocal
 from app.models import Avatar, VideoJob
@@ -352,6 +355,32 @@ def run_job(job_id: int) -> None:
                 logger.warning("Captions failed: %s", caption_error[0])
             else:
                 captions = caption_result[0]
+
+                word_timestamps = (
+                    captions.pop("word_timestamps", [])
+                    if captions
+                    else []
+                )
+
+                try:
+                    alignment = sync_scenes_to_word_timestamps(
+                        package["scenes"],
+                        word_timestamps,
+                        package["audio_duration_seconds"],
+                    )
+                    package["audio_timing_alignment"] = alignment
+
+                    logger.info(
+                        "AUDIO_WORD_SYNC applied=%s confidence=%s matched=%s",
+                        alignment.get("applied"),
+                        alignment.get("confidence"),
+                        alignment.get("matched_tokens"),
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "AUDIO_WORD_SYNC fallback to proportional timing: %s",
+                        error,
+                    )
 
             _record_timing_seconds(
                 output_dir,
