@@ -1,0 +1,20 @@
+{
+  "private": true,
+  "name": "atta-remotion-editor",
+  "version": "1.0.0",
+  "scripts": {
+    "compositions": "remotion compositions src/index.jsx"
+  },
+  "dependencies": {
+    "@remotion/captions": "4.0.521",
+    "@remotion/cli": "4.0.521",
+    "@remotion/motion-blur": "4.0.521",
+    "@remotion/noise": "4.0.521",
+    "@remotion/paths": "4.0.521",
+    "@remotion/shapes": "4.0.521",
+    "@remotion/transitions": "4.0.521",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.521"
+  }
+}

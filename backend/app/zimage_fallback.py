@@ -169,6 +169,20 @@ def _zimage_graphic_risk(value):
         "infographic",
         "poster layout",
         "presentation slide",
+        "flow diagram",
+        "flow chart",
+        "diagram on paper",
+        "receipt",
+        "invoice",
+        "billing statement",
+        "account statement",
+        "credit card statement",
+        "loan statement",
+        "financial ledger",
+        "ledger sheet",
+        "credit report document",
+        "rewards brochure",
+        "rewards catalog",
     )
 
     return any(term in text for term in risky)
@@ -221,13 +235,67 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
         if str(value).strip()
     ]
 
-    # Never let Z-Image manufacture maps, globes, title cards,
-    # fake UI, infographic layouts or similar editorial graphics.
+    # Z-Image has no true negative-prompt channel. Never mention
+    # unwanted editorial objects anywhere in the positive prompt.
+    # Even "no X" can cause X to appear.
     if _zimage_graphic_risk(subject):
         subject = ""
 
-    if _zimage_graphic_risk(planned_prompt):
+    for field_name in (
+        "action",
+        "environment",
+        "shot_type",
+        "camera_angle",
+        "focal_detail",
+        "visual_distinction",
+        "planned_prompt",
+    ):
+        value = locals()[field_name]
+        if _zimage_graphic_risk(value):
+            if field_name == "action":
+                action = ""
+            elif field_name == "environment":
+                environment = ""
+            elif field_name == "shot_type":
+                shot_type = ""
+            elif field_name == "camera_angle":
+                camera_angle = ""
+            elif field_name == "focal_detail":
+                focal_detail = ""
+            elif field_name == "visual_distinction":
+                visual_distinction = ""
+            elif field_name == "planned_prompt":
+                planned_prompt = ""
+
+    if not subject and environment:
+        subject = environment
+
+    narration = " ".join(
+        str(scene.get("narration") or "").lower().split()
+    )
+
+    is_cta = (
+        "subscribe" in narration
+        or (
+            "comment" in narration
+            and "like" in narration
+        )
+    )
+
+    if is_cta:
+        # Closing visuals must stay physical. Never send a video title,
+        # CTA wording, poster-style concept or title-like composition
+        # into Z-Image.
         planned_prompt = ""
+        action = ""
+        visual_distinction = ""
+
+        if environment:
+            subject = environment
+        elif focal_detail:
+            subject = focal_detail
+        else:
+            subject = _zimage_title_anchor(video_title)
 
     if not subject:
         subject = _zimage_title_anchor(video_title)
@@ -311,11 +379,8 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
         ),
     ])
 
-    if negatives:
-        parts.append(
-            "Exclude: " + ", ".join(negatives[:8]) + "."
-        )
-
+    # Do not append textual negative keywords. Z-Image Turbo can
+    # visually react to forbidden nouns even when phrased as exclusions.
     return " ".join(parts)
 
 

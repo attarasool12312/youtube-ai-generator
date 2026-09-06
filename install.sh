@@ -243,6 +243,18 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     sqlite3 \
     unzip
 
+log "Installing Node.js 22 for Remotion"
+
+if ! command -v node >/dev/null 2>&1 || \
+   [[ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -lt 22 ]]
+then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+fi
+
+node --version
+npm --version
+
 command -v nvidia-smi >/dev/null 2>&1 || \
     fail "NVIDIA driver or GPU was not detected."
 
@@ -297,6 +309,27 @@ mkdir -p \
 chown -R "$APP_USER:$APP_GROUP" \
     "$PROJECT_ROOT" \
     "$MODEL_ROOT"
+
+log "Installing Remotion production dependencies"
+
+[[ -f "$PROJECT_ROOT/remotion/package.json" ]] || \
+    fail "Remotion package.json is missing."
+
+[[ -f "$PROJECT_ROOT/remotion/package-lock.json" ]] || \
+    fail "Remotion package-lock.json is missing."
+
+run_as_user bash -lc \
+    "cd '$PROJECT_ROOT/remotion' && npm ci"
+
+log "Ensuring Remotion browser runtime"
+
+run_as_user bash -lc \
+    "cd '$PROJECT_ROOT/remotion' && npx remotion browser ensure"
+
+log "Verifying Remotion composition"
+
+run_as_user bash -lc \
+    "cd '$PROJECT_ROOT/remotion' && npx remotion compositions src/index.jsx"
 
 log "Preparing Python virtual environment"
 
@@ -573,7 +606,6 @@ systemctl enable --now redis-server
 redis-cli ping | grep -q PONG || \
     fail "Redis did not start."
 
-log "Using cloud AI providers; Ollama/Qwen installation skipped."
 
 ENV_FILE="$PROJECT_ROOT/.env"
 

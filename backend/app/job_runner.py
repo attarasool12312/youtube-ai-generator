@@ -19,7 +19,11 @@ from app.database import SessionLocal
 from app.models import Avatar, VideoJob
 from app.kokoro_service import generate_narration, unload_pipelines
 from app.scene_media import download_scene_images
-from app.zimage_fallback import apply_zimage_fallbacks
+from app.zimage_fallback import (
+    apply_zimage_fallbacks,
+    start_zimage_warmup,
+    cancel_zimage_warmup,
+)
 from app.video_renderer import render_video, overlay_avatar_video
 from app.paths import OUTPUT_ROOT
 from app.avatar_service import generate_avatar_video
@@ -280,6 +284,26 @@ def run_job(job_id: int) -> None:
         captions = None
         caption_started = time.perf_counter()
         media_started = time.perf_counter()
+        zimage_warmup = None
+
+        def _release_tts_for_zimage():
+            if narrator_voice.startswith("cloned:"):
+                try:
+                    from app.chatterbox_service import unload_model as unload_chatterbox_model
+                    unload_chatterbox_model()
+                except Exception as error:
+                    logger.info(
+                        "ZIMAGE Chatterbox cleanup skipped: %s",
+                        error,
+                    )
+            else:
+                try:
+                    unload_pipelines()
+                except Exception as error:
+                    logger.info(
+                        "ZIMAGE Kokoro cleanup skipped: %s",
+                        error,
+                    )
 
         if captions_enabled:
             def _do_captions():
@@ -348,48 +372,69 @@ def run_job(job_id: int) -> None:
             with ThreadPoolExecutor(max_workers=2) as pool:
                 fut_cap = pool.submit(_run_captions)
                 fut_med = pool.submit(_run_media)
+
+                # Whisper is normally much faster than stock collection.
+                # As soon as Whisper releases the GPU, begin loading
+                # Z-Image while stock network searches continue.
                 fut_cap.result()
-                fut_med.result()
 
-            if caption_error[0]:
-                logger.warning("Captions failed: %s", caption_error[0])
-            else:
-                captions = caption_result[0]
+                if caption_error[0]:
+                    logger.warning(
+                        "Captions failed: %s",
+                        caption_error[0],
+                    )
+                else:
+                    captions = caption_result[0]
 
-                word_timestamps = (
-                    captions.pop("word_timestamps", [])
-                    if captions
-                    else []
+                    word_timestamps = (
+                        captions.pop("word_timestamps", [])
+                        if captions
+                        else []
+                    )
+
+                    try:
+                        alignment = sync_scenes_to_word_timestamps(
+                            package["scenes"],
+                            word_timestamps,
+                            package["audio_duration_seconds"],
+                        )
+                        package["audio_timing_alignment"] = alignment
+
+                        logger.info(
+                            "AUDIO_WORD_SYNC applied=%s confidence=%s matched=%s",
+                            alignment.get("applied"),
+                            alignment.get("confidence"),
+                            alignment.get("matched_tokens"),
+                        )
+                    except Exception as error:
+                        logger.warning(
+                            "AUDIO_WORD_SYNC fallback to proportional timing: %s",
+                            error,
+                        )
+
+                _record_timing_seconds(
+                    output_dir,
+                    timings,
+                    "captions",
+                    caption_elapsed[0],
                 )
 
-                try:
-                    alignment = sync_scenes_to_word_timestamps(
-                        package["scenes"],
-                        word_timestamps,
-                        package["audio_duration_seconds"],
-                    )
-                    package["audio_timing_alignment"] = alignment
+                _release_tts_for_zimage()
 
+                zimage_warmup = start_zimage_warmup(
+                    output_dir,
+                    timeout_seconds=1800,
+                )
+
+                if zimage_warmup:
                     logger.info(
-                        "AUDIO_WORD_SYNC applied=%s confidence=%s matched=%s",
-                        alignment.get("applied"),
-                        alignment.get("confidence"),
-                        alignment.get("matched_tokens"),
-                    )
-                except Exception as error:
-                    logger.warning(
-                        "AUDIO_WORD_SYNC fallback to proportional timing: %s",
-                        error,
+                        "ZIMAGE_WARMUP_OVERLAP started during stock collection"
                     )
 
-            _record_timing_seconds(
-                output_dir,
-                timings,
-                "captions",
-                caption_elapsed[0],
-            )
+                fut_med.result()
 
             if media_error[0]:
+                cancel_zimage_warmup(zimage_warmup)
                 raise media_error[0]
 
             package["scenes"] = media_result[0]
@@ -415,6 +460,12 @@ def run_job(job_id: int) -> None:
                     min(84, max(68, progress)),
                 )
 
+            _release_tts_for_zimage()
+            zimage_warmup = start_zimage_warmup(
+                output_dir,
+                timeout_seconds=1800,
+            )
+
             package["scenes"] = download_scene_images(
                 package["scenes"],
                 output_dir,
@@ -438,21 +489,10 @@ def run_job(job_id: int) -> None:
             if scene.get("needs_ai_fallback")
         )
         if zimage_targets:
-            # Reliability first: do not overlap the ~20 GB Z-Image model with
-            # narration/caption GPU residents.  Stock search is complete here,
-            # so explicitly release cached TTS state before loading Z-Image once
-            # for the entire AI-image batch.
-            if narrator_voice.startswith("cloned:"):
-                try:
-                    from app.chatterbox_service import unload_model as unload_chatterbox_model
-                    unload_chatterbox_model()
-                except Exception as error:
-                    logger.info("ZIMAGE Chatterbox cleanup skipped: %s", error)
-            else:
-                try:
-                    unload_pipelines()
-                except Exception as error:
-                    logger.info("ZIMAGE Kokoro cleanup skipped: %s", error)
+            # TTS/Whisper have already been released before speculative
+            # Z-Image warmup. Releasing again is harmless and protects the
+            # non-warm fallback path.
+            _release_tts_for_zimage()
 
             update_job_progress(job_id, "media_collection", 84)
             zimage_started = time.perf_counter()
@@ -474,6 +514,7 @@ def run_job(job_id: int) -> None:
                 video_title=package.get("title", title),
                 video_profile=package.get("detected_style", video_style),
                 progress_callback=_zimage_progress,
+                warmup=zimage_warmup,
             )
             _record_timing(
                 output_dir,
@@ -482,6 +523,7 @@ def run_job(job_id: int) -> None:
                 zimage_started,
             )
         else:
+            cancel_zimage_warmup(zimage_warmup)
             _record_timing_seconds(
                 output_dir,
                 timings,

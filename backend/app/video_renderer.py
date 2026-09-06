@@ -768,6 +768,40 @@ def render_video(
         exist_ok=True,
     )
 
+    # Remotion is now the primary creative editing layer.
+    # Existing FFmpeg renderer remains a production-safe fallback.
+    try:
+        from app.remotion_renderer import (
+            render_remotion_video,
+        )
+
+        remotion_result = render_remotion_video(
+            scenes=scenes,
+            narration=narration,
+            output_path=output_path,
+            orientation=orientation,
+            captions_ass=captions_ass,
+        )
+
+        if remotion_result:
+            _validate_video(
+                output_path,
+                width,
+                height,
+            )
+            print(
+                "Video render completed using Remotion.",
+                flush=True,
+            )
+            return remotion_result
+
+    except Exception as error:
+        print(
+            "REMOTION_FALLBACK_TO_FFMPEG: "
+            f"{error}",
+            flush=True,
+        )
+
     clips = output_path.parent / "render-clips"
     timeline_file = (
         output_path.parent / "timeline.txt"
