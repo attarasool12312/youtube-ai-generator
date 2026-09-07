@@ -132,10 +132,25 @@ def run_job(job_id: int) -> None:
         narrator_voice = job.narrator_voice
         voice_speed = job.voice_speed
         captions_enabled = bool(job.captions_enabled)
+        caption_font_family = (
+            getattr(job, "caption_font_family", None) or "Manrope"
+        )
+        caption_font_color = (
+            getattr(job, "caption_font_color", None) or "#FFFFFF"
+        )
         caption_font_size = job.caption_font_size or 48
         caption_position = job.caption_position or "bottom"
         caption_background = bool(job.caption_background)
         caption_outline = job.caption_outline
+
+        caption_style = {
+            "fontFamily": caption_font_family,
+            "fontColor": caption_font_color,
+            "fontSize": caption_font_size,
+            "position": caption_position,
+            "background": caption_background,
+            "outline": caption_outline,
+        }
         avatar_id = job.avatar_id
         avatar_position = (
             job.avatar_position
@@ -591,6 +606,7 @@ def run_job(job_id: int) -> None:
                             if captions
                             else None
                         ),
+                        caption_style=caption_style,
                     )
                 except Exception as e:
                     render_error[0] = e
@@ -728,6 +744,7 @@ def run_job(job_id: int) -> None:
                     if captions
                     else None
                 ),
+                caption_style=caption_style,
             )
 
             _record_timing(

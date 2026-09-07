@@ -96,8 +96,6 @@ from app.api_settings import (
     remove_api_key,
     save_api_key,
 )
-from app.provider_quota import clear_quota_cache, get_provider_quotas
-from app.api_health import get_test_results, test_provider
 from app.audio_export import create_narration_mp3
 from app.security import hash_password, verify_password
 from app.voice_registry import (
@@ -1390,7 +1388,9 @@ def add_jobs(
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
     captions_enabled: str = Form("enabled"),
-    caption_font_size: int = Form(36),
+    caption_font_family: str = Form("Manrope"),
+    caption_font_color: str = Form("#FFFFFF"),
+    caption_font_size: int = Form(48),
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
@@ -1428,6 +1428,36 @@ def add_jobs(
 
     captions_enabled_value = captions_enabled == "enabled"
     caption_background_value = caption_background == "on"
+
+    allowed_caption_fonts = {
+        "Manrope",
+        "Inter",
+        "Montserrat",
+        "Poppins",
+        "Roboto",
+        "Open Sans",
+        "Lato",
+        "Nunito",
+        "Merriweather",
+        "Source Sans 3",
+    }
+
+    if caption_font_family not in allowed_caption_fonts:
+        caption_font_family = "Manrope"
+
+    caption_font_color = str(caption_font_color or "").strip()
+
+    if not (
+        len(caption_font_color) == 7
+        and caption_font_color.startswith("#")
+        and all(
+            c in "0123456789abcdefABCDEF"
+            for c in caption_font_color[1:]
+        )
+    ):
+        caption_font_color = "#FFFFFF"
+
+    caption_font_color = caption_font_color.upper()
 
     # AI scene media is currently disabled.
     media_source = "stock_only"
@@ -1671,6 +1701,8 @@ def add_jobs(
             voice_pool=",".join(selected_voices),
             voice_speed=voice_speed,
             captions_enabled=captions_enabled_value,
+            caption_font_family=caption_font_family,
+            caption_font_color=caption_font_color,
             caption_font_size=caption_font_size,
             caption_position=caption_position,
             caption_background=caption_background_value,
@@ -1731,7 +1763,9 @@ def add_script_job(
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
     captions_enabled: str = Form("enabled"),
-    caption_font_size: int = Form(36),
+    caption_font_family: str = Form("Manrope"),
+    caption_font_color: str = Form("#FFFFFF"),
+    caption_font_size: int = Form(48),
     caption_position: str = Form("bottom"),
     caption_background: str = Form("on"),
     caption_outline: int = Form(2),
@@ -1800,6 +1834,36 @@ def add_script_job(
 
     captions_enabled_value = captions_enabled == "enabled"
     caption_background_value = caption_background == "on"
+
+    allowed_caption_fonts = {
+        "Manrope",
+        "Inter",
+        "Montserrat",
+        "Poppins",
+        "Roboto",
+        "Open Sans",
+        "Lato",
+        "Nunito",
+        "Merriweather",
+        "Source Sans 3",
+    }
+
+    if caption_font_family not in allowed_caption_fonts:
+        caption_font_family = "Manrope"
+
+    caption_font_color = str(caption_font_color or "").strip()
+
+    if not (
+        len(caption_font_color) == 7
+        and caption_font_color.startswith("#")
+        and all(
+            c in "0123456789abcdefABCDEF"
+            for c in caption_font_color[1:]
+        )
+    ):
+        caption_font_color = "#FFFFFF"
+
+    caption_font_color = caption_font_color.upper()
 
     # AI scene media is intentionally disabled.
     media_source = "stock_only"
@@ -2042,6 +2106,8 @@ def add_script_job(
         voice_pool=",".join(selected_voices),
         voice_speed=voice_speed,
         captions_enabled=captions_enabled_value,
+        caption_font_family=caption_font_family,
+        caption_font_color=caption_font_color,
         caption_font_size=caption_font_size,
         caption_position=caption_position,
         caption_background=caption_background_value,
@@ -3709,11 +3775,6 @@ def api_settings_page(request: Request):
         "youtube_client_secret"
     )
     zernio_ready = has_api_key("zernio_api_key")
-    force_limits_refresh = request.query_params.get("limits_refreshed") == "1"
-    provider_quotas = get_provider_quotas(
-        force_refresh=force_limits_refresh
-    )
-
     configured_count = sum([
         pexels_ready,
         pixabay_ready,
@@ -3745,37 +3806,8 @@ def api_settings_page(request: Request):
             "zernio_ready": zernio_ready,
             "configured_count": configured_count,
             "total_integrations": 8,
-            "provider_quotas": provider_quotas,
-            "limits_checked_at": (
-                provider_quotas[0]["checked_at"]
-                if provider_quotas else None
-            ),
-            "limits_cache_state": provider_quotas[0].get("cache_state", "Cached") if provider_quotas else "Cached",
-            "provider_test_results": get_test_results(),
         },
     )
-
-
-@app.post("/settings/limits/refresh")
-def refresh_api_limits(request: Request):
-    if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
-
-    clear_quota_cache()
-    return RedirectResponse(
-        "/settings?limits_refreshed=1#api-limits",
-        status_code=303,
-    )
-
-
-@app.post("/settings/providers/{provider}/test")
-def test_api_provider(request: Request, provider: str):
-    if not request.session.get("user_id"):
-        return RedirectResponse("/login", status_code=303)
-    if provider not in {"pexels", "pixabay", "coverr", "openverse", "gemini", "together", "youtube"}:
-        raise HTTPException(status_code=404, detail="Unknown provider")
-    test_provider(provider)
-    return RedirectResponse("/settings#api-limits", status_code=303)
 
 
 @app.post("/settings")

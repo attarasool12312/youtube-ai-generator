@@ -10,7 +10,7 @@ from app.media_selector import select_media
 def _fake_try_providers(results):
     calls = []
 
-    def fake(providers, query, folder, number, extension, orientation, used_sources, topic_context=None, deadline=None):
+    def fake(providers, query, folder, number, extension, orientation, used_sources, topic_context=None, deadline=None, **kwargs):
         calls.append(set(used_sources))
         outcome = results.pop(0) if results else None
         if outcome is None:
@@ -32,7 +32,7 @@ class HistoryPreferenceTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 select_media("mummy", folder, 2, "video", "landscape",
                              used_sources={"same-job"}, history_sources={"old-mummy"})
-        self.assertEqual(calls, [{"same-job"}])
+        self.assertEqual(calls, [{"same-job"}, {"same-job"}])
 
     def test_same_job_source_stays_excluded(self):
         strong = {"source": "fresh-good", "relevance_score": 80, "relevance_confidence": "strong"}
@@ -50,4 +50,4 @@ class HistoryPreferenceTests(unittest.TestCase):
                 patch("app.media_selector._try_licensed_historical_sources", return_value=None):
             with self.assertRaises(RuntimeError):
                 select_media("x", folder, 1, "video", "landscape")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)

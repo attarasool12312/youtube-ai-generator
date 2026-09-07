@@ -62,7 +62,13 @@ class VideoJob(Base):
     voice_pool: Mapped[str] = mapped_column(Text, default=DEFAULT_VOICE_POOL_CSV)
     voice_speed: Mapped[float] = mapped_column(Float, default=1.0)
     captions_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    caption_font_size: Mapped[int] = mapped_column(Integer, default=36)
+    caption_font_size: Mapped[int] = mapped_column(Integer, default=48)
+    caption_font_family: Mapped[str] = mapped_column(
+        String(50), default="Manrope"
+    )
+    caption_font_color: Mapped[str] = mapped_column(
+        String(20), default="#FFFFFF"
+    )
     caption_position: Mapped[str] = mapped_column(
         String(20), default="bottom"
     )

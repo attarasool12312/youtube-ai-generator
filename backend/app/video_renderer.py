@@ -750,6 +750,7 @@ def render_video(
     output_path,
     orientation="landscape",
     captions_ass=None,
+    caption_style=None,
 ):
     sizes = {
         "landscape": (1920, 1080),
@@ -781,6 +782,7 @@ def render_video(
             output_path=output_path,
             orientation=orientation,
             captions_ass=captions_ass,
+            caption_style=caption_style,
         )
 
         if remotion_result:

@@ -430,42 +430,54 @@ def first_success(
     cleaner=clean_script,
 ):
     errors = []
+    chain = providers or provider_chain()
 
-    for name, provider in providers or provider_chain():
-        try:
-            result = provider(prompt, json_mode=False)
-            text = cleaner(result.text)
+    # Two complete passes make transient cloud/model failures recoverable
+    # without weakening any narration quality gate.
+    for round_number in range(2):
+        if round_number:
+            logger.warning(
+                "SCRIPT_PROVIDER_CHAIN_RETRY round=%s",
+                round_number + 1,
+            )
+            _pace_script_api()
 
-            if text and require_complete_start and has_broken_opening(text):
-                message = (
-                    f"{name}: output began with a broken "
-                    "lowercase sentence fragment"
-                )
+        for name, provider in chain:
+            try:
+                result = provider(prompt, json_mode=False)
+                text = cleaner(result.text)
+
+                if text and require_complete_start and has_broken_opening(text):
+                    message = (
+                        f"{name}: output began with a broken "
+                        "lowercase sentence fragment"
+                    )
+                    errors.append(message)
+                    logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
+                    continue
+
+                if text and validator is not None and not validator(text):
+                    message = f"{name}: invalid {validation_name}"
+                    errors.append(message)
+                    logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
+                    continue
+
+                if text:
+                    return text, result.provider
+
+                message = f"{name}: empty output"
                 errors.append(message)
                 logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
-                continue
 
-            if text and validator is not None and not validator(text):
-                message = f"{name}: invalid {validation_name}"
+            except Exception as error:
+                message = f"{name}: {error}"
                 errors.append(message)
-                logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
-                continue
-
-            if text:
-                return text, result.provider
-
-            message = f"{name}: empty output"
-            errors.append(message)
-            logger.warning("SCRIPT_PROVIDER_REJECTED %s", message)
-
-        except Exception as error:
-            message = f"{name}: {error}"
-            errors.append(message)
-            logger.warning("SCRIPT_PROVIDER_FAILED %s", message)
+                logger.warning("SCRIPT_PROVIDER_FAILED %s", message)
 
     raise RuntimeError(
-        "All providers failed: " + " | ".join(errors)
+        "All providers failed after 2 rounds: " + " | ".join(errors)
     )
+
 
 
 def calculate_section_count(target_words):

@@ -1,5 +1,16 @@
 import React from 'react';
 
+import '@fontsource/manrope/700.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/montserrat/700.css';
+import '@fontsource/poppins/700.css';
+import '@fontsource/roboto/700.css';
+import '@fontsource/open-sans/700.css';
+import '@fontsource/lato/700.css';
+import '@fontsource/nunito/700.css';
+import '@fontsource/merriweather/700.css';
+import '@fontsource/source-sans-3/700.css';
+
 import {
   AbsoluteFill,
   Audio,
@@ -43,77 +54,231 @@ const hash = (value) => {
    Different videos deterministically receive different DNA.
 --------------------------------------------------------- */
 
-const PALETTES = [
-  {
-    accent: '#37C9FF',
-    accent2: '#7868FF',
-    soft: '#C9F3FF',
-    dark: '#07111D',
-  },
-  {
-    accent: '#F4B942',
-    accent2: '#F97316',
-    soft: '#FFE7A8',
-    dark: '#151006',
-  },
-  {
-    accent: '#36D399',
-    accent2: '#22A7F0',
-    soft: '#C5FBE8',
-    dark: '#061510',
-  },
-  {
-    accent: '#E879F9',
-    accent2: '#8B5CF6',
-    soft: '#F4D5FF',
-    dark: '#12091A',
-  },
-  {
-    accent: '#FF6B7A',
-    accent2: '#FF9F43',
-    soft: '#FFD6DA',
-    dark: '#18080B',
-  },
-  {
-    accent: '#69A9FF',
-    accent2: '#38E0D0',
-    soft: '#D2E6FF',
-    dark: '#07101A',
-  },
-];
+const NICHE_PALETTES = {
+  nasa: [
+    {
+      accent: '#39D8FF',
+      accent2: '#6777FF',
+      soft: '#C9F6FF',
+      dark: '#040A14',
+    },
+    {
+      accent: '#64E9FF',
+      accent2: '#8A6CFF',
+      soft: '#D8F8FF',
+      dark: '#050916',
+    },
+  ],
+
+  news: [
+    {
+      accent: '#5BA8FF',
+      accent2: '#E75A62',
+      soft: '#DCEBFF',
+      dark: '#08111B',
+    },
+    {
+      accent: '#7CB8FF',
+      accent2: '#D8E3F0',
+      soft: '#EFF6FF',
+      dark: '#09121C',
+    },
+  ],
+
+  science: [
+    {
+      accent: '#35D5C8',
+      accent2: '#3F9EFF',
+      soft: '#C9FFF7',
+      dark: '#041411',
+    },
+    {
+      accent: '#46E1B7',
+      accent2: '#55B8FF',
+      soft: '#D5FFF4',
+      dark: '#061510',
+    },
+  ],
+
+  history: [
+    {
+      accent: '#D9A84E',
+      accent2: '#B96F3A',
+      soft: '#F4DFB2',
+      dark: '#171007',
+    },
+    {
+      accent: '#E6B85E',
+      accent2: '#8E6846',
+      soft: '#F7E6C4',
+      dark: '#151008',
+    },
+  ],
+
+  business: [
+    {
+      accent: '#56B8FF',
+      accent2: '#39D39F',
+      soft: '#D7F1FF',
+      dark: '#06121A',
+    },
+    {
+      accent: '#5D8FFF',
+      accent2: '#47D7B1',
+      soft: '#DEE7FF',
+      dark: '#07111A',
+    },
+  ],
+
+  generic: [
+    {
+      accent: '#37C9FF',
+      accent2: '#7868FF',
+      soft: '#C9F3FF',
+      dark: '#07111D',
+    },
+    {
+      accent: '#36D399',
+      accent2: '#22A7F0',
+      soft: '#C5FBE8',
+      dark: '#061510',
+    },
+    {
+      accent: '#F4B942',
+      accent2: '#F97316',
+      soft: '#FFE7A8',
+      dark: '#151006',
+    },
+  ],
+};
+
+const inferNiche = (scenes) => {
+  const text = clean(
+    scenes
+      .slice(0, 20)
+      .map(
+        (scene) =>
+          `${scene.subject} ` +
+          `${scene.environment} ` +
+          `${scene.action} ` +
+          `${scene.focalDetail} ` +
+          `${scene.visualDistinction}`
+      )
+      .join(' ')
+  ).toLowerCase();
+
+  if (
+    /\b(nasa|space|planet|moon|mars|rocket|orbit|astronaut|satellite|galaxy|asteroid|telescope)\b/.test(text)
+  ) {
+    return 'nasa';
+  }
+
+  if (
+    /\b(news|government|president|minister|election|war|breaking|reporter|parliament|white house|downing street)\b/.test(text)
+  ) {
+    return 'news';
+  }
+
+  if (
+    /\b(science|scientist|laboratory|research|discovery|experiment|microscope|physics|biology|chemistry|quantum|medical)\b/.test(text)
+  ) {
+    return 'science';
+  }
+
+  if (
+    /\b(ancient|history|civilization|empire|roman|egypt|archaeology|ruins|temple|medieval|pharaoh|artifact)\b/.test(text)
+  ) {
+    return 'history';
+  }
+
+  if (
+    /\b(business|money|finance|economy|market|bank|stock|investment|company|revenue|inflation|currency|credit)\b/.test(text)
+  ) {
+    return 'business';
+  }
+
+  return 'generic';
+};
 
 const getTheme = (scenes) => {
+  const niche = inferNiche(scenes);
+
   const signature = scenes
     .slice(0, 12)
-    .map((s) => `${s.subject} ${s.environment}`)
+    .map(
+      (scene) =>
+        `${scene.subject}|` +
+        `${scene.environment}|` +
+        `${scene.visualDistinction}`
+    )
     .join('|');
 
-  return PALETTES[
-    hash(signature) % PALETTES.length
-  ];
+  const palettes =
+    NICHE_PALETTES[niche] ||
+    NICHE_PALETTES.generic;
+
+  return {
+    ...palettes[
+      hash(signature) % palettes.length
+    ],
+    niche,
+    seed: hash(signature),
+  };
 };
 
 /* ---------------------------------------------------------
    TRANSITIONS
 --------------------------------------------------------- */
 
-const transitionFrames = (index) =>
-  [20, 24, 27, 18, 23, 29, 21, 25][
-    index % 8
-  ];
+const transitionFrames = (scene, index) => {
+  const signature =
+    `${scene.subject}|${scene.action}|${index}`;
 
-const transitionPresentation = (index) => {
+  const choice =
+    hash(signature) % 8;
+
+  // Intentional clean hard cuts keep the edit from
+  // feeling like every scene uses an effect.
+  if (choice === 0 || choice === 5) {
+    return 0;
+  }
+
+  return [
+    22,
+    26,
+    30,
+    24,
+    28,
+    32,
+  ][choice % 6];
+};
+
+const transitionPresentation = (
+  scene,
+  index
+) => {
+  const signature =
+    `${scene.subject}|${scene.environment}|` +
+    `${scene.visualDistinction}|${index}`;
+
   const variants = [
     linearBlur,
     crossZoom,
     pushCut,
-    dreamyZoom,
     linearBlur,
+    dreamyZoom,
+    pushCut,
     crossZoom,
   ];
 
+  const selected =
+    variants[
+      hash(signature) %
+      variants.length
+    ];
+
   try {
-    return variants[index % variants.length]();
+    return selected();
   } catch {
     return linearBlur();
   }
@@ -125,107 +290,198 @@ const transitionPresentation = (index) => {
 
 const getMotion = (scene, index) => {
   const text = clean(
-    `${scene.shotType} ${scene.cameraAngle}`
+    `${scene.shotType} ${scene.cameraAngle} ` +
+    `${scene.visualDistinction} ${scene.action}`
   ).toLowerCase();
 
   if (text.includes('macro')) return 'macro';
   if (text.includes('overhead')) return 'overhead';
   if (text.includes('aerial')) return 'aerial';
   if (text.includes('tracking')) return 'tracking';
-  if (text.includes('low')) return 'rise';
+  if (text.includes('low angle')) return 'rise';
+  if (text.includes('high angle')) return 'fall';
 
-  return [
+  const presets = [
     'push',
     'pull',
     'left',
     'right',
     'rise',
+    'fall',
     'float',
+    'drift',
+    'perspectiveLeft',
+    'perspectiveRight',
+    'reveal',
     'hold',
-  ][hash(`${scene.subject}-${index}`) % 7];
+  ];
+
+  const signature =
+    `${scene.subject}|${scene.environment}|` +
+    `${scene.visualDistinction}|${index}`;
+
+  return presets[
+    hash(signature) % presets.length
+  ];
 };
 
-const motionValues = (preset, p) => {
+const motionValues = (preset, progress) => {
+  const p =
+    progress * progress * (3 - 2 * progress);
+
   switch (preset) {
     case 'pull':
       return {
-        scale: 1.14 - p * 0.10,
-        x: 0,
-        y: 0,
-        rotate: 0,
+        scale: 1.16 - p * 0.12,
+        x: 0, y: 0, rotate: 0,
+        rotateX: 0, rotateY: 0,
       };
 
     case 'left':
       return {
-        scale: 1.09,
-        x: 3.8 - p * 7.6,
-        y: 0,
-        rotate: -0.25,
+        scale: 1.105,
+        x: 4.8 - p * 9.6,
+        y: 0.5 - p,
+        rotate: -0.22,
+        rotateX: 0,
+        rotateY: 0.7,
       };
 
     case 'right':
       return {
-        scale: 1.09,
-        x: -3.8 + p * 7.6,
-        y: 0,
-        rotate: 0.25,
+        scale: 1.105,
+        x: -4.8 + p * 9.6,
+        y: -0.5 + p,
+        rotate: 0.22,
+        rotateX: 0,
+        rotateY: -0.7,
       };
 
     case 'rise':
       return {
-        scale: 1.08 + p * 0.025,
-        x: 0,
-        y: 3.2 - p * 6.4,
-        rotate: -0.15,
+        scale: 1.075 + p * 0.055,
+        x: 0.4 - p * 0.8,
+        y: 4.2 - p * 8.4,
+        rotate: -0.14,
+        rotateX: 0.5,
+        rotateY: 0,
+      };
+
+    case 'fall':
+      return {
+        scale: 1.11 - p * 0.03,
+        x: -0.4 + p * 0.8,
+        y: -4 + p * 8,
+        rotate: 0.12,
+        rotateX: -0.5,
+        rotateY: 0,
       };
 
     case 'macro':
       return {
-        scale: 1.05 + p * 0.075,
-        x: -1 + p * 2,
-        y: 0.7 - p * 1.4,
+        scale: 1.045 + p * 0.095,
+        x: -1.3 + p * 2.6,
+        y: 0.9 - p * 1.8,
         rotate: 0,
+        rotateX: 0.25,
+        rotateY: -0.25,
       };
 
     case 'overhead':
+      return {
+        scale: 1.10,
+        x: -3 + p * 6,
+        y: 1.8 - p * 3.6,
+        rotate: -0.35 + p * 0.7,
+        rotateX: 0,
+        rotateY: 0,
+      };
+
     case 'aerial':
       return {
-        scale: 1.08,
-        x: -2.5 + p * 5,
-        y: 1.4 - p * 2.8,
-        rotate: 0.18,
+        scale: 1.12 - p * 0.045,
+        x: -3.5 + p * 7,
+        y: 2.2 - p * 4.4,
+        rotate: 0.3 - p * 0.55,
+        rotateX: 0.35,
+        rotateY: -0.25,
       };
 
     case 'tracking':
       return {
-        scale: 1.055,
-        x: -4 + p * 8,
-        y: 0,
+        scale: 1.075,
+        x: -5 + p * 10,
+        y: Math.sin(p * Math.PI) * 0.7,
         rotate: 0,
-      };
-
-    case 'hold':
-      return {
-        scale: 1.045,
-        x: 0,
-        y: 0,
-        rotate: 0,
+        rotateX: 0,
+        rotateY: -0.45 + p * 0.9,
       };
 
     case 'float':
       return {
-        scale: 1.07 + p * 0.025,
-        x: Math.sin(p * Math.PI) * 1.5,
-        y: -1.2 + p * 2.4,
-        rotate: 0.15,
+        scale: 1.075 + p * 0.03,
+        x: Math.sin(p * Math.PI) * 2,
+        y: -1.7 + p * 3.4,
+        rotate: -0.18 + p * 0.36,
+        rotateX: 0.35,
+        rotateY: -0.35,
+      };
+
+    case 'drift':
+      return {
+        scale: 1.085 + p * 0.02,
+        x: -2.8 + p * 5.6,
+        y: -1.6 + p * 3.2,
+        rotate: -0.12,
+        rotateX: -0.3,
+        rotateY: 0.4,
+      };
+
+    case 'perspectiveLeft':
+      return {
+        scale: 1.095 + p * 0.025,
+        x: 2.7 - p * 5.4,
+        y: 0,
+        rotate: -0.16,
+        rotateX: 0.25,
+        rotateY: 1.2 - p * 2.4,
+      };
+
+    case 'perspectiveRight':
+      return {
+        scale: 1.095 + p * 0.025,
+        x: -2.7 + p * 5.4,
+        y: 0,
+        rotate: 0.16,
+        rotateX: -0.25,
+        rotateY: -1.2 + p * 2.4,
+      };
+
+    case 'reveal':
+      return {
+        scale: 1.13 - p * 0.055,
+        x: -1.8 + p * 3.6,
+        y: 1.2 - p * 2.4,
+        rotate: -0.12 + p * 0.24,
+        rotateX: 0.55 - p * 0.55,
+        rotateY: -0.55 + p * 0.55,
+      };
+
+    case 'hold':
+      return {
+        scale: 1.055 + p * 0.012,
+        x: Math.sin(p * Math.PI) * 0.45,
+        y: Math.sin(p * Math.PI * 0.75) * 0.35,
+        rotate: 0,
+        rotateX: 0,
+        rotateY: 0,
       };
 
     default:
       return {
-        scale: 1.035 + p * 0.09,
-        x: 0,
-        y: 0,
-        rotate: 0,
+        scale: 1.035 + p * 0.105,
+        x: 0, y: 0, rotate: 0,
+        rotateX: 0, rotateY: 0,
       };
   }
 };
@@ -323,7 +579,9 @@ const SceneMedia = ({
             `perspective(1800px) ` +
             `scale(${m.scale}) ` +
             `translate(${m.x}%, ${m.y}%) ` +
-            `rotate(${m.rotate}deg)`,
+            `rotateX(${m.rotateX}deg) ` +
+              `rotateY(${m.rotateY}deg) ` +
+              `rotate(${m.rotate}deg)`,
           transformOrigin: 'center center',
           filter:
             'contrast(1.045) saturate(1.075)',
@@ -397,6 +655,227 @@ const CinematicFinish = ({
    FOCUS CHIP — TOP LEFT, SMALL
 --------------------------------------------------------- */
 
+const compactWords = (value, maxWords = 5) =>
+  clean(value)
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, maxWords)
+    .join(' ');
+
+const editorialGraphicFor = (scene) => {
+  const narration = clean(scene.narration);
+  if (!narration) return null;
+
+  const stat = narration.match(
+    /(?:[$£€]\s*)?\d+(?:[.,]\d+)?\s*(?:%|percent|million|billion|trillion)\b/i
+  );
+
+  if (stat) {
+    return {
+      type: 'stat',
+      value: stat[0],
+      label: compactWords(scene.subject, 5) || 'Key figure',
+    };
+  }
+
+  const years = narration.match(/\b(?:18|19|20)\d{2}\b/g) || [];
+
+  if (years.length >= 2) {
+    return {
+      type: 'timeline',
+      from: years[0],
+      to: years[years.length - 1],
+    };
+  }
+
+  if (
+    /\b(vs\.?|versus|compared to|more than|less than|twice|half as)\b/i.test(
+      narration
+    )
+  ) {
+    return {
+      type: 'comparison',
+      left: compactWords(scene.subject, 4) || 'A',
+      right:
+        compactWords(
+          scene.focalDetail || scene.visualDistinction,
+          4
+        ) || 'B',
+    };
+  }
+
+  if (
+    /\b(first|then|next|finally|step|process)\b/i.test(narration)
+  ) {
+    const items = [
+      compactWords(scene.subject, 3),
+      compactWords(scene.action, 3),
+      compactWords(scene.focalDetail, 3),
+    ].filter(Boolean);
+
+    if (items.length >= 2) {
+      return {
+        type: 'process',
+        items,
+      };
+    }
+  }
+
+  return null;
+};
+
+const EditorialGraphic = ({
+  scene,
+  theme,
+}) => {
+  const frame = useCurrentFrame();
+  const {fps, width, height} = useVideoConfig();
+
+  const graphic = editorialGraphicFor(scene);
+
+  if (!graphic) return null;
+
+  const enter = spring({
+    fps,
+    frame: Math.max(0, frame - Math.round(fps * 0.2)),
+    config: {
+      damping: 22,
+      stiffness: 115,
+      mass: 0.72,
+    },
+  });
+
+  const base = {
+    position: 'absolute',
+    top: height > width ? '10%' : '8%',
+    right: '4.5%',
+    maxWidth: width > 1200 ? 460 : 350,
+    padding: '14px 18px 16px',
+    borderRadius: 15,
+    background: 'rgba(5,10,18,.90)',
+    border: `1px solid ${theme.accent}55`,
+    boxShadow: '0 14px 34px rgba(0,0,0,.24)',
+    color: '#FFFFFF',
+    fontFamily: 'Manrope, Arial, sans-serif',
+    opacity: enter,
+    transform: `translateY(${(1 - enter) * -14}px)`,
+    pointerEvents: 'none',
+  };
+
+  const labelStyle = {
+    marginBottom: 7,
+    color: theme.accent,
+    fontSize: width > 1200 ? 13 : 11,
+    fontWeight: 800,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  };
+
+  if (graphic.type === 'stat') {
+    return (
+      <div style={base}>
+        <div style={labelStyle}>Key figure</div>
+        <div
+          style={{
+            color: theme.soft,
+            fontSize: width > 1200 ? 42 : 32,
+            fontWeight: 800,
+            lineHeight: 1,
+          }}
+        >
+          {graphic.value}
+        </div>
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: width > 1200 ? 18 : 15,
+            fontWeight: 650,
+          }}
+        >
+          {graphic.label}
+        </div>
+      </div>
+    );
+  }
+
+  if (graphic.type === 'timeline') {
+    return (
+      <div style={base}>
+        <div style={labelStyle}>Timeline</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <b>{graphic.from}</b>
+          <div
+            style={{
+              flex: 1,
+              height: 3,
+              borderRadius: 99,
+              background:
+                `linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`,
+            }}
+          />
+          <b>{graphic.to}</b>
+        </div>
+      </div>
+    );
+  }
+
+  if (graphic.type === 'comparison') {
+    return (
+      <div style={base}>
+        <div style={labelStyle}>Comparison</div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
+            gap: 10,
+            alignItems: 'center',
+            fontSize: width > 1200 ? 17 : 14,
+            fontWeight: 750,
+          }}
+        >
+          <div>{graphic.left}</div>
+          <div style={{color: theme.accent}}>VS</div>
+          <div>{graphic.right}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (graphic.type === 'process') {
+    return (
+      <div style={base}>
+        <div style={labelStyle}>Process</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: width > 1200 ? 14 : 12,
+            fontWeight: 700,
+          }}
+        >
+          {graphic.items.map((item, index) => (
+            <React.Fragment key={`${index}-${item}`}>
+              {index > 0 ? (
+                <span style={{color: theme.accent}}>→</span>
+              ) : null}
+              <span>{item}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
+
 const shortFocus = (subject) => {
   const words = clean(subject).split(' ');
   return words.slice(0, 4).join(' ');
@@ -411,6 +890,7 @@ const FocusChip = ({
   const {fps} = useVideoConfig();
 
   if (index % 4 !== 1) return null;
+  if (editorialGraphicFor(scene)) return null;
 
   const value = shortFocus(scene.subject);
   if (!value) return null;
@@ -433,14 +913,13 @@ const FocusChip = ({
         display: 'flex',
         alignItems: 'center',
         gap: 10,
-        padding: '9px 14px',
+        padding: '8px 13px',
         borderRadius: 999,
-        background: 'rgba(5,10,17,.66)',
+        background: 'rgba(5,10,17,.88)',
         border:
-          `1px solid ${theme.accent}88`,
-        backdropFilter: 'blur(12px)',
+          `1px solid ${theme.accent}66`,
         color: 'white',
-        fontFamily: 'Inter, Arial, sans-serif',
+        fontFamily: 'Manrope, Arial, sans-serif',
         fontSize: 18,
         fontWeight: 700,
         letterSpacing: 0.2,
@@ -479,6 +958,7 @@ const ExplanationCard = ({
   const {fps, width} = useVideoConfig();
 
   if (index % 5 !== 2) return null;
+  if (editorialGraphicFor(scene)) return null;
 
   let text =
     clean(scene.focalDetail) ||
@@ -511,7 +991,7 @@ const ExplanationCard = ({
         opacity: enter,
         transform:
           `translateX(${(1 - enter) * 24}px)`,
-        fontFamily: 'Inter, Arial, sans-serif',
+        fontFamily: 'Manrope, Arial, sans-serif',
       }}
     >
       <div
@@ -539,13 +1019,12 @@ const ExplanationCard = ({
           fontWeight: 590,
           background:
             'linear-gradient(145deg,' +
-            'rgba(5,10,18,.78),' +
-            'rgba(20,28,40,.60))',
+            'rgba(5,10,18,.88),' +
+            'rgba(14,20,30,.88))',
           border:
-            `1px solid ${theme.accent}4F`,
+            `1px solid ${theme.accent}45`,
           boxShadow:
-            '0 15px 42px rgba(0,0,0,.28)',
-          backdropFilter: 'blur(12px)',
+            '0 12px 30px rgba(0,0,0,.24)',
         }}
       >
         {text}
@@ -559,29 +1038,51 @@ const ExplanationCard = ({
    Phrase-based. No individual word boxes.
 --------------------------------------------------------- */
 
-const splitPhrases = (words) => {
-  if (words.length <= 4) return [words];
+const CAPTION_FONTS = {
+  Manrope: 'Manrope, Arial, sans-serif',
+  Inter: 'Inter, Arial, sans-serif',
+  Montserrat: 'Montserrat, Arial, sans-serif',
+  Poppins: 'Poppins, Arial, sans-serif',
+  Roboto: 'Roboto, Arial, sans-serif',
+  'Open Sans': '"Open Sans", Arial, sans-serif',
+  Lato: 'Lato, Arial, sans-serif',
+  Nunito: 'Nunito, Arial, sans-serif',
+  Merriweather: 'Merriweather, Georgia, serif',
+  'Source Sans 3': '"Source Sans 3", Arial, sans-serif',
+};
 
-  const size =
-    words.length >= 9 ? 3 : 2;
+const isLightColor = (hex) => {
+  const value = String(hex || '#FFFFFF').replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(value)) return true;
 
-  const groups = [];
-  for (let i = 0; i < words.length; i += size) {
-    groups.push(words.slice(i, i + size));
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+
+  return ((0.2126 * r + 0.7152 * g + 0.0722 * b) / 255) >= 0.58;
+};
+
+const makeCaptionLines = (text) => {
+  const words = clean(text).split(' ').filter(Boolean);
+
+  if (words.length <= 6) {
+    return [words.join(' ')];
   }
-  return groups;
+
+  const middle = Math.ceil(words.length / 2);
+
+  return [
+    words.slice(0, middle).join(' '),
+    words.slice(middle).join(' '),
+  ];
 };
 
 const PremiumCaptions = ({
   captions,
-  theme,
+  captionStyle = {},
 }) => {
   const frame = useCurrentFrame();
-  const {
-    fps,
-    width,
-    height,
-  } = useVideoConfig();
+  const {fps, width, height} = useVideoConfig();
 
   const time = frame / fps;
 
@@ -593,108 +1094,157 @@ const PremiumCaptions = ({
 
   if (!cue) return null;
 
-  const words = clean(cue.text)
-    .split(' ')
-    .filter(Boolean);
-
-  const groups = splitPhrases(words);
-
   const start = Number(cue.start);
   const end = Number(cue.end);
   const duration = Math.max(0.1, end - start);
 
-  const progress = Math.max(
-    0,
-    Math.min(0.999, (time - start) / duration)
-  );
-
-  const active = Math.min(
-    groups.length - 1,
-    Math.floor(progress * groups.length)
-  );
-
-  const age =
-    frame - Math.round(start * fps);
+  const age = frame - Math.round(start * fps);
 
   const enter = spring({
     fps,
     frame: Math.max(0, age),
     config: {
-      damping: 20,
-      stiffness: 155,
-      mass: 0.65,
+      damping: 24,
+      stiffness: 125,
+      mass: 0.72,
     },
   });
+
+  const exitOpacity = interpolate(
+    time,
+    [
+      Math.max(start, end - Math.min(0.18, duration * 0.3)),
+      end,
+    ],
+    [1, 0],
+    clamp
+  );
+
+  const fontColor =
+    /^#[0-9a-fA-F]{6}$/.test(String(captionStyle.fontColor || ''))
+      ? captionStyle.fontColor
+      : '#FFFFFF';
+
+  const lightText = isLightColor(fontColor);
+  const lines = makeCaptionLines(cue.text);
+
+  const longest = Math.max(
+    ...lines.map((line) => line.length),
+    1
+  );
+
+  const requestedSize = Number(captionStyle.fontSize || 48);
+
+  const fitScale =
+    longest > 58 ? 0.74 :
+    longest > 48 ? 0.82 :
+    longest > 40 ? 0.90 : 1;
+
+  const fontSize = Math.max(
+    24,
+    Math.round(
+      requestedSize *
+      fitScale *
+      (width <= 1080 ? 0.94 : 1)
+    )
+  );
+
+  const position =
+    ['top', 'middle', 'bottom'].includes(captionStyle.position)
+      ? captionStyle.position
+      : 'bottom';
+
+  const background = captionStyle.background !== false;
+
+  const outlineValue = Number(captionStyle.outline);
+  const outline =
+    [0, 1, 2, 4].includes(outlineValue)
+      ? outlineValue
+      : 2;
+
+  const placement =
+    position === 'top'
+      ? {top: height > width ? '7%' : '5.5%'}
+      : position === 'middle'
+        ? {top: '50%'}
+        : {bottom: height > width ? '7%' : '5.3%'};
+
+  const glassBackground =
+    lightText
+      ? 'rgba(7,11,18,.72)'
+      : 'rgba(248,250,252,.78)';
+
+  const glassBorder =
+    lightText
+      ? 'rgba(255,255,255,.12)'
+      : 'rgba(7,11,18,.12)';
+
+  const outlineColor =
+    lightText
+      ? 'rgba(0,0,0,.82)'
+      : 'rgba(255,255,255,.90)';
 
   return (
     <div
       style={{
         position: 'absolute',
         left: '50%',
-        bottom:
-          height > width ? '7%' : '5.3%',
-        transform:
-          `translateX(-50%) ` +
-          `translateY(${(1 - enter) * 12}px)`,
-        width:
-          width > 1200 ? '82%' : '90%',
+        ...placement,
+        width: width > 1200 ? '82%' : '90%',
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        columnGap: 10,
-        rowGap: 7,
-        opacity: enter,
-        textAlign: 'center',
-        fontFamily:
-          'Inter, Arial, sans-serif',
-        fontSize:
-          width > 1200 ? 38 : 31,
-        fontWeight: 760,
-        lineHeight: 1.22,
-        textShadow:
-          '0 3px 14px rgba(0,0,0,.92)',
+        opacity: Math.min(enter, exitOpacity),
+        transform:
+          `translateX(-50%) ` +
+          `${position === 'middle' ? 'translateY(-50%) ' : ''}` +
+          `translateY(${(1 - enter) * 10}px)`,
+        pointerEvents: 'none',
       }}
     >
-      {groups.map((group, index) => {
-        const highlighted =
-          index === active;
-
-        return (
-          <span
-            key={index}
-            style={{
-              display: 'inline-block',
-              padding:
-                highlighted
-                  ? '4px 10px 5px'
-                  : '4px 3px 5px',
-              borderRadius: 9,
-              color:
-                highlighted
-                  ? '#061018'
-                  : index < active
-                    ? 'rgba(255,255,255,.72)'
-                    : '#FFFFFF',
-              background:
-                highlighted
-                  ? `linear-gradient(100deg, ` +
-                    `${theme.accent}, ${theme.accent2})`
-                  : 'transparent',
-              boxShadow:
-                highlighted
-                  ? `0 6px 24px ${theme.accent}44`
-                  : 'none',
-              transform:
-                highlighted
-                  ? 'scale(1.025)'
-                  : 'scale(1)',
-            }}
-          >
-            {group.join(' ')}
-          </span>
-        );
-      })}
+      <div
+        style={{
+          maxWidth: '100%',
+          padding: background
+            ? (height > width ? '10px 18px 12px' : '9px 17px 11px')
+            : 0,
+          borderRadius: background ? 14 : 0,
+          background: background ? glassBackground : 'transparent',
+          border: background ? `1px solid ${glassBorder}` : 'none',
+          boxShadow: background
+            ? '0 10px 30px rgba(0,0,0,.18)'
+            : 'none',
+          color: fontColor,
+          fontFamily:
+            CAPTION_FONTS[captionStyle.fontFamily] ||
+            CAPTION_FONTS.Manrope,
+          fontSize,
+          fontWeight: 700,
+          lineHeight: 1.18,
+          letterSpacing: '-0.012em',
+          textAlign: 'center',
+          WebkitFontSmoothing: 'antialiased',
+          WebkitTextStroke:
+            outline > 0
+              ? `${outline}px ${outlineColor}`
+              : '0 transparent',
+          paintOrder: 'stroke fill',
+          textShadow:
+            outline > 0
+              ? '0 3px 12px rgba(0,0,0,.25)'
+              : (
+                  lightText
+                    ? '0 3px 12px rgba(0,0,0,.82)'
+                    : '0 2px 10px rgba(255,255,255,.35)'
+                ),
+        }}
+      >
+        {lines.map((line, index) => (
+          <React.Fragment key={`${index}-${line}`}>
+            {index > 0 ? <br /> : null}
+            {line}
+          </React.Fragment>
+        ))}
+      </div>
     </div>
   );
 };
@@ -789,6 +1339,11 @@ const PremiumScene = ({
       theme={theme}
     />
 
+    <EditorialGraphic
+      scene={scene}
+      theme={theme}
+    />
+
     <FocusChip
       scene={scene}
       index={index}
@@ -818,6 +1373,7 @@ const PremiumScene = ({
 export const AttaVideo = ({
   scenes = [],
   captions = [],
+  captionStyle = {},
   audio = '',
 }) => {
   const {fps} = useVideoConfig();
@@ -848,7 +1404,7 @@ export const AttaVideo = ({
           const transition =
             isLast
               ? 0
-              : transitionFrames(index);
+              : transitionFrames(scene, index);
 
           return (
             <React.Fragment
@@ -871,10 +1427,10 @@ export const AttaVideo = ({
                 />
               </TransitionSeries.Sequence>
 
-              {!isLast ? (
+              {!isLast && transition > 0 ? (
                 <TransitionSeries.Transition
                   presentation={
-                    transitionPresentation(index)
+                    transitionPresentation(scene, index)
                   }
                   timing={
                     linearTiming({
@@ -895,7 +1451,7 @@ export const AttaVideo = ({
 
       <PremiumCaptions
         captions={captions}
-        theme={theme}
+        captionStyle={captionStyle}
       />
     </AbsoluteFill>
   );

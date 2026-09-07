@@ -7,7 +7,7 @@ from app.media_relevance import MediaTopicContext
 from app.openverse_media import download_historical_image
 from app.stock_providers import (
     pexels_video, pixabay_video, coverr_video,
-    pexels_image, pixabay_image, provider_query_candidates,
+    pexels_image, pixabay_image, openverse_image, provider_query_candidates,
 )
 from app.wikimedia_media import download_image
 
@@ -18,7 +18,7 @@ logger.setLevel(logging.INFO)
 # providers; they are reserved for scenes that explicitly request an archival
 # still/map/document/diagram in a historical profile.
 VIDEO_PROVIDERS = (pexels_video, pixabay_video, coverr_video)
-IMAGE_PROVIDERS = (pexels_image, pixabay_image)
+IMAGE_PROVIDERS = (pexels_image, pixabay_image, openverse_image, download_image)
 LICENSED_HISTORICAL_PROVIDERS = (
     ("wikimedia", download_image),
     ("historical_openverse", download_historical_image),
@@ -158,7 +158,7 @@ def _finish_best(best, best_path, final_path, number):
 
 
 def try_providers(providers, query, folder, number, extension, orientation,
-                  used_sources, topic_context=None, deadline=None):
+                  used_sources, topic_context=None, deadline=None, stop_on_strong=True):
     """Search one exact query across providers, video-first and bounded.
 
     The scene-AI query is already the semantic search plan.  Provider-specific
@@ -203,7 +203,7 @@ def try_providers(providers, query, folder, number, extension, orientation,
         result.setdefault("matched_query", query)
         candidate_index += 1
 
-        if _meets_threshold(result, VIDEO_ACCEPT_SCORE):
+        if stop_on_strong and _meets_threshold(result, VIDEO_ACCEPT_SCORE):
             if path != final_path:
                 final_path.unlink(missing_ok=True)
                 Path(path).replace(final_path)
@@ -244,10 +244,11 @@ def _first_search_variant(query, topic_context):
 
 
 def _search_exact_then_one_variant(providers, query, folder, number, extension,
-                                   orientation, excluded, topic_context, deadline):
+                                    orientation, excluded, topic_context, deadline,
+                                    stop_on_strong=True):
     first = try_providers(
         providers, query, folder, number, extension, orientation, excluded,
-        topic_context, deadline=deadline,
+        topic_context, deadline=deadline, **({"stop_on_strong": False} if not stop_on_strong else {}),
     )
     if _meets_threshold(first, VIDEO_ACCEPT_SCORE):
         return first
@@ -259,7 +260,7 @@ def _search_exact_then_one_variant(providers, query, folder, number, extension,
     alt_folder = Path(folder) / f"alt-{extension}"
     second = try_providers(
         providers, variant, alt_folder, number, extension, orientation, excluded,
-        topic_context, deadline=deadline,
+        topic_context, deadline=deadline, **({"stop_on_strong": False} if not stop_on_strong else {}),
     )
     winner = _better_result(first, second)
     loser = second if winner is first else first
@@ -288,12 +289,12 @@ def _try_licensed_historical_sources(query, folder, number, orientation,
 
 
 def _stock_pass(query, folder, number, requested, orientation, excluded, topic_context):
-    """Always search video first. Images are an explicit-still fallback only."""
-    deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
+    """Search stock video first, then exact licensed stills, then hand off to Z-Image."""
+    video_deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
 
     video_result = _search_exact_then_one_variant(
         VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
-        topic_context, deadline,
+        topic_context, video_deadline,
     )
     if _verified_acceptable_result(video_result):
         video_result["needs_ai_fallback"] = False
@@ -304,28 +305,19 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         )
         return video_result
 
-    # Normal scenes remain video-first even if the AI mistakenly requested an
-    # image.  Only explicit still-type scenes may use Pexels/Pixabay photos.
-    explicit_still = requested in {"image", "stock_image"}
-    image_result = None
-    if explicit_still and time.monotonic() < deadline:
-        image_result = _search_exact_then_one_variant(
-            IMAGE_PROVIDERS, query, folder, number, "jpg", orientation, excluded,
-            topic_context, deadline,
-        )
-        if _verified_acceptable_result(image_result):
-            _discard_result_media(video_result)
-            image_result["needs_ai_fallback"] = False
-            image_result["stock_decision"] = (
-                "explicit_still_accepted_strong"
-                if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE)
-                else "explicit_still_accepted_verified"
-            )
-            return image_result
+    image_deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
+    image_folder = Path(folder) / "stock-images"
+    image_result = _search_exact_then_one_variant(
+        IMAGE_PROVIDERS, query, image_folder, number, "jpg", orientation, excluded,
+        topic_context, image_deadline, stop_on_strong=False,
+    )
+    if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE):
+        _discard_result_media(video_result)
+        image_result = _adopt_result_media(image_result, folder, number)
+        image_result["needs_ai_fallback"] = False
+        image_result["stock_decision"] = "image_accepted_strong"
+        return image_result
 
-    # Keep the best below-threshold candidate only long enough for diagnostics.
-    # select_media will discard it and trigger the bounded broad-query pass;
-    # if that also fails, scene_media hands the scene to Z-Image.
     winner = _better_result(video_result, image_result)
     loser = image_result if winner is video_result else video_result
     _discard_result_media(loser)
@@ -354,6 +346,20 @@ def select_media(query, folder, number, requested, orientation, used_sources=Non
     folder.mkdir(parents=True, exist_ok=True)
     used_sources = set(used_sources or ())
     provider_used_sources = used_sources | set(history_sources or ())
+
+    if prefer_wikimedia and requested in {"image", "stock_image"} and topic_context is not None:
+        licensed_folder = folder / "licensed-historical"
+        licensed_folder.mkdir(parents=True, exist_ok=True)
+        licensed = _try_licensed_historical_sources(
+            query, licensed_folder, number, orientation, provider_used_sources,
+            history_sources, topic_context,
+        )
+        if _meets_threshold(licensed, IMAGE_ACCEPT_SCORE):
+            licensed = _adopt_result_media(licensed, folder, number)
+            licensed["needs_ai_fallback"] = False
+            licensed["stock_decision"] = "historical_still_accepted"
+            return licensed
+        _discard_result_media(licensed)
 
     result = _stock_with_history_preference(
         query, folder, number, requested, orientation,

@@ -101,6 +101,7 @@ def render_remotion_video(
     output_path,
     orientation="landscape",
     captions_ass=None,
+    caption_style=None,
 ):
     if os.getenv(
         "REMOTION_ENABLED",
@@ -276,6 +277,7 @@ def render_remotion_video(
             ),
             "scenes": remotion_scenes,
             "captions": captions,
+            "captionStyle": caption_style or {},
             "orientation": orientation,
         }
 

@@ -87,11 +87,12 @@ class ProviderQuotaTests(unittest.TestCase):
         self.assertEqual(fresh[0]["provider"], "fresh")
         self.assertEqual(collect.call_count, 2)
 
-    def test_settings_template_contains_quota_area_without_polling(self):
+    def test_settings_template_excludes_provider_monitoring_ui(self):
         with open("backend/app/templates/api_settings.html", encoding="utf-8") as page:
             html = page.read()
-        self.assertIn("API Limits &amp; Quota Status", html)
-        self.assertIn("Refresh Limits", html)
+        self.assertNotIn("API Limits &amp; Quota Status", html)
+        self.assertNotIn("Refresh Limits", html)
+        self.assertNotIn("Provider Monitoring", html)
         self.assertNotIn("setInterval", html)
 
 

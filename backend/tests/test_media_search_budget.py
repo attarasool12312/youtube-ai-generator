@@ -38,7 +38,7 @@ class MediaSearchBudgetTests(unittest.TestCase):
         self.assertEqual(result["source"], "good")
         self.assertEqual(len(calls), 1)
 
-    def test_acceptable_video_skips_image_pass(self):
+    def test_acceptable_video_still_checks_image_pass(self):
         video = {
             "source": "video", "relevance_score": 60,
             "relevance_confidence": "acceptable",
@@ -49,7 +49,43 @@ class MediaSearchBudgetTests(unittest.TestCase):
                 "subject", Path("/tmp"), 1, "video", "landscape", set(), None
             )
         self.assertEqual(result["source"], "video")
-        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_strong_stock_image_wins_after_weak_video(self):
+        video = {
+            "source": "weak-video", "relevance_score": 35,
+            "relevance_confidence": "weak", "media_file": "/tmp/fake-video.mp4",
+        }
+        image = {
+            "source": "exact-image", "relevance_score": 90,
+            "relevance_confidence": "strong", "media_file": "/tmp/fake-image.jpg",
+            "relevance_penalties": [],
+        }
+        with patch("app.media_selector._search_exact_then_one_variant", side_effect=[video, image]) as mocked:
+            result = media_selector._stock_pass(
+                "exact subject", Path("/tmp"), 1, "video", "landscape", set(), None
+            )
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(result["source"], "exact-image")
+        self.assertFalse(result["needs_ai_fallback"])
+        self.assertEqual(result["stock_decision"], "image_accepted_strong")
+
+    def test_acceptable_stock_image_does_not_bypass_ai_fallback(self):
+        video = {
+            "source": "weak-video", "relevance_score": 35,
+            "relevance_confidence": "weak", "media_file": "/tmp/fake-video.mp4",
+        }
+        image = {
+            "source": "generic-image", "relevance_score": 70,
+            "relevance_confidence": "acceptable", "media_file": "/tmp/fake-image.jpg",
+            "relevance_penalties": [],
+        }
+        with patch("app.media_selector._search_exact_then_one_variant", side_effect=[video, image]):
+            result = media_selector._stock_pass(
+                "exact subject", Path("/tmp"), 1, "video", "landscape", set(), None
+            )
+        self.assertTrue(result["needs_ai_fallback"])
+        self.assertEqual(result["stock_decision"], "ai_fallback_pending")
 
     def test_candidate_download_count_is_tightly_bounded(self):
         calls = []

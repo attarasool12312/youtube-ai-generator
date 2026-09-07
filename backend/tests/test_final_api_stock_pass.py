@@ -41,12 +41,11 @@ class ProviderHealthTests(unittest.TestCase):
         self.assertEqual(run_provider_test("pexels", client)["status"], "Configuration Missing")
         client.get.assert_not_called()
 
-    def test_template_has_every_action_without_polling(self):
+    def test_template_has_no_manual_provider_test_controls(self):
         html = Path("backend/app/templates/api_settings.html").read_text()
-        for provider in ("pexels", "pixabay", "coverr", "openverse", "gemini", "together", "youtube"):
-            self.assertIn(f"/settings/providers/{{{{ provider_key }}}}/test", html)
-        self.assertIn("Test API", html)
-        self.assertIn("Test Connection", html)
+        self.assertNotIn("/settings/providers/", html)
+        self.assertNotIn("Test API", html)
+        self.assertNotIn("Test Connection", html)
         self.assertNotIn("setInterval", html)
 
 

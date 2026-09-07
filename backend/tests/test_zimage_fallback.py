@@ -45,8 +45,8 @@ class ZImageFallbackTests(unittest.TestCase):
             "educational_how_it_works",
         )
         self.assertIn("submarine fiber optic cable repeater", prompt)
-        self.assertIn("cable car", prompt)
-        self.assertIn("No text", prompt)
+        self.assertNotIn("cable car", prompt)
+        self.assertIn("without readable writing", prompt)
 
     def test_success_replaces_weak_stock_and_updates_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
