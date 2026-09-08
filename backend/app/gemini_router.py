@@ -10,9 +10,9 @@ STATE = Path("backend/data/gemini_router_state.json")
 CACHE = {"until": 0, "models": []}
 
 FREE_MODEL_POOL = (
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
     "gemini-2.5-flash",
 )
 

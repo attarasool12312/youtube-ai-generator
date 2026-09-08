@@ -1,9 +1,9 @@
 import json
 
 from app.ai_provider import (
+    call_gemini,
     call_gemini_35_flash_lite,
     call_gemini_31_flash_lite,
-    call_deepseek_metadata_flash,
 )
 
 
@@ -167,8 +167,8 @@ Return only JSON: {"scenes":[{"scene_number":1,"visual_subject":"concrete visibl
             1,
         ),
         (
-            "deepseek-v4-flash",
-            call_deepseek_metadata_flash,
+            "gemini-free-pool",
+            call_gemini,
             1,
         ),
     ]

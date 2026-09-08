@@ -15,6 +15,16 @@ TOGETHER_SCRIPT_FALLBACK_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731"
 
 logger = logging.getLogger(__name__)
 
+# Reuse TCP/TLS connections across Together calls. This changes transport only;
+# model, prompts, generation settings, pacing and retry behavior stay unchanged.
+_TOGETHER_CLIENT = httpx.Client(
+    limits=httpx.Limits(
+        max_connections=20,
+        max_keepalive_connections=10,
+        keepalive_expiry=60.0,
+    )
+)
+
 
 @dataclass
 class AIResult:
@@ -96,7 +106,7 @@ def _call_together_model(
     response = None
 
     for attempt in range(4):
-        response = httpx.post(
+        response = _TOGETHER_CLIENT.post(
             "https://api.together.xyz/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
             json=payload,

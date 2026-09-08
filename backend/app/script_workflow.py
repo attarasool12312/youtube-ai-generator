@@ -395,6 +395,30 @@ def needs_chunk_retry(text):
     )
 
 
+def needs_section_retry(existing_text, section_text):
+    # Retry only when the NEW section itself is weak or introduces
+    # additional repetition. Do not let an older issue cause every
+    # later section to regenerate.
+    if needs_chunk_retry(section_text):
+        return True
+
+    if not existing_text.strip():
+        return False
+
+    _, old_duplicates, old_phrase_ratio = quality_rank(existing_text)
+
+    combined = existing_text + "\n\n" + section_text
+    _, new_duplicates, new_phrase_ratio = quality_rank(combined)
+
+    if new_duplicates > old_duplicates:
+        return True
+
+    return (
+        new_phrase_ratio > 0.025
+        and new_phrase_ratio > old_phrase_ratio
+    )
+
+
 def _script_api_delay():
     """Small pacing delay to avoid Together burst rate limits."""
     try:
@@ -1212,9 +1236,10 @@ def generate_initial_script(title, duration, style, progress_callback=None):
             previous_tail=previous_tail,
         )
 
+        existing_text = "\n\n".join(sections)
         combined = "\n\n".join(sections + [section])
 
-        if needs_chunk_retry(combined):
+        if needs_section_retry(existing_text, section):
             _pace_script_api()
 
             retry_section, retry_provider = generate_section(

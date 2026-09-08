@@ -10,8 +10,8 @@ from app.api_settings import get_api_key
 from app.openverse_client import openverse_headers
 from app.media_relevance import build_media_query_candidates, concrete_subject_words, practical_head_query, score_media_candidate
 
-SEARCH_CLIENT = httpx.Client(timeout=httpx.Timeout(5.0, connect=3.0), follow_redirects=True)
-DOWNLOAD_CLIENT = httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True)
+SEARCH_CLIENT = httpx.Client(timeout=httpx.Timeout(1.5, connect=1.0), follow_redirects=True)
+DOWNLOAD_CLIENT = httpx.Client(timeout=httpx.Timeout(4.0, connect=1.5), follow_redirects=True)
 logger = logging.getLogger(__name__)
 MAX_SCORED_CANDIDATES = 10
 

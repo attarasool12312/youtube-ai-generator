@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.ai_provider import call_ai
+from app.ai_provider import call_gemini
 from app.youtube_categories import YOUTUBE_CATEGORY_OPTIONS
 from app.youtube_publish_validation import (
     calculate_tags_length,
@@ -785,7 +785,7 @@ Validated script:
 """.strip()
 
     try:
-        result = call_ai(prompt, json_mode=True)
+        result = call_gemini(prompt, json_mode=True)
         data = _extract_json_object(result.text)
 
         generated_title = _truncate_title(
@@ -828,7 +828,7 @@ Current description:
 {generated_description}
 """.strip()
 
-            expansion_result = call_ai(
+            expansion_result = call_gemini(
                 expansion_prompt,
                 json_mode=True,
             )

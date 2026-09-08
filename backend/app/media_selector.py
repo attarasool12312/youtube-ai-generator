@@ -26,7 +26,7 @@ LICENSED_HISTORICAL_PROVIDERS = (
 
 VIDEO_ACCEPT_SCORE = 80
 IMAGE_ACCEPT_SCORE = 80
-SCENE_STOCK_BUDGET_SECONDS = 4.0
+SCENE_STOCK_BUDGET_SECONDS = 1.5
 MAX_EXTRA_CANDIDATES = 3
 CONFIDENCE_ORDER = {"bad": 0, "weak": 1, "acceptable": 2, "strong": 3}
 
@@ -245,12 +245,15 @@ def _first_search_variant(query, topic_context):
 
 def _search_exact_then_one_variant(providers, query, folder, number, extension,
                                     orientation, excluded, topic_context, deadline,
-                                    stop_on_strong=True):
+                                    stop_on_strong=True, allow_variant=True):
     first = try_providers(
         providers, query, folder, number, extension, orientation, excluded,
         topic_context, deadline=deadline, **({"stop_on_strong": False} if not stop_on_strong else {}),
     )
     if _meets_threshold(first, VIDEO_ACCEPT_SCORE):
+        return first
+
+    if not allow_variant:
         return first
 
     variant = _first_search_variant(query, topic_context)
@@ -289,13 +292,22 @@ def _try_licensed_historical_sources(query, folder, number, orientation,
 
 
 def _stock_pass(query, folder, number, requested, orientation, excluded, topic_context):
-    """Fast quality-first stock pass, then hand off immediately to Z-Image."""
+    """Ultra-fast exact-query stock hit, otherwise hand off to Z-Image."""
     deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
 
     video_result = _search_exact_then_one_variant(
-        VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
-        topic_context, deadline,
+        (pexels_video,),
+        query,
+        folder,
+        number,
+        "mp4",
+        orientation,
+        excluded,
+        topic_context,
+        deadline,
+        allow_variant=False,
     )
+
     if _verified_acceptable_result(video_result):
         video_result["needs_ai_fallback"] = False
         video_result["stock_decision"] = (
@@ -309,8 +321,16 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
     if time.monotonic() < deadline:
         image_folder = Path(folder) / "stock-images"
         image_result = _search_exact_then_one_variant(
-            IMAGE_PROVIDERS, query, image_folder, number, "jpg",
-            orientation, excluded, topic_context, deadline,
+            (pexels_image,),
+            query,
+            image_folder,
+            number,
+            "jpg",
+            orientation,
+            excluded,
+            topic_context,
+            deadline,
+            allow_variant=False,
         )
 
     if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE):
@@ -329,7 +349,6 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         winner["stock_decision"] = "ai_fallback_pending"
 
     return winner
-
 
 def _is_weak_result(result):
     return not _meets_threshold(result, VIDEO_ACCEPT_SCORE)
