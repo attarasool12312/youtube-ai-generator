@@ -26,7 +26,7 @@ LICENSED_HISTORICAL_PROVIDERS = (
 
 VIDEO_ACCEPT_SCORE = 80
 IMAGE_ACCEPT_SCORE = 80
-SCENE_STOCK_BUDGET_SECONDS = 8.0
+SCENE_STOCK_BUDGET_SECONDS = 4.0
 MAX_EXTRA_CANDIDATES = 3
 CONFIDENCE_ORDER = {"bad": 0, "weak": 1, "acceptable": 2, "strong": 3}
 
@@ -289,12 +289,12 @@ def _try_licensed_historical_sources(query, folder, number, orientation,
 
 
 def _stock_pass(query, folder, number, requested, orientation, excluded, topic_context):
-    """Search stock video first, then exact licensed stills, then hand off to Z-Image."""
-    video_deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
+    """Fast quality-first stock pass, then hand off immediately to Z-Image."""
+    deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
 
     video_result = _search_exact_then_one_variant(
         VIDEO_PROVIDERS, query, folder, number, "mp4", orientation, excluded,
-        topic_context, video_deadline,
+        topic_context, deadline,
     )
     if _verified_acceptable_result(video_result):
         video_result["needs_ai_fallback"] = False
@@ -305,12 +305,14 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         )
         return video_result
 
-    image_deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
-    image_folder = Path(folder) / "stock-images"
-    image_result = _search_exact_then_one_variant(
-        IMAGE_PROVIDERS, query, image_folder, number, "jpg", orientation, excluded,
-        topic_context, image_deadline, stop_on_strong=False,
-    )
+    image_result = None
+    if time.monotonic() < deadline:
+        image_folder = Path(folder) / "stock-images"
+        image_result = _search_exact_then_one_variant(
+            IMAGE_PROVIDERS, query, image_folder, number, "jpg",
+            orientation, excluded, topic_context, deadline,
+        )
+
     if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE):
         _discard_result_media(video_result)
         image_result = _adopt_result_media(image_result, folder, number)
@@ -321,9 +323,11 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
     winner = _better_result(video_result, image_result)
     loser = image_result if winner is video_result else video_result
     _discard_result_media(loser)
+
     if winner:
         winner["needs_ai_fallback"] = True
         winner["stock_decision"] = "ai_fallback_pending"
+
     return winner
 
 

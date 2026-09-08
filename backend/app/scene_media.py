@@ -100,31 +100,19 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
                         used_sources, ai_prompt, media_source, prefer_wikimedia,
                         topic_context, history_sources, asset_usage, duration_minutes=10):
     media_source = normalize_media_source(media_source)
+
     try:
         return select_media(
             query, media_dir, number, requested, orientation, used_sources,
-            ai_prompt, "stock_only", prefer_wikimedia=prefer_wikimedia,
-            topic_context=topic_context, history_sources=history_sources,
+            ai_prompt, "stock_only",
+            prefer_wikimedia=prefer_wikimedia,
+            topic_context=topic_context,
+            history_sources=history_sources,
         )
-    except RuntimeError:
-        for broad_query in emergency_topic_queries(topic_context):
-            logger.info("MEDIA scene=%d emergency=true query=%r", number, broad_query)
-            try:
-                result = select_media(
-                    broad_query, media_dir, number, requested, orientation,
-                    used_sources, broad_query, "stock_only",
-                    prefer_wikimedia=False, topic_context=topic_context, history_sources=history_sources,
-                )
-                result["emergency"] = True
-                return result
-            except RuntimeError:
-                continue
-        # Stock exhaustion is not fatal.  Hand the scene to the isolated
-        # Z-Image batch instead of aborting the whole video before the AI
-        # fallback stage gets a chance to run.
+    except RuntimeError as error:
         logger.info(
-            "MEDIA scene=%d result=ai_fallback reason=stock_exhausted query=%r",
-            number, query,
+            "MEDIA scene=%d result=ai_fallback reason=fast_stock_exhausted query=%r error=%s",
+            number, query, error,
         )
         return {
             "provider": "stock-exhausted",
@@ -135,9 +123,7 @@ def _select_scene_media(query, media_dir, number, requested, orientation,
             "matched_query": query,
             "relevance_score": 0,
             "relevance_confidence": "none",
-            "relevance_reason": (
-                "No usable unique stock candidate remained after normal and broad-topic searches."
-            ),
+            "relevance_reason": "Fast exact stock search exhausted; using Z-Image.",
             "relevance_penalties": ["stock_exhausted"],
             "subject_coverage": 0.0,
             "descriptive_coverage": 0.0,
