@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Restore a user-data archive made by backup_user_data.sh.
-# Never deletes existing data: current db/.env/avatars/cloned-voices are moved
-# to backend/data/pre-restore-<stamp>/ first.
-# Usage: bash scripts/restore_user_data.sh /path/to/atta-user-data-*.tar.gz
-set -u
+# Restore lightweight ATTA user/runtime backup.
+# Existing important files are preserved under pre-restore-* first.
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE="${1:-}"
@@ -16,51 +14,83 @@ if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
 fi
 
 if [ -f "$ARCHIVE.sha256" ]; then
-    ( cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE").sha256" ) || {
-        echo "CHECKSUM_FAILED"; exit 1; }
-fi
-
-if systemctl is-active --quiet youtube-ai-generator 2>/dev/null; then
-    echo "Stopping youtube-ai-generator service (sudo)"
-    sudo systemctl stop youtube-ai-generator
-    RESTART=1
-else
-    RESTART=0
+    (
+        cd "$(dirname "$ARCHIVE")"
+        sha256sum -c "$(basename "$ARCHIVE").sha256"
+    ) || {
+        echo "CHECKSUM_FAILED"
+        exit 1
+    }
 fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# Validate archive before touching live data.
+tar -tzf "$ARCHIVE" >/dev/null
 tar -xzf "$ARCHIVE" -C "$WORK"
 
 SRC="$WORK/user-data"
-[ -d "$SRC" ] || { echo "BAD_ARCHIVE: user-data folder missing"; exit 1; }
+[ -d "$SRC" ] || {
+    echo "BAD_ARCHIVE: user-data folder missing"
+    exit 1
+}
 
-mkdir -p "$KEEP" "$ROOT/backend/data" "$ROOT/backend/app/static"
+# Backward compatibility with older archive layout.
+if [ -d "$SRC/backend-data" ]; then
+    SRC_DATA="$SRC/backend-data"
+else
+    SRC_DATA="$SRC"
+fi
 
-[ -f "$ROOT/backend/data/app.db" ] && mv "$ROOT/backend/data/app.db" "$KEEP/app.db"
-[ -f "$ROOT/.env" ] && cp "$ROOT/.env" "$KEEP/.env"
-[ -d "$ROOT/backend/data/avatars" ] && mv "$ROOT/backend/data/avatars" "$KEEP/avatars"
-[ -d "$ROOT/backend/app/static/cloned-voices" ] && \
-    mv "$ROOT/backend/app/static/cloned-voices" "$KEEP/cloned-voices"
+RESTART=0
+if systemctl is-active --quiet youtube-ai-generator 2>/dev/null; then
+    echo "Stopping youtube-ai-generator service"
+    sudo systemctl stop youtube-ai-generator
+    RESTART=1
+fi
 
-[ -f "$SRC/app.db" ] && cp "$SRC/app.db" "$ROOT/backend/data/app.db"
+mkdir -p "$KEEP" "$ROOT/backend/data"
+
+# Preserve current live state first.
+for name in \
+    app.db \
+    gemini_router_state.json \
+    media_history.json \
+    video_presets.json
+do
+    if [ -f "$ROOT/backend/data/$name" ]; then
+        cp -a "$ROOT/backend/data/$name" "$KEEP/$name"
+    fi
+done
+
+[ -f "$ROOT/.env" ] && cp -a "$ROOT/.env" "$KEEP/.env"
+
+# Restore available files only.
+for name in \
+    app.db \
+    gemini_router_state.json \
+    media_history.json \
+    video_presets.json
+do
+    if [ -f "$SRC_DATA/$name" ]; then
+        cp "$SRC_DATA/$name" "$ROOT/backend/data/$name"
+    fi
+done
+
 [ -f "$SRC/.env" ] && cp "$SRC/.env" "$ROOT/.env"
-[ -d "$SRC/avatars" ] && cp -r "$SRC/avatars" "$ROOT/backend/data/avatars"
-[ -d "$SRC/cloned-voices" ] && cp -r "$SRC/cloned-voices" "$ROOT/backend/app/static/cloned-voices"
 
-# When invoked via sudo/systemd-run the copies land root-owned and the app
-# (running as the project owner) cannot write its own database. Hand the
-# files back to whoever owns the project directory.
 OWNER="$(stat -c '%U:%G' "$ROOT")"
+
 if [ "$(id -u)" = "0" ] && [ "$OWNER" != "root:root" ]; then
-    chown -R "$OWNER"         "$ROOT/backend/data"         "$ROOT/backend/app/static/cloned-voices" 2>/dev/null || true
+    chown -R "$OWNER" "$ROOT/backend/data" 2>/dev/null || true
     [ -f "$ROOT/.env" ] && chown "$OWNER" "$ROOT/.env"
 fi
 
 if [ "$RESTART" = "1" ]; then
     sudo systemctl start youtube-ai-generator
     sleep 3
-    curl -s http://127.0.0.1:8000/health || true
+    curl -fsS http://127.0.0.1:8000/health || true
     echo
 fi
 

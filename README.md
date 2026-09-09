@@ -1,174 +1,45 @@
-# YouTube AI Video Generator
+# ATTA VIDEO AI
 
-Private GPU-powered AI video generation system for automated YouTube content creation.
+Private GPU-powered AI video production system for creating long-form YouTube and Facebook videos from a title or a finished script.
 
-## Overview
+> Updated for the current ATTA production architecture and provider setup as of September 2026.
 
-This system generates complete YouTube videos from a single title.
+## Production pipeline
 
-Pipeline:
+**Title / Script → Live Research when needed → Script → Scene Planning → Stock Media → Z-Image fallback → TTS → Captions → Remotion/FFmpeg Render → Thumbnail Prompt → YouTube/Facebook Publishing**
 
-Title Input
-↓
-AI Script Generation
-↓
-Scene Planning
-↓
-Stock Media Selection
-↓
-Kokoro TTS Voice Generation
-↓
-FFmpeg Video Rendering
-↓
-Final MP4 Output
+Current routing:
 
-## Private GitHub Repository Access
+- **Long-form script:** DeepSeek V4 Flash
+- **Script fallback / repair:** DeepSeek V4 Pro
+- **Last script fallback:** Gemini
+- **Metadata:** Gemini
+- **Scene search queries / Z-Image prompts:** Gemini
+- **Fresh-data research:** Gemini + Google Search grounding for time-sensitive topics
+- **Media order:** stock video → stock image → Z-Image Turbo
+- **Captions:** Whisper timings + Remotion styling
+- **Publishing:** YouTube OAuth + Facebook through Zernio
 
-This repository is private.
-
-Before installing on a new VM, GitHub access is required to clone the repository.
-
-Use a GitHub Personal Access Token (PAT):
-
-git clone -b openrelay-setup https://YOUR_GITHUB_USERNAME:YOUR_GITHUB_TOKEN@github.com/attarasool12312/youtube-ai-generator.git
-
-cd youtube-ai-generator
-
-GitHub credentials are only required for the initial repository download.
-
-They are not stored in:
-
-- Recovery backups
-- Database
-- Environment files
-
-## Fresh VM Setup
-### Requirements
+## Recommended server
 
 - Ubuntu 24.04
-- NVIDIA GPU-enabled VM
-- Python 3.12
-- sudo access
+- NVIDIA GPU
+- **24 GB VRAM recommended**
+- sudo/root access
+- Internet access
 - Private GitHub repository access
 
-
-Check GPU:
-
-```bash
-nvidia-smi
-```
-
-
-Clone repository:
+## Fresh VM installation
 
 ```bash
 git clone -b openrelay-setup git@github.com:attarasool12312/youtube-ai-generator.git
-
 cd youtube-ai-generator
-```
-
-
-Run installer:
-
-```bash
 sudo bash bootstrap.sh
 ```
 
+The target is a **single-command setup** for the complete production stack.
 
-The installer configures:
-
-- Python environment
-- Required packages
-- Redis
-- Ollama
-- AI models
-- Systemd service
-- Application environment
-
-
-Successful installation:
-
-```
-INSTALLATION_COMPLETE
-```
-
-
-## AI Components
-
-
-
-### Ollama
-
-Local AI model runtime.
-
-Check:
-
-```bash
-ollama list
-```
-
-
-Test:
-
-```bash
-ollama run qwen3:30b "Say hello"
-```
-
-
-## Environment Configuration
-
-Create `.env`:
-
-```env
-GEMINI_API_KEY=
-
-OLLAMA_URL=http://127.0.0.1:11434
-
-OLLAMA_MODEL=qwen3:30b
-
-SETTINGS_ENCRYPTION_KEY=
-```
-
-
-## Database
-
-The application uses SQLite.
-
-Database location:
-
-```
-backend/data/app.db
-```
-
-
-Stores:
-
-- Users
-- Video jobs
-- Application settings
-- API configuration
-
-
-## Redis Queue
-
-Redis manages background processing.
-
-Check:
-
-```bash
-redis-cli ping
-```
-
-Expected:
-
-```
-PONG
-```
-
-
-## Running Application
-
-Health check:
+After installation:
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -180,195 +51,94 @@ Expected:
 {"status":"ok"}
 ```
 
+## Dashboard access
 
-## Dashboard Access
-
-Create SSH tunnel:
+For local tunnel access:
 
 ```powershell
-ssh -L 8000:127.0.0.1:8000 YOUR_VM_USERNAME@YOUR_VM_HOST
+ssh -L 8000:127.0.0.1:8000 USER@SERVER
 ```
-
 
 Open:
 
-```
+```text
 http://127.0.0.1:8000
 ```
 
+## First setup
 
-## System Service Commands
+Open **Dashboard → API & Integrations** and configure the providers you need:
 
-Check status:
+1. Google Gemini
+2. Together AI
+3. Pexels
+4. Pixabay
+5. Coverr
+6. Openverse Client ID + Client Secret
+7. Google OAuth credentials for YouTube publishing
+8. Zernio API key for Facebook publishing
+
+Detailed guides:
+
+- [Setup Guide](docs/SETUP_GUIDE.md)
+- [API Setup](docs/API_SETUP.md)
+- [Google Cloud & YouTube OAuth](docs/YOUTUBE_GOOGLE_CLOUD.md)
+- [Backup & Restore](docs/BACKUP_RESTORE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Production Checklist](docs/PRODUCTION_CHECKLIST.md)
+
+## Saved presets
+
+ATTA supports reusable video-generation presets. Presets intentionally do **not** save:
+
+- title
+- titles list
+- source script
+
+Server-side preset state:
+
+```text
+backend/data/video_presets.json
+```
+
+## Backup
+
+From the dashboard use **Backup & Restore**, or run:
+
+```bash
+bash scripts/backup_user_data.sh
+```
+
+The lightweight backup includes:
+
+- `backend/data/app.db`
+- `.env`
+- `backend/data/gemini_router_state.json`
+- `backend/data/media_history.json`
+- `backend/data/video_presets.json` when present
+
+Generated videos, model caches, avatars and cloned-voice media are intentionally excluded.
+
+## Tests
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m unittest discover -s backend/tests
+```
+
+## Service commands
 
 ```bash
 sudo systemctl status youtube-ai-generator --no-pager
-```
-
-
-Restart:
-
-```bash
 sudo systemctl restart youtube-ai-generator
+sudo journalctl -u youtube-ai-generator -n 200 --no-pager
 ```
 
+## Security
 
-View logs:
+Never commit or publish `.env`, API keys, OAuth client secrets, refresh/access tokens, encryption keys, production databases or private backup archives.
 
-```bash
-sudo journalctl -u youtube-ai-generator -n 100 --no-pager
-```
-
-
-## Video Output
-
-Generated videos are stored:
-
-```
-outputs/jobs/{job_id}/
-```
-
-
-Example:
-
-```
-final-video.mp4
-media/
-render-clips/
-```
-
-
-## Video Download
-
-Large video downloads use streaming delivery.
-
-Benefits:
-
-- Lower memory usage
-- Stable downloads
-- Dashboard remains responsive
-- Better handling of large MP4 files
-
-
-## Backup and Recovery
-
-Create backup:
-
-```bash
-./backup.sh
-```
-
-
-Successful output:
-
-```
-BACKUP_COMPLETE
-```
-
-
-Backup includes:
-
-- Application configuration
-- Database
-- Runtime settings
-- Administrator data
-
-
-Excluded:
-
-- Generated videos
-- Model cache files
-
-
-## Tested Environment
-
-GPU:
-
-```
-NVIDIA RTX 5090
-```
-
-
-CUDA:
-
-```
-13.0
-```
-
-
-Python:
-
-```
-3.12
-```
-
-
-AI Models:
-
-```
-Qwen3:14B
-Stock Media
-```
-
-
-Verified:
-
-- Dashboard working
-- AI generation working
-- Stock media generation pipeline working
-- Video rendering working
-- Video download working
-- Recovery backup working
-
-
-Keep this repository private.
-
-
-## Developer
-
-YouTube AI Video Generator by Atta Rasool
-
-https://attarasool.com
-
-## Tested Production Checkpoint — 2026-08-01
-
-The following features were completed on the OpenRelay RTX 4090 deployment. The final full workflow test used Stock media:
-
-- Stock Only media-source mode
-- Improved Pixabay and stock-media selection
-- Duplicate-media prevention
-- Static image fades without unwanted zoom
-- Gemini free-model rotation with Ollama and Together fallbacks
-- Encrypted API-key add, replace, and remove controls
-- Queue progress stages, readable statuses, ETA, retry, and cancel
-- Single sequential GPU-heavy job processing
-- Detailed failure messages
-- Automatic render temporary-file cleanup
-- Captions enabled by default with small font size
-- Quiet dashboard polling without full-page reloads
-- Browser desktop notifications for job started, completed, and failed
-- Bottom-left dashboard popup notifications with optional sound
-
-A complete 3-minute landscape video using Stock media and captions was generated and verified successfully.
-
-The active deployment and recovery branch is:
+## Production branch
 
 ```text
 openrelay-setup
 ```
-
-The recovery archive is stored in:
-
-`recovery/runtime-state.tar.gz`
-
-## One-Command Fresh GPU VM Setup
-
-After cloning the `openrelay-setup` branch and entering the project directory, run:
-
-    sudo bash bootstrap.sh
-
-The bootstrap checks the NVIDIA GPU and driver. If the driver is working, it continues with the existing `install.sh`. If it installs a driver and requests a reboot, reboot and run the same command again.
-
-Successful setup ends with:
-
-    INSTALLATION_COMPLETE

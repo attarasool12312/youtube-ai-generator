@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from datetime import datetime, timezone
 import re
 import shlex
@@ -2309,9 +2310,12 @@ def retry_job(
             status_code=303,
         )
 
+    # Smart retry: stop any stale worker but preserve completed artifacts.
+    # run_job() validates each saved stage and resumes from the earliest
+    # invalid/missing dependency instead of deleting the whole job.
     cleanup_job_files(
         worker_pid=job.worker_pid,
-        output_directory=job.output_directory,
+        output_directory=None,
     )
 
     last_job = db.scalar(
@@ -2331,9 +2335,8 @@ def retry_job(
     job.worker_pid = None
     job.started_at = None
     job.completed_at = None
-    job.output_directory = None
-    job.script = None
-    job.scene_plan = None
+    # Preserve output_directory/script/scene_plan for stage validation
+    # and selective resume.
     db.commit()
 
     start_queue_worker()
@@ -3578,6 +3581,76 @@ def system_health_page(request: Request):
             "system_metrics": collect_dashboard_metrics(),
         },
     )
+
+
+_VIDEO_PRESETS_FILE = PROJECT_ROOT / "backend" / "data" / "video_presets.json"
+
+
+def _read_video_presets():
+    try:
+        if not _VIDEO_PRESETS_FILE.is_file():
+            return {}
+        data = json.loads(_VIDEO_PRESETS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        logger.exception("Could not read video presets")
+        return {}
+
+
+def _write_video_presets(data):
+    _VIDEO_PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _VIDEO_PRESETS_FILE.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    temporary.replace(_VIDEO_PRESETS_FILE)
+
+
+@app.get("/video-presets/data")
+def video_presets_data(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse(_read_video_presets())
+
+
+@app.post("/video-presets/data")
+async def video_presets_save(request: Request):
+    if not request.session.get("user_id"):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    if not isinstance(data, dict):
+        return JSONResponse({"error": "Invalid preset data"}, status_code=400)
+
+    # Never allow topic/script content into reusable presets.
+    cleaned = {}
+    for name, preset in data.items():
+        name = str(name).strip()[:60]
+        if not name or not isinstance(preset, dict):
+            continue
+
+        settings_data = preset.get("settings", {})
+        if not isinstance(settings_data, dict):
+            settings_data = {}
+
+        settings_data = {
+            key: value
+            for key, value in settings_data.items()
+            if key not in {"title", "titles", "source_script"}
+        }
+
+        cleaned[name] = {
+            "settings": settings_data,
+            "updated_at": str(preset.get("updated_at", "")),
+        }
+
+    _write_video_presets(cleaned)
+    return JSONResponse({"ok": True, "count": len(cleaned)})
 
 
 _BACKUP_NAME = re.compile(r"^atta-user-data-[0-9]{8}-[0-9]{6}\.tar\.gz$")

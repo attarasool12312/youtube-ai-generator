@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Portable user-data backup: database (incl. encrypted OAuth tokens), .env
-# (holds the decryption key - keep the archive private), avatars, cloned-voice
-# reference audio. Excludes generated videos, narration, caches.
-# Usage: bash scripts/backup_user_data.sh [output-directory]
-set -u
+# Portable lightweight ATTA user/runtime backup.
+# Includes database, secrets/config and small runtime state only.
+# Excludes generated videos, caches, avatars and cloned-voice media.
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${1:-$ROOT/backups}"
@@ -14,33 +13,53 @@ mkdir -p "$DEST"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-mkdir -p "$WORK/user-data"
+DATA="$WORK/user-data"
+mkdir -p "$DATA/backend-data"
 
 if [ -f "$ROOT/backend/data/app.db" ]; then
     if command -v sqlite3 >/dev/null 2>&1; then
-        sqlite3 "$ROOT/backend/data/app.db" ".backup '$WORK/user-data/app.db'"
+        sqlite3 "$ROOT/backend/data/app.db" \
+            ".backup '$DATA/backend-data/app.db'"
     else
-        cp "$ROOT/backend/data/app.db" "$WORK/user-data/app.db"
+        cp "$ROOT/backend/data/app.db" \
+           "$DATA/backend-data/app.db"
     fi
 else
     echo "WARNING: backend/data/app.db not found"
 fi
 
-[ -f "$ROOT/.env" ] && cp "$ROOT/.env" "$WORK/user-data/.env"
+[ -f "$ROOT/.env" ] && \
+    cp "$ROOT/.env" "$DATA/.env"
 
-[ -d "$ROOT/backend/data/avatars" ] && \
-    cp -r "$ROOT/backend/data/avatars" "$WORK/user-data/avatars"
+for name in \
+    gemini_router_state.json \
+    media_history.json \
+    video_presets.json
+do
+    [ -f "$ROOT/backend/data/$name" ] && \
+        cp "$ROOT/backend/data/$name" \
+           "$DATA/backend-data/$name"
+done
 
-[ -d "$ROOT/backend/app/static/cloned-voices" ] && \
-    cp -r "$ROOT/backend/app/static/cloned-voices" "$WORK/user-data/cloned-voices"
-
-cat > "$WORK/user-data/MANIFEST.txt" <<MANIFEST
-atta-video-ai user data backup
+cat > "$DATA/MANIFEST.txt" <<MANIFEST
+ATTA VIDEO AI lightweight user/runtime backup
 created: $STAMP
 host: $(hostname)
 git: $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
-contents: app.db .env avatars/ cloned-voices/
-restore: bash scripts/restore_user_data.sh <archive>
+
+Included:
+- backend/data/app.db
+- .env
+- gemini_router_state.json (when present)
+- media_history.json (when present)
+- video_presets.json (when present)
+
+Excluded:
+- generated videos/output files
+- avatars
+- cloned voice media
+- model caches
+- virtual environments
 MANIFEST
 
 tar -czf "$ARCHIVE" -C "$WORK" user-data

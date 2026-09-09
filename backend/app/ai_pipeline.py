@@ -1159,6 +1159,7 @@ def generate_video_package_from_script(
         "script_initial_provider": "user_supplied",
         "script_repair_providers": [],
         "script_validation": validation,
+        "live_research": script_result.get("live_research"),
         "sections": [],
         "scenes": scenes,
     }

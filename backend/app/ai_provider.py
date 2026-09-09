@@ -82,6 +82,7 @@ def _call_together_model(
     temperature=0.35,
     max_tokens=4500,
     timeout=240,
+    reasoning_enabled=None,
 ):
     enabled = os.getenv(
         "ENABLE_TOGETHER_FALLBACK", "true"
@@ -102,6 +103,9 @@ def _call_together_model(
 
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+
+    if reasoning_enabled is not None:
+        payload["reasoning"] = {"enabled": bool(reasoning_enabled)}
 
     response = None
 
@@ -172,6 +176,7 @@ def call_deepseek_script_pro(prompt, json_mode=False):
         temperature=0.35,
         max_tokens=4500,
         timeout=240,
+        reasoning_enabled=False,
     )
 
 
@@ -183,6 +188,7 @@ def call_deepseek_script_flash(prompt, json_mode=False):
         temperature=0.35,
         max_tokens=4000,
         timeout=180,
+        reasoning_enabled=False,
     )
 
 
@@ -195,6 +201,7 @@ def call_deepseek_metadata_flash(prompt, json_mode=False):
         temperature=0.25,
         max_tokens=5000,
         timeout=180,
+        reasoning_enabled=False,
     )
 
 

@@ -13,6 +13,21 @@
       <div class="success">{{ success }}</div>
       {% endif %}
       <form method="post" action="{% if script_mode %}/jobs/script{% else %}/jobs{% endif %}">
+        <div class="video-preset-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:0 0 20px;">
+          <div style="min-width:180px;flex:1;">
+            <label for="video-preset-select">Saved Preset</label>
+            <select id="video-preset-select">
+              <option value="">Select preset...</option>
+            </select>
+          </div>
+          <div style="min-width:180px;flex:1;">
+            <label for="video-preset-name">Preset Name</label>
+            <input id="video-preset-name" type="text" maxlength="60" placeholder="e.g. Space Channel">
+          </div>
+          <button type="button" id="video-preset-save" style="width:auto !important;flex:0 0 auto;margin:0;">Save Preset</button>
+          <button type="button" id="video-preset-load" style="width:auto !important;flex:0 0 auto;margin:0;">Load</button>
+          <button type="button" id="video-preset-delete" style="width:auto !important;flex:0 0 auto;margin:0;">Delete</button>
+        </div>
         {% if script_mode %}
         <label for="titles">Video Title</label>
         <input
@@ -798,6 +813,323 @@
 
       </form>
     </section>
+
+
+<script>
+(function () {
+  const STORAGE_KEY = "atta_video_presets_v1";
+  const EXCLUDED = new Set([
+    "title",
+    "titles",
+    "source_script"
+  ]);
+
+  function getForm() {
+    return document.querySelector(
+      'form[action="/jobs"], form[action="/jobs/script"]'
+    );
+  }
+
+  function readPresets() {
+    try {
+      const value = JSON.parse(
+        localStorage.getItem(STORAGE_KEY) || "{}"
+      );
+      return value && typeof value === "object"
+        ? value
+        : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function writePresets(value) {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(value)
+    );
+
+    fetch("/video-presets/data", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(value)
+    }).catch(() => {});
+  }
+
+  function refreshPresetList(selectedName) {
+    const select = document.getElementById(
+      "video-preset-select"
+    );
+    if (!select) return;
+
+    const presets = readPresets();
+    select.innerHTML =
+      '<option value="">Select preset...</option>';
+
+    Object.keys(presets)
+      .sort((a, b) => a.localeCompare(b))
+      .forEach(name => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+
+    if (selectedName && presets[selectedName]) {
+      select.value = selectedName;
+    }
+  }
+
+  function collectSettings() {
+    const form = getForm();
+    const settings = {};
+    if (!form) return settings;
+
+    const groups = {};
+
+    Array.from(form.elements).forEach(field => {
+      if (
+        !field.name ||
+        field.disabled ||
+        EXCLUDED.has(field.name) ||
+        ["submit", "button", "reset"].includes(field.type)
+      ) {
+        return;
+      }
+
+      (groups[field.name] ||= []).push(field);
+    });
+
+    Object.entries(groups).forEach(([name, fields]) => {
+      const first = fields[0];
+
+      if (
+        first.type === "checkbox" ||
+        first.type === "radio"
+      ) {
+        settings[name] = fields
+          .filter(field => field.checked)
+          .map(field => field.value);
+        return;
+      }
+
+      if (
+        first.tagName === "SELECT" &&
+        first.multiple
+      ) {
+        settings[name] = Array.from(
+          first.selectedOptions
+        ).map(option => option.value);
+        return;
+      }
+
+      settings[name] = first.value;
+    });
+
+    return settings;
+  }
+
+  function applySettings(settings) {
+    const form = getForm();
+    if (!form || !settings) return;
+
+    Array.from(form.elements).forEach(field => {
+      if (
+        !field.name ||
+        field.disabled ||
+        EXCLUDED.has(field.name) ||
+        !(field.name in settings)
+      ) {
+        return;
+      }
+
+      const value = settings[field.name];
+
+      if (
+        field.type === "checkbox" ||
+        field.type === "radio"
+      ) {
+        const values = Array.isArray(value)
+          ? value.map(String)
+          : [String(value)];
+
+        field.checked = values.includes(
+          String(field.value)
+        );
+      } else if (
+        field.tagName === "SELECT" &&
+        field.multiple
+      ) {
+        const values = Array.isArray(value)
+          ? value.map(String)
+          : [String(value)];
+
+        Array.from(field.options).forEach(option => {
+          option.selected = values.includes(
+            String(option.value)
+          );
+        });
+      } else {
+        const wanted = String(value ?? "");
+
+        if (field.tagName === "SELECT") {
+          const exists = Array.from(
+            field.options
+          ).some(option => option.value === wanted);
+
+          if (!exists) return;
+        }
+
+        field.value = wanted;
+      }
+
+      field.dispatchEvent(
+        new Event("input", { bubbles: true })
+      );
+      field.dispatchEvent(
+        new Event("change", { bubbles: true })
+      );
+    });
+  }
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+      const presetSelect = document.getElementById(
+        "video-preset-select"
+      );
+      const presetName = document.getElementById(
+        "video-preset-name"
+      );
+      const saveButton = document.getElementById(
+        "video-preset-save"
+      );
+      const loadButton = document.getElementById(
+        "video-preset-load"
+      );
+      const deleteButton = document.getElementById(
+        "video-preset-delete"
+      );
+
+      if (
+        !presetSelect ||
+        !presetName ||
+        !saveButton ||
+        !loadButton ||
+        !deleteButton
+      ) {
+        return;
+      }
+
+      refreshPresetList();
+
+      fetch("/video-presets/data")
+        .then(response => {
+          if (!response.ok) throw new Error("preset sync failed");
+          return response.json();
+        })
+        .then(serverPresets => {
+          if (
+            serverPresets &&
+            typeof serverPresets === "object"
+          ) {
+            const localPresets = readPresets();
+            const merged = {
+              ...serverPresets,
+              ...localPresets
+            };
+            localStorage.setItem(
+              STORAGE_KEY,
+              JSON.stringify(merged)
+            );
+            refreshPresetList();
+          }
+        })
+        .catch(() => {});
+
+      presetSelect.addEventListener(
+        "change",
+        function () {
+          if (presetSelect.value) {
+            presetName.value = presetSelect.value;
+          }
+        }
+      );
+
+      saveButton.addEventListener(
+        "click",
+        function () {
+          const name = presetName.value.trim();
+
+          if (!name) {
+            alert("Enter a preset name.");
+            presetName.focus();
+            return;
+          }
+
+          const presets = readPresets();
+          presets[name] = {
+            settings: collectSettings(),
+            updated_at: new Date().toISOString()
+          };
+
+          writePresets(presets);
+          refreshPresetList(name);
+          presetName.value = name;
+        }
+      );
+
+      loadButton.addEventListener(
+        "click",
+        function () {
+          const name =
+            presetSelect.value ||
+            presetName.value.trim();
+
+          const presets = readPresets();
+          const preset = presets[name];
+
+          if (!preset) {
+            alert("Select a saved preset.");
+            return;
+          }
+
+          applySettings(preset.settings || {});
+          presetSelect.value = name;
+          presetName.value = name;
+        }
+      );
+
+      deleteButton.addEventListener(
+        "click",
+        function () {
+          const name =
+            presetSelect.value ||
+            presetName.value.trim();
+
+          const presets = readPresets();
+
+          if (!name || !presets[name]) {
+            alert("Select a saved preset.");
+            return;
+          }
+
+          if (!confirm('Delete preset "' + name + '"?')) {
+            return;
+          }
+
+          delete presets[name];
+          writePresets(presets);
+          refreshPresetList();
+          presetName.value = "";
+        }
+      );
+    }
+  );
+})();
+</script>
 
 
 <script>

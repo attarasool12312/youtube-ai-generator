@@ -459,15 +459,18 @@ fi
 run_as_user "$ZIMAGE_PIP" install --upgrade pip setuptools wheel
 
 # Keep Z-Image completely isolated from the application's pinned Torch stack.
-# These versions are the production-proven A10G/CUDA 13 runtime.
+# Pin the CUDA 12.8 PyTorch wheel. It works with CUDA 12.8 drivers and newer
+# NVIDIA drivers, avoiding accidental installation of a CUDA 13-only wheel.
 run_as_user "$ZIMAGE_PIP" install \
-    torch==2.14.0 \
+    --index-url https://download.pytorch.org/whl/cu128 \
+    torch==2.11.0+cu128
+
+run_as_user "$ZIMAGE_PIP" install \
     accelerate==1.14.0 \
     transformers==5.16.1 \
     safetensors==0.8.0 \
     numpy==2.5.2 \
-    pillow==12.3.0 \
-    nvidia-cudnn-cu13==9.24.0.43
+    pillow==12.3.0
 
 run_as_user "$ZIMAGE_PIP" install \
     "git+https://github.com/huggingface/diffusers.git@09e4f5e4950c4eb156c8b9e5486176c431d53be5"
@@ -484,7 +487,7 @@ log "Verifying Z-Image isolated runtime"
 
 run_as_user env \
     HF_HOME="$ZIMAGE_HF_HOME" \
-    "$ZIMAGE_PYTHON" -c 'import torch, diffusers, transformers; from diffusers import ZImagePipeline; print("ZIMAGE_RUNTIME_OK", torch.__version__, diffusers.__version__, transformers.__version__)'
+    "$ZIMAGE_PYTHON" -c 'import torch, diffusers, transformers; from diffusers import ZImagePipeline; assert torch.cuda.is_available(), f"Z-Image CUDA unavailable: torch={torch.__version__} cuda={torch.version.cuda}"; print("ZIMAGE_RUNTIME_OK", torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), diffusers.__version__, transformers.__version__)'
 
 ZIMAGE_CUDNN_LIB="$ZIMAGE_VENV/lib/python3.12/site-packages/nvidia/cudnn/lib"
 [[ -d "$ZIMAGE_CUDNN_LIB" ]] || fail "Z-Image cuDNN runtime directory is missing."
@@ -950,6 +953,7 @@ run_as_user env \
 import app.main
 import app.ai_pipeline
 import app.script_workflow
+import app.live_research
 import app.media_selector
 import app.provider_quota
 import app.youtube_metadata_generator

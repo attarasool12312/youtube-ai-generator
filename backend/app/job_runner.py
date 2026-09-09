@@ -202,6 +202,17 @@ def run_job(job_id: int) -> None:
             json.dumps(package, indent=2), encoding="utf-8"
         )
 
+        live_research = package.get("live_research")
+        research_path = output_dir / "research.json"
+
+        if live_research:
+            research_path.write_text(
+                json.dumps(live_research, indent=2),
+                encoding="utf-8",
+            )
+        elif research_path.exists():
+            research_path.unlink()
+
         with SessionLocal() as db:
             job = db.get(VideoJob, job_id)
             if job:

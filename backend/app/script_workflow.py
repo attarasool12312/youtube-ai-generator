@@ -437,10 +437,11 @@ def _pace_script_api():
 
 
 def provider_chain():
-    # Premium cloud script path. No local GPU model is required.
+    # Flash is the default long-form writer for speed and cost.
+    # Pro is reserved as the higher-quality fallback when Flash fails.
     return [
-        ("deepseek-v4-pro", call_deepseek_script_pro),
         ("deepseek-v4-flash", call_deepseek_script_flash),
+        ("deepseek-v4-pro", call_deepseek_script_pro),
         ("gemini", call_gemini),
     ]
 
@@ -1193,6 +1194,17 @@ def trim_script_to_max_words(script, maximum_words):
 
 
 def generate_initial_script(title, duration, style, progress_callback=None):
+    from app.live_research import prepare_live_research
+
+    original_title = title
+    live_research = prepare_live_research(
+        title,
+        style,
+    )
+
+    if live_research:
+        title = live_research["grounded_title"]
+
     target = int(duration * WORDS_PER_MINUTE)
     section_count = calculate_section_count(target)
 
@@ -1326,6 +1338,8 @@ def generate_initial_script(title, duration, style, progress_callback=None):
         "outline": outline,
         "outline_provider": outline_provider,
         "section_providers": section_providers,
+        "live_research": live_research,
+        "original_title": original_title,
     }
 
 
@@ -1587,4 +1601,5 @@ def create_validated_script(title, duration, style, progress_callback=None):
             "after": cadence_after,
             "repaired": cadence_repaired,
         },
+        "live_research": generated.get("live_research"),
     }

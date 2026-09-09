@@ -245,3 +245,157 @@ def generate(prompt, json_mode=False):
     raise RuntimeError(
         "Gemini pool unavailable: " + " | ".join(errors)
     )
+
+
+
+def generate_grounded(prompt):
+    """Generate factual context using Gemini + live Google Search."""
+    key = get_api_key("gemini_api_key")
+    if not key:
+        raise RuntimeError("Gemini key missing.")
+
+    state = load_state()
+    errors = []
+
+    for model in list_models():
+        record = state.get(model, {})
+
+        if record.get("disabled_until", 0) > time.time():
+            continue
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 4096,
+            },
+            "tools": [
+                {
+                    "google_search": {}
+                }
+            ],
+        }
+
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{model}:generateContent"
+        )
+
+        try:
+            response = httpx.post(
+                url,
+                headers={"x-goog-api-key": key},
+                json=payload,
+                timeout=180,
+            )
+        except Exception as error:
+            errors.append(f"{model}: {error}")
+            continue
+
+        if response.status_code != 200:
+            message = response.text[:800]
+
+            state[model] = {
+                "disabled_until": cooldown(
+                    response.status_code,
+                    message,
+                ),
+                "last_error": message[:300],
+            }
+            save_state(state)
+
+            errors.append(
+                f"{model}: HTTP {response.status_code}"
+            )
+            continue
+
+        data = response.json()
+        candidates = data.get("candidates") or []
+
+        if not candidates:
+            errors.append(f"{model}: empty candidates")
+            continue
+
+        candidate = candidates[0]
+
+        parts = (
+            candidate
+            .get("content", {})
+            .get("parts", [])
+        )
+
+        text = "".join(
+            str(item.get("text") or "")
+            for item in parts
+        ).strip()
+
+        if not text:
+            errors.append(f"{model}: empty final content")
+            continue
+
+        grounding = (
+            candidate.get("groundingMetadata")
+            or {}
+        )
+
+        sources = []
+        seen = set()
+
+        for chunk in grounding.get(
+            "groundingChunks",
+            [],
+        ):
+            web = chunk.get("web") or {}
+            uri = str(web.get("uri") or "").strip()
+            title = str(
+                web.get("title") or ""
+            ).strip()
+
+            if not uri or uri in seen:
+                continue
+
+            seen.add(uri)
+
+            sources.append({
+                "title": title,
+                "url": uri,
+            })
+
+        usage = data.get("usageMetadata", {})
+
+        state[model] = {
+            "disabled_until": 0,
+            "last_success": time.time(),
+        }
+        save_state(state)
+
+        return {
+            "text": text,
+            "model": model,
+            "input_tokens": usage.get(
+                "promptTokenCount",
+                0,
+            ),
+            "output_tokens": usage.get(
+                "candidatesTokenCount",
+                0,
+            ),
+            "sources": sources[:12],
+            "search_queries": grounding.get(
+                "webSearchQueries",
+                [],
+            ),
+        }
+
+    detail = "; ".join(errors[-4:])
+
+    raise RuntimeError(
+        "Gemini grounded search failed"
+        + (f": {detail}" if detail else "")
+    )

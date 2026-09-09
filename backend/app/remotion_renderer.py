@@ -289,6 +289,9 @@ def render_remotion_video(
             encoding="utf-8",
         )
 
+        available_cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+        remotion_concurrency = max(1, available_cpus)
+
         base_command = [
             str(cli),
             "render",
@@ -297,7 +300,7 @@ def render_remotion_video(
             str(temporary_output),
             f"--props={props_path}",
             "--codec=h264",
-            "--concurrency=8",
+            f"--concurrency={remotion_concurrency}",
         ]
 
         # Chromium compositing can use the NVIDIA GPU where supported.
@@ -319,7 +322,7 @@ def render_remotion_video(
         )
 
         print(
-            "REMOTION_RENDER_START mode=accelerated concurrency=8",
+            f"REMOTION_RENDER_START mode=accelerated concurrency={remotion_concurrency}",
             flush=True,
         )
 
