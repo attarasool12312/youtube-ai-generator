@@ -188,202 +188,160 @@ def _zimage_graphic_risk(value):
     return any(term in text for term in risky)
 
 
+
 def build_zimage_prompt(scene, video_title="", video_profile=""):
-    subject = " ".join(
-        str(
-            scene.get("visual_subject")
-            or scene.get("search_query")
-            or ""
-        ).split()
-    ).strip()
+    def clean(value):
+        return " ".join(str(value or "").split()).strip()
 
-    action = " ".join(
-        str(scene.get("action") or "").split()
-    ).strip()
+    def clean_list(value):
+        if isinstance(value, str):
+            value = [value]
+        return [clean(item) for item in (value or []) if clean(item)]
 
-    environment = " ".join(
-        str(scene.get("environment") or "").split()
-    ).strip()
+    def title_like(value):
+        left = clean(value).casefold()
+        right = clean(video_title).casefold()
+        return bool(left and right and left == right)
 
-    shot_type = " ".join(
-        str(scene.get("shot_type") or "").split()
-    ).strip()
-
-    camera_angle = " ".join(
-        str(scene.get("camera_angle") or "").split()
-    ).strip()
-
-    focal_detail = " ".join(
-        str(scene.get("focal_detail") or "").split()
-    ).strip()
-
-    visual_distinction = " ".join(
-        str(scene.get("visual_distinction") or "").split()
-    ).strip()
-
-    planned_prompt = " ".join(
-        str(scene.get("zimage_prompt") or "").split()
-    ).strip()
-
-    negatives = scene.get("negative_keywords") or []
-    if isinstance(negatives, str):
-        negatives = [negatives]
-
-    negatives = [
-        str(value).strip()
-        for value in negatives
-        if str(value).strip()
-    ]
-
-    # Z-Image has no true negative-prompt channel. Never mention
-    # unwanted editorial objects anywhere in the positive prompt.
-    # Even "no X" can cause X to appear.
-    if _zimage_graphic_risk(subject):
-        subject = ""
-
-    for field_name in (
-        "action",
-        "environment",
-        "shot_type",
-        "camera_angle",
-        "focal_detail",
-        "visual_distinction",
-        "planned_prompt",
-    ):
-        value = locals()[field_name]
+    def safe_text(value):
+        value = clean(value)
         if _zimage_graphic_risk(value):
-            if field_name == "action":
-                action = ""
-            elif field_name == "environment":
-                environment = ""
-            elif field_name == "shot_type":
-                shot_type = ""
-            elif field_name == "camera_angle":
-                camera_angle = ""
-            elif field_name == "focal_detail":
-                focal_detail = ""
-            elif field_name == "visual_distinction":
-                visual_distinction = ""
-            elif field_name == "planned_prompt":
-                planned_prompt = ""
+            return ""
+        return value
 
-    if not subject and environment:
-        subject = environment
+    search_query = safe_text(scene.get("search_query"))
+    required_terms = clean_list(scene.get("required_terms"))[:3]
+    search_variants = clean_list(scene.get("search_variants"))[:2]
 
-    narration = " ".join(
-        str(scene.get("narration") or "").lower().split()
-    )
+    def choose_subject():
+        direct_subject = safe_text(scene.get("visual_subject"))
+        if direct_subject and not title_like(direct_subject):
+            return direct_subject
 
-    is_cta = (
-        "subscribe" in narration
-        or (
-            "comment" in narration
-            and "like" in narration
-        )
-    )
+        if (title_like(direct_subject) or title_like(search_query)) and required_terms:
+            combined = safe_text(" ".join(required_terms[:2]))
+            if combined and len(combined.split()) >= 2:
+                return combined
+
+        candidates = [
+            search_query,
+            safe_text(scene.get("focal_detail")),
+            safe_text(scene.get("environment")),
+            *[safe_text(x) for x in required_terms],
+            *[safe_text(x) for x in search_variants],
+        ]
+
+        for candidate in candidates:
+            if candidate and not title_like(candidate):
+                return candidate
+
+        return _zimage_title_anchor(video_title)
+
+    subject = choose_subject()
+    action = safe_text(scene.get("action"))
+    environment = safe_text(scene.get("environment"))
+    shot_type = safe_text(scene.get("shot_type"))
+    camera_angle = safe_text(scene.get("camera_angle"))
+    focal_detail = safe_text(scene.get("focal_detail"))
+    visual_distinction = safe_text(scene.get("visual_distinction"))
+    planned_prompt = safe_text(scene.get("zimage_prompt"))
+
+    narration = clean(scene.get("narration")).lower()
+    is_cta = "subscribe" in narration or ("comment" in narration and "like" in narration)
 
     if is_cta:
-        # Closing visuals must stay physical. Never send a video title,
-        # CTA wording, poster-style concept or title-like composition
-        # into Z-Image.
         planned_prompt = ""
         action = ""
-        visual_distinction = ""
-
-        if environment:
+        if environment and not title_like(environment):
             subject = environment
-        elif focal_detail:
+        elif focal_detail and not title_like(focal_detail):
             subject = focal_detail
-        else:
-            subject = _zimage_title_anchor(video_title)
+        elif required_terms:
+            subject = " ".join(required_terms[:2])
+        elif search_variants:
+            subject = search_variants[0]
 
-    if not subject:
-        subject = _zimage_title_anchor(video_title)
+    context_text = " ".join([
+        subject,
+        action,
+        environment,
+        focal_detail,
+        search_query,
+        planned_prompt,
+    ]).lower()
 
-    lower = subject.lower()
-
-    visual_type = "photorealistic real-world documentary scene"
-
-    if any(
-        word in lower
-        for word in (
-            "cross-section",
-            "cross section",
-            "cutaway",
-            "schematic",
-        )
-    ):
-        visual_type = (
-            "high-detail realistic scientific cutaway visualization "
-            "with no labels"
-        )
+    if any(term in context_text for term in (
+        "cleanroom",
+        "assembly hall",
+        "test facility",
+        "mirror segment",
+        "optical testing",
+        "spacecraft assembly",
+    )):
+        visual_type = "high-detail aerospace engineering photograph"
+    elif any(term in context_text for term in (
+        "deep space",
+        "orbit",
+        "orbital",
+        "kuiper",
+        "asteroid",
+        "dwarf planet",
+        "solar system",
+        "telescope",
+        "planetary",
+        "nebula",
+        "star field",
+        "outer solar system",
+    )):
+        visual_type = "high-detail space-science visualization"
+    else:
+        visual_type = "photorealistic documentary image"
 
     parts = [
-        f"Create a {visual_type} showing exactly: {subject}.",
+        f"Create one single {visual_type}.",
+        f"Main subject: {subject}.",
+        "The image must match this exact scene, not a generic image from the overall topic.",
     ]
 
-    if planned_prompt:
+    if search_query and not title_like(search_query):
+        parts.append(f"Subject identity anchor: {search_query}.")
+    if required_terms:
         parts.append(
-            "Scene-specific visual plan: "
-            + planned_prompt
+            "Important physical identity cues: "
+            + ", ".join(required_terms)
             + "."
         )
-
+    if planned_prompt:
+        parts.append(f"Scene plan: {planned_prompt}.")
     if action:
         parts.append(f"Visible action: {action}.")
-
     if environment:
-        parts.append(f"Environment: {environment}.")
-
+        parts.append(f"Setting: {environment}.")
     if shot_type:
-        parts.append(f"Shot composition: {shot_type}.")
-
+        parts.append(f"Composition: {shot_type}.")
     if camera_angle:
-        parts.append(f"Camera viewpoint: {camera_angle}.")
-
+        parts.append(f"Viewpoint: {camera_angle}.")
     if focal_detail:
         parts.append(
-            f"Primary focal detail: {focal_detail}."
+            f"Key unique detail to emphasize: {focal_detail}."
         )
-
     if visual_distinction:
         parts.append(
-            "Visual distinction from nearby scenes: "
+            "Differentiate this shot by emphasizing: "
             + visual_distinction
             + "."
         )
 
     parts.extend([
-        (
-            "The requested subject must be the clear main focus and "
-            "accurately match its real environment, scale, materials, "
-            "geography, and physical context."
-        ),
-        (
-            "Use realistic documentary photography, natural believable "
-            "lighting, physically plausible materials, clean composition, "
-            "realistic colors, and high visual fidelity."
-        ),
-        (
-            "Do not add unrelated objects, symbolic concepts, generic "
-            "filler imagery, or invented events."
-        ),
-        (
-            "Keep the frame as one coherent real-world physical scene "
-            "captured by a documentary camera, with no composited panels, "
-            "editorial overlays, or artificial visual inserts."
-        ),
-        (
-            "Use clean unbranded physical objects and surfaces without "
-            "readable writing or visible branding."
-        ),
+        "Keep one coherent frame with a single clear subject focus.",
+        "Use realistic scale, materials, lighting, and physically believable detail.",
+        "Do not let one recurring object from the overall topic dominate unrelated scenes.",
+        "If the current scene is about a place, person, process, object, or environment, show that exact thing instead of falling back to a repeated topic icon.",
+        "Avoid turning the video title into visible text or a poster-like concept.",
+        "Use clean unbranded physical objects and surfaces without readable writing or visible branding. No text, labels, captions, logos, diagrams, interfaces, split layouts, or editorial overlays.",
     ])
 
-    # Do not append textual negative keywords. Z-Image Turbo can
-    # visually react to forbidden nouns even when phrased as exclusions.
-    return " ".join(parts)
-
-
+    return " ".join(part for part in parts if part)
 
 def _release_ollama_gpu():
     model = str(getattr(settings, "ollama_model", "") or "").strip()

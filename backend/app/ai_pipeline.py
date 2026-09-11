@@ -424,12 +424,14 @@ def _enrich_scene_batch_once(
     topic_context=None,
     media_script_context=None,
     all_scenes=None,
+    recent_visuals=None,
 ):
     topic_context = topic_context or build_media_topic_context(
         title, video_style
     )
     media_script_context = media_script_context or {}
     all_scenes = all_scenes or scenes
+    recent_visuals = recent_visuals or []
     continuity = _scene_continuity_rows(all_scenes, scenes)
     prompt = (
         f"Video title: {title}\n"
@@ -512,6 +514,15 @@ def _enrich_scene_batch_once(
         "zimage_prompt must be a concise photorealistic documentary-still prompt grounded only in this scene's subject, action and environment. Never request text, labels, captions, logos, screens, UI, posters, fake maps, title cards or written diagrams.\n"
         "Never output placeholder values such as none, n/a, unknown or not applicable for visual planning fields.\n"
         "Across adjacent scenes, vary framing, viewpoint and focal detail while preserving factual accuracy.\n"
+        "Recent visual plans already used earlier in this SAME video:\n"
+        f"{json.dumps(recent_visuals, ensure_ascii=False)}\n"
+        "Cross-batch visual diversity rules:\n"
+        "- Treat those recent visuals as already used. Do not casually reuse the same visual concept.\n"
+        "- A different camera angle alone does NOT make a repeated subject into a new visual idea.\n"
+        "- If the same named entity must appear again because narration directly requires it, show a different factual component, physical action, environment, scale, stage, or meaningful focal detail.\n"
+        "- Avoid repeatedly using generic hero views such as a spacecraft floating in space, telescope portrait, rocket on launch pad, isolated planet against stars, or the same object in a cleanroom.\n"
+        "- Prefer the most specific physical mechanism, component, observation target, surface feature, instrument, environment, or event actually supported by the current narration.\n"
+        "- Never invent unrelated variety just to be different; narration accuracy remains mandatory.\n"
         "Local continuity context (previous/current/next narration): "
         f"{json.dumps(continuity, ensure_ascii=False)}\n"
         f"Scenes: {json.dumps(scenes)}"
@@ -1053,10 +1064,26 @@ def enrich_scene_batch(title, video_style, scenes, script=None):
 
     for start in range(0, len(scenes), 8):
         batch = scenes[start:start + 8]
+
+        recent_visuals = [
+            {
+                "scene_number": item.get("scene_number"),
+                "visual_subject": item.get("visual_subject"),
+                "action": item.get("action"),
+                "environment": item.get("environment"),
+                "shot_type": item.get("shot_type"),
+                "camera_angle": item.get("camera_angle"),
+                "focal_detail": item.get("focal_detail"),
+                "visual_distinction": item.get("visual_distinction"),
+            }
+            for item in enriched[-16:]
+        ]
+
         enriched.extend(
             _enrich_scene_batch_once(
                 title, video_style, batch, topic_context,
                 media_script_context, scenes,
+                recent_visuals=recent_visuals,
             )
         )
 
@@ -1159,7 +1186,7 @@ def generate_video_package_from_script(
         "script_initial_provider": "user_supplied",
         "script_repair_providers": [],
         "script_validation": validation,
-        "live_research": script_result.get("live_research"),
+        "live_research": None,
         "sections": [],
         "scenes": scenes,
     }

@@ -7,7 +7,7 @@ import subprocess
 from contextlib import asynccontextmanager
 import logging
 import shutil
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Request, UploadFile
 from urllib.parse import quote
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.responses import FileResponse, StreamingResponse
@@ -28,7 +28,7 @@ from app.avatar_service import (
 )
 from app.download_filenames import content_disposition_for_video
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.dashboard_metrics import collect_dashboard_metrics
 from app.project_info import get_project_info
 from app.publishing_status import collect_publishing_status
@@ -1040,9 +1040,33 @@ def avatars_page(
     )
 
 
+def _prepare_avatar_background(avatar_id, cache_id, source_path):
+    db = SessionLocal()
+    try:
+        avatar = db.get(Avatar, int(avatar_id))
+        if avatar is None:
+            return
+        try:
+            prepare_avatar(cache_id=cache_id, source_path=Path(source_path))
+            avatar.status = "ready"
+            avatar.error_message = None
+            db.commit()
+        except Exception as error:
+            avatar.status = "failed"
+            avatar.error_message = str(error)[-6000:]
+            db.commit()
+            from app.avatar_service import avatar_cache_path
+            cache_path = avatar_cache_path(cache_id)
+            if cache_path.exists():
+                shutil.rmtree(cache_path, ignore_errors=True)
+    finally:
+        db.close()
+
+
 @app.post("/avatars")
 def create_avatar(
     request: Request,
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     source_file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -1110,17 +1134,15 @@ def create_avatar(
                 "Uploaded avatar file is empty."
             )
 
-        prepare_avatar(
-            cache_id=cache_id,
-            source_path=source_path,
+        background_tasks.add_task(
+            _prepare_avatar_background,
+            avatar.id,
+            cache_id,
+            str(source_path),
         )
 
-        avatar.status = "ready"
-        avatar.error_message = None
-        db.commit()
-
         return RedirectResponse(
-            "/avatars?success=Avatar prepared and ready to use.",
+            "/avatars?success=Avatar uploaded. Preparation is running.",
             status_code=303,
         )
 
