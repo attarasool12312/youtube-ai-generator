@@ -201,11 +201,11 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
     def title_like(value):
         left = clean(value).casefold()
         right = clean(video_title).casefold()
-        return bool(left and right and left == right)
+        return bool(left and right and (left == right or right in left))
 
     def safe_text(value):
         value = clean(value)
-        if _zimage_graphic_risk(value):
+        if _zimage_graphic_risk(value) or title_like(value):
             return ""
         return value
 
@@ -260,6 +260,13 @@ def build_zimage_prompt(scene, video_title="", video_profile=""):
             subject = " ".join(required_terms[:2])
         elif search_variants:
             subject = search_variants[0]
+
+        # CTA closing scene ko clean rakho.
+        # Title/topic carry-over metadata hata do taa ke text ya wrong subject na aaye.
+        search_query = ""
+        required_terms = []
+        search_variants = []
+        focal_detail = ""
 
     context_text = " ".join([
         subject,

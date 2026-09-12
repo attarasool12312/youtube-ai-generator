@@ -26,7 +26,7 @@ LICENSED_HISTORICAL_PROVIDERS = (
 
 VIDEO_ACCEPT_SCORE = 80
 IMAGE_ACCEPT_SCORE = 80
-SCENE_STOCK_BUDGET_SECONDS = 1.5
+SCENE_STOCK_BUDGET_SECONDS = 4.0
 MAX_EXTRA_CANDIDATES = 3
 CONFIDENCE_ORDER = {"bad": 0, "weak": 1, "acceptable": 2, "strong": 3}
 
@@ -90,9 +90,9 @@ def _verified_acceptable_result(result):
 
     return bool(
         _result_confidence(result) == "acceptable"
-        and _result_score(result) >= 60
-        and float(result.get("subject_coverage") or 0) >= 1.0
-        and float(result.get("descriptive_coverage") or 0) >= 1.0
+        and _result_score(result) >= 68
+        and float(result.get("subject_coverage") or 0) >= 0.66
+        and float(result.get("descriptive_coverage") or 0) >= 0.50
     )
 
 
@@ -296,7 +296,7 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
     deadline = time.monotonic() + SCENE_STOCK_BUDGET_SECONDS
 
     video_result = _search_exact_then_one_variant(
-        (pexels_video,),
+        (pexels_video, pixabay_video, coverr_video),
         query,
         folder,
         number,
@@ -305,7 +305,7 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
         excluded,
         topic_context,
         deadline,
-        allow_variant=False,
+        allow_variant=True,
     )
 
     if _verified_acceptable_result(video_result):
@@ -321,7 +321,7 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
     if time.monotonic() < deadline:
         image_folder = Path(folder) / "stock-images"
         image_result = _search_exact_then_one_variant(
-            (pexels_image,),
+            (pexels_image, pixabay_image, openverse_image),
             query,
             image_folder,
             number,
@@ -330,14 +330,18 @@ def _stock_pass(query, folder, number, requested, orientation, excluded, topic_c
             excluded,
             topic_context,
             deadline,
-            allow_variant=False,
+            allow_variant=True,
         )
 
-    if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE):
+    if _verified_acceptable_result(image_result):
         _discard_result_media(video_result)
         image_result = _adopt_result_media(image_result, folder, number)
         image_result["needs_ai_fallback"] = False
-        image_result["stock_decision"] = "image_accepted_strong"
+        image_result["stock_decision"] = (
+            "image_accepted_strong"
+            if _meets_threshold(image_result, IMAGE_ACCEPT_SCORE)
+            else "image_accepted_verified"
+        )
         return image_result
 
     winner = _better_result(video_result, image_result)
