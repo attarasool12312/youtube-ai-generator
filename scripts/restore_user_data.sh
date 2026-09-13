@@ -66,6 +66,18 @@ done
 
 [ -f "$ROOT/.env" ] && cp -a "$ROOT/.env" "$KEEP/.env"
 
+# Preserve cloned voices before replacing them.
+if [ -d "$ROOT/backend/app/static/cloned-voices" ]; then
+    mkdir -p "$KEEP/cloned-voices"
+    cp -a "$ROOT/backend/app/static/cloned-voices/." "$KEEP/cloned-voices/"
+fi
+
+# A restored SQLite database must not inherit WAL/SHM files from the
+# destination VM. Stale WAL data can otherwise override restored rows.
+if [ -f "$SRC_DATA/app.db" ]; then
+    rm -f "$ROOT/backend/data/app.db-wal" "$ROOT/backend/data/app.db-shm"
+fi
+
 # Restore available files only.
 for name in \
     app.db \
@@ -80,10 +92,35 @@ done
 
 [ -f "$SRC/.env" ] && cp "$SRC/.env" "$ROOT/.env"
 
+# Restore cloned voice audio. Avatars are intentionally not restored.
+if [ -d "$SRC/cloned-voices" ]; then
+    TARGET="$ROOT/backend/app/static/cloned-voices"
+    rm -rf "$TARGET"
+    mkdir -p "$TARGET"
+    cp -a "$SRC/cloned-voices/." "$TARGET/"
+fi
+
+# Make cloned-voice DB paths portable between VMs/project locations.
+if command -v sqlite3 >/dev/null 2>&1 && [ -f "$ROOT/backend/data/app.db" ]; then
+    sqlite3 "$ROOT/backend/data/app.db" "
+        UPDATE cloned_voices
+        SET reference_audio_path =
+            '$ROOT/backend/app/static/cloned-voices/' || id || '/reference.wav'
+        WHERE reference_audio_path IS NOT NULL;
+
+        UPDATE cloned_voices
+        SET preview_audio_path =
+            '$ROOT/backend/app/static/cloned-voices/' || id || '/preview.mp3'
+        WHERE preview_audio_path IS NOT NULL;
+    " 2>/dev/null || true
+fi
+
 OWNER="$(stat -c '%U:%G' "$ROOT")"
 
 if [ "$(id -u)" = "0" ] && [ "$OWNER" != "root:root" ]; then
     chown -R "$OWNER" "$ROOT/backend/data" 2>/dev/null || true
+    [ -d "$ROOT/backend/app/static/cloned-voices" ] && \
+        chown -R "$OWNER" "$ROOT/backend/app/static/cloned-voices" 2>/dev/null || true
     [ -f "$ROOT/.env" ] && chown "$OWNER" "$ROOT/.env"
 fi
 

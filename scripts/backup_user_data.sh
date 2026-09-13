@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Portable lightweight ATTA user/runtime backup.
 # Includes database, secrets/config and small runtime state only.
-# Excludes generated videos, caches, avatars and cloned-voice media.
+# Excludes generated videos, caches and avatars. Includes cloned-voice media.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,6 +41,13 @@ do
            "$DATA/backend-data/$name"
 done
 
+# Cloned voices are user data and must move with the database.
+CLONED_VOICES="$ROOT/backend/app/static/cloned-voices"
+if [ -d "$CLONED_VOICES" ]; then
+    mkdir -p "$DATA/cloned-voices"
+    cp -a "$CLONED_VOICES/." "$DATA/cloned-voices/"
+fi
+
 cat > "$DATA/MANIFEST.txt" <<MANIFEST
 ATTA VIDEO AI lightweight user/runtime backup
 created: $STAMP
@@ -53,11 +60,11 @@ Included:
 - gemini_router_state.json (when present)
 - media_history.json (when present)
 - video_presets.json (when present)
+- cloned voice reference/preview media (when present)
 
 Excluded:
 - generated videos/output files
 - avatars
-- cloned voice media
 - model caches
 - virtual environments
 MANIFEST
