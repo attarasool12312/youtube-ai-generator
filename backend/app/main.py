@@ -32,6 +32,7 @@ from app.database import SessionLocal, get_db
 from app.dashboard_metrics import collect_dashboard_metrics
 from app.project_info import get_project_info
 from app.publishing_status import collect_publishing_status
+from app.provider_quota import clear_quota_cache
 from app.youtube_oauth import (
     YouTubeOAuthConfigurationError,
     build_youtube_oauth_flow,
