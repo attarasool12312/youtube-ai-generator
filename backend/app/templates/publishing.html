@@ -152,15 +152,27 @@ Prepare completed videos for publishing and monitor integration readiness.
         </p>
       </div>
 
-      {% if publishing_status.credentials_ready %}
-      <a href="/youtube/connect" class="crm-primary-button">
-        Connect YouTube Channel
-      </a>
-      {% else %}
-      <a href="/settings" class="crm-primary-button">
-        Configure OAuth
-      </a>
-      {% endif %}
+      <div class="publishing-channel-header-actions">
+        {% if publishing_status.credentials_ready %}
+        <a href="/youtube/connect" class="crm-primary-button">
+          Connect YouTube Channel
+        </a>
+        {% else %}
+        <a href="/settings" class="crm-primary-button">
+          Configure OAuth
+        </a>
+        {% endif %}
+
+        <form
+          method="post"
+          action="/youtube/connections/clear-disconnected"
+          onsubmit="return confirm('Remove all disconnected YouTube profiles from ATTA AI?');"
+        >
+          <button type="submit" class="api-danger-button">
+            Clear Disconnected
+          </button>
+        </form>
+      </div>
     </div>
 
     {% if youtube_connections %}

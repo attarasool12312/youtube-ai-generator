@@ -12,6 +12,9 @@ CACHE = {"until": 0, "models": []}
 FREE_MODEL_POOL = (
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-2.5-flash",
 )
@@ -121,17 +124,31 @@ def generate_model(prompt, model, json_mode=False):
         f"models/{model}:generateContent"
     )
 
-    try:
-        response = httpx.post(
-            url,
-            headers={"x-goog-api-key": key},
-            json=payload,
-            timeout=180,
-        )
-    except Exception as error:
-        raise RuntimeError(f"{model}: {error}") from error
+    response = None
+    last_network_error = None
 
-    if response.status_code != 200:
+    for attempt in range(3):
+        try:
+            response = httpx.post(
+                url,
+                headers={"x-goog-api-key": key},
+                json=payload,
+                timeout=180,
+            )
+        except Exception as error:
+            last_network_error = error
+            if attempt < 2:
+                time.sleep((3, 8)[attempt])
+                continue
+            raise RuntimeError(f"{model}: {error}") from error
+
+        if response.status_code == 200:
+            break
+
+        if response.status_code == 503 and attempt < 2:
+            time.sleep((3, 8)[attempt])
+            continue
+
         message = response.text[:800]
         state[model] = {
             "disabled_until": cooldown(
@@ -143,6 +160,11 @@ def generate_model(prompt, model, json_mode=False):
         save_state(state)
         raise RuntimeError(
             f"{model}: HTTP {response.status_code}"
+        )
+
+    if response is None:
+        raise RuntimeError(
+            f"{model}: {last_network_error or 'request failed'}"
         )
 
     data = response.json()

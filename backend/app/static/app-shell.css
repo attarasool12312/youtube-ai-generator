@@ -3390,3 +3390,30 @@
   display: block;
   margin-top: 6px;
 }
+
+
+.publishing-channel-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.publishing-channel-header-actions form {
+  margin: 0;
+}
+
+.publishing-channel-header-actions .crm-primary-button,
+.publishing-channel-header-actions .api-danger-button {
+  min-height: 43px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .publishing-channel-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}

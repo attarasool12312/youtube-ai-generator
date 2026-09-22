@@ -1,6 +1,7 @@
 import json
 
 from app.ai_provider import (
+    call_deepseek_metadata_flash,
     call_gemini,
     call_gemini_35_flash_lite,
     call_gemini_31_flash_lite,
@@ -156,6 +157,11 @@ Return only JSON: {"scenes":[{"scene_number":1,"visual_subject":"concrete visibl
 """
 
     providers = [
+        (
+            "together-deepseek-v4-flash",
+            call_deepseek_metadata_flash,
+            1,
+        ),
         (
             "gemini-3.5-flash-lite",
             call_gemini_35_flash_lite,

@@ -3589,6 +3589,43 @@ def disconnect_youtube_channel(
     )
 
 
+@app.post("/youtube/connections/clear-disconnected")
+def clear_disconnected_youtube_channels(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not request.session.get("user_id"):
+        return RedirectResponse("/login", status_code=303)
+
+    disconnected = db.scalars(
+        select(YouTubeConnection).where(
+            YouTubeConnection.is_active.is_(False)
+        )
+    ).all()
+
+    for connection in disconnected:
+        publish_job = db.scalar(
+            select(YouTubePublishJob.id)
+            .where(
+                YouTubePublishJob.youtube_connection_id
+                == connection.id
+            )
+            .limit(1)
+        )
+
+        if publish_job is not None:
+            continue
+
+        db.delete(connection)
+
+    db.commit()
+
+    return RedirectResponse(
+        "/publishing",
+        status_code=303,
+    )
+
+
 @app.get("/system-health")
 def system_health_page(request: Request):
     if not request.session.get("user_id"):
