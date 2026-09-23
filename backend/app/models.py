@@ -172,6 +172,10 @@ class VideoJob(Base):
         Integer,
         nullable=True,
     )
+    auto_publish_connection_ids: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
     auto_publish_privacy: Mapped[str] = mapped_column(
         String(20),
         default="private",

@@ -1400,6 +1400,72 @@ def videos_page(
 from app.video_profiles import normalize_profile_key
 
 
+def _resolve_auto_publish_connections(db, raw_ids):
+    ids = []
+    for raw in raw_ids or []:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value not in ids:
+            ids.append(value)
+
+    if not ids:
+        return [], []
+
+    rows = db.scalars(
+        select(YouTubeConnection).where(
+            YouTubeConnection.id.in_(ids),
+            YouTubeConnection.is_active.is_(True),
+            YouTubeConnection.encrypted_refresh_token.is_not(None),
+        )
+    ).all()
+
+    by_id = {row.id: row for row in rows}
+    return ids, [by_id[item] for item in ids if item in by_id]
+
+
+def _read_manual_youtube_thumbnail(upload):
+    if upload is None or not getattr(upload, "filename", ""):
+        return b"", "", None
+
+    suffix = Path(upload.filename).suffix.lower()
+
+    if suffix not in {".jpg", ".jpeg", ".png"}:
+        return b"", "", "Thumbnail must be JPG or PNG."
+
+    data = upload.file.read()
+
+    if not data:
+        return b"", "", "Thumbnail file is empty."
+
+    if len(data) >= 2 * 1024 * 1024:
+        return b"", "", "Thumbnail must be smaller than 2 MB."
+
+    normalized_suffix = ".png" if suffix == ".png" else ".jpg"
+    return data, normalized_suffix, None
+
+
+def _store_manual_youtube_thumbnail(
+    job,
+    thumbnail_bytes,
+    thumbnail_suffix,
+):
+    if not thumbnail_bytes:
+        return
+
+    root = PROJECT_ROOT / "backend/data/manual-thumbnails"
+    root.mkdir(parents=True, exist_ok=True)
+
+    path = root / f"job-{job.id}{thumbnail_suffix}"
+    path.write_bytes(thumbnail_bytes)
+
+    job.manual_thumbnail_path = str(path.resolve())
+    job.manual_thumbnail_uploaded_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+
+
 @app.post("/jobs")
 def add_jobs(
     request: Request,
@@ -1420,13 +1486,14 @@ def add_jobs(
     caption_outline: int = Form(2),
     avatar_id: int = Form(0),
     avatar_position: str = Form("bottom_right"),
-    auto_publish_connection_id: int = Form(0),
+    auto_publish_connection_ids: list[int] = Form(default=[]),
     auto_publish_privacy: str = Form("private"),
     auto_publish_scheduled_at_local: str = Form(""),
     auto_publish_scheduled_at_utc: str = Form(""),
     auto_publish_made_for_kids: str = Form("no"),
     auto_publish_notify_subscribers: str = Form(""),
     auto_publish_metadata: str = Form("on"),
+    youtube_thumbnail: UploadFile | None = File(None),
     facebook_auto_publish_connection_id: int = Form(0),
     facebook_auto_publish_mode: str = Form("now"),
     facebook_auto_publish_scheduled_at_local: str = Form(""),
@@ -1522,24 +1589,31 @@ def add_jobs(
                 status_code=303,
             )
 
-    auto_publish_enabled = auto_publish_connection_id > 0
-    selected_youtube_connection = None
+    (
+        selected_youtube_ids,
+        selected_youtube_connections,
+    ) = _resolve_auto_publish_connections(
+        db,
+        auto_publish_connection_ids,
+    )
 
-    if auto_publish_enabled:
-        selected_youtube_connection = db.get(
-            YouTubeConnection,
-            auto_publish_connection_id,
+    auto_publish_enabled = bool(selected_youtube_ids)
+
+    if (
+        auto_publish_enabled
+        and len(selected_youtube_connections)
+        != len(selected_youtube_ids)
+    ):
+        return RedirectResponse(
+            "/videos/create?success=One or more selected YouTube channels are unavailable.",
+            status_code=303,
         )
 
-        if (
-            selected_youtube_connection is None
-            or not selected_youtube_connection.is_active
-            or not selected_youtube_connection.encrypted_refresh_token
-        ):
-            return RedirectResponse(
-                "/videos/create?success=Selected YouTube channel is unavailable.",
-                status_code=303,
-            )
+    selected_youtube_connection = (
+        selected_youtube_connections[0]
+        if selected_youtube_connections
+        else None
+    )
 
     publish_mode = auto_publish_privacy.strip().lower()
 
@@ -1609,6 +1683,19 @@ def add_jobs(
         auto_publish_notify_subscribers == "on"
     )
     auto_metadata_value = auto_publish_metadata == "on"
+
+
+    (
+        thumbnail_bytes,
+        thumbnail_suffix,
+        thumbnail_error,
+    ) = _read_manual_youtube_thumbnail(youtube_thumbnail)
+
+    if thumbnail_error:
+        return RedirectResponse(
+            "/videos/create?success=" + quote(thumbnail_error),
+            status_code=303,
+        )
 
     facebook_auto_publish_enabled = (
         facebook_auto_publish_connection_id > 0
@@ -1714,7 +1801,7 @@ def add_jobs(
     next_position = last_job.queue_position + 1 if last_job else 1
 
     for index, title in enumerate(title_list):
-        db.add(VideoJob(
+        job = VideoJob(
             title=title,
             duration_minutes=duration_minutes,
             video_style=video_style,
@@ -1743,6 +1830,9 @@ def add_jobs(
                 if selected_youtube_connection
                 else None
             ),
+            auto_publish_connection_ids=",".join(
+                str(item) for item in selected_youtube_ids
+            ),
             auto_publish_privacy=auto_publish_privacy,
             auto_publish_scheduled_at=auto_publish_scheduled_at,
             auto_publish_made_for_kids=made_for_kids_value,
@@ -1750,7 +1840,7 @@ def add_jobs(
                 notify_subscribers_value
             ),
             auto_publish_metadata=auto_metadata_value,
-            auto_publish_thumbnail=False,
+            auto_publish_thumbnail=bool(thumbnail_bytes),
             facebook_auto_publish_enabled=(
                 facebook_auto_publish_enabled
             ),
@@ -1765,7 +1855,16 @@ def add_jobs(
             status="waiting",
             progress=0,
             queue_position=next_position + index,
-        ))
+        )
+
+        db.add(job)
+        db.flush()
+
+        _store_manual_youtube_thumbnail(
+            job,
+            thumbnail_bytes,
+            thumbnail_suffix,
+        )
 
     db.commit()
     start_queue_worker()
@@ -1795,13 +1894,14 @@ def add_script_job(
     caption_outline: int = Form(2),
     avatar_id: int = Form(0),
     avatar_position: str = Form("bottom_right"),
-    auto_publish_connection_id: int = Form(0),
+    auto_publish_connection_ids: list[int] = Form(default=[]),
     auto_publish_privacy: str = Form("private"),
     auto_publish_scheduled_at_local: str = Form(""),
     auto_publish_scheduled_at_utc: str = Form(""),
     auto_publish_made_for_kids: str = Form("no"),
     auto_publish_notify_subscribers: str = Form(""),
     auto_publish_metadata: str = Form("on"),
+    youtube_thumbnail: UploadFile | None = File(None),
     facebook_auto_publish_connection_id: int = Form(0),
     facebook_auto_publish_mode: str = Form("now"),
     facebook_auto_publish_scheduled_at_local: str = Form(""),
@@ -1928,24 +2028,31 @@ def add_script_job(
                 status_code=303,
             )
 
-    auto_publish_enabled = auto_publish_connection_id > 0
-    selected_youtube_connection = None
+    (
+        selected_youtube_ids,
+        selected_youtube_connections,
+    ) = _resolve_auto_publish_connections(
+        db,
+        auto_publish_connection_ids,
+    )
 
-    if auto_publish_enabled:
-        selected_youtube_connection = db.get(
-            YouTubeConnection,
-            auto_publish_connection_id,
+    auto_publish_enabled = bool(selected_youtube_ids)
+
+    if (
+        auto_publish_enabled
+        and len(selected_youtube_connections)
+        != len(selected_youtube_ids)
+    ):
+        return RedirectResponse(
+            "/script-to-video?success=One or more selected YouTube channels are unavailable.",
+            status_code=303,
         )
 
-        if (
-            selected_youtube_connection is None
-            or not selected_youtube_connection.is_active
-            or not selected_youtube_connection.encrypted_refresh_token
-        ):
-            return RedirectResponse(
-                "/script-to-video?success=Selected YouTube channel is unavailable.",
-                status_code=303,
-            )
+    selected_youtube_connection = (
+        selected_youtube_connections[0]
+        if selected_youtube_connections
+        else None
+    )
 
     publish_mode = auto_publish_privacy.strip().lower()
 
@@ -2014,6 +2121,19 @@ def add_script_job(
         auto_publish_notify_subscribers == "on"
     )
     auto_metadata_value = auto_publish_metadata == "on"
+
+
+    (
+        thumbnail_bytes,
+        thumbnail_suffix,
+        thumbnail_error,
+    ) = _read_manual_youtube_thumbnail(youtube_thumbnail)
+
+    if thumbnail_error:
+        return RedirectResponse(
+            "/script-to-video?success=" + quote(thumbnail_error),
+            status_code=303,
+        )
 
     facebook_auto_publish_enabled = (
         facebook_auto_publish_connection_id > 0
@@ -2152,12 +2272,15 @@ def add_script_job(
             if selected_youtube_connection
             else None
         ),
+        auto_publish_connection_ids=",".join(
+            str(item) for item in selected_youtube_ids
+        ),
         auto_publish_privacy=auto_publish_privacy,
         auto_publish_scheduled_at=auto_publish_scheduled_at,
         auto_publish_made_for_kids=made_for_kids_value,
         auto_publish_notify_subscribers=notify_subscribers_value,
         auto_publish_metadata=auto_metadata_value,
-        auto_publish_thumbnail=False,
+        auto_publish_thumbnail=bool(thumbnail_bytes),
         facebook_auto_publish_enabled=(
             facebook_auto_publish_enabled
         ),
@@ -2176,6 +2299,14 @@ def add_script_job(
     )
 
     db.add(job)
+    db.flush()
+
+    _store_manual_youtube_thumbnail(
+        job,
+        thumbnail_bytes,
+        thumbnail_suffix,
+    )
+
     db.commit()
 
     start_queue_worker()

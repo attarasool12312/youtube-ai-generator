@@ -12,7 +12,7 @@
       {% if success %}
       <div class="success">{{ success }}</div>
       {% endif %}
-      <form method="post" action="{% if script_mode %}/jobs/script{% else %}/jobs{% endif %}">
+      <form method="post" enctype="multipart/form-data" action="{% if script_mode %}/jobs/script{% else %}/jobs{% endif %}">
         <div class="video-preset-toolbar" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:0 0 20px;">
           <div style="min-width:180px;flex:1;">
             <label for="video-preset-select">Saved Preset</label>
@@ -300,14 +300,13 @@
           </div>
         </section>
 
-        <section class="caption-settings">
+        <section class="caption-settings youtube-publish-settings">
           <div class="caption-settings-heading">
             <div>
               <h3>Automatic YouTube Publishing</h3>
               <p>
-                Choose a connected channel to automatically prepare
-                and upload each completed video. Select no channel to
-                keep manual download only.
+                Select one or more connected channels. The video renders once,
+                then uploads separately to every selected channel.
               </p>
             </div>
           </div>
@@ -315,23 +314,42 @@
           <div class="caption-controls-grid">
             <div>
               <label for="auto_publish_connection_id">
-                Upload Destination
+                Upload Destination(s)
               </label>
 
               <select
                 id="auto_publish_connection_id"
-                name="auto_publish_connection_id"
+                name="auto_publish_connection_ids"
+                multiple
+                size="4"
               >
-                <option value="0" selected>
-                  Do not upload automatically
-                </option>
-
                 {% for connection in youtube_connections | default([]) %}
                 <option value="{{ connection.id }}">
-                  {{ connection.channel_title }}
+                  {{ connection.channel_title }}{% if connection.google_account_email %} — {{ connection.google_account_email }}{% endif %}
                 </option>
                 {% endfor %}
               </select>
+
+              <small>
+                Hold Ctrl/Cmd to choose multiple channels. Leave empty for manual download only.
+              </small>
+            </div>
+
+            <div>
+              <label for="youtube_thumbnail">
+                YouTube Thumbnail (Optional)
+              </label>
+
+              <input
+                id="youtube_thumbnail"
+                type="file"
+                name="youtube_thumbnail"
+                accept="image/jpeg,image/png"
+              >
+
+              <small>
+                JPG or PNG, under 2 MB. The same thumbnail will be uploaded to all selected channels.
+              </small>
             </div>
 
             <div data-auto-publish-option hidden>

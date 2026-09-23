@@ -105,6 +105,37 @@ def package_contains_synthetic_media(
     return False
 
 
+def _selected_connection_ids(video_job: VideoJob) -> list[int]:
+    result = []
+
+    for raw in str(
+        video_job.auto_publish_connection_ids or ""
+    ).split(","):
+        raw = raw.strip()
+
+        if not raw:
+            continue
+
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+
+        if value > 0 and value not in result:
+            result.append(value)
+
+    # Backward compatibility with older single-channel jobs.
+    if (
+        not result
+        and video_job.auto_publish_connection_id
+    ):
+        result.append(
+            int(video_job.auto_publish_connection_id)
+        )
+
+    return result
+
+
 def prepare_and_queue_auto_publish(
     video_job_id: int,
 ) -> str:
@@ -120,45 +151,37 @@ def prepare_and_queue_auto_publish(
         if not video_job.auto_publish_enabled:
             return "skipped_disabled"
 
-        if not video_job.auto_publish_connection_id:
+        connection_ids = _selected_connection_ids(
+            video_job
+        )
+
+        if not connection_ids:
             return "skipped_no_channel"
 
-        connection = db.get(
-            YouTubeConnection,
-            video_job.auto_publish_connection_id,
-        )
-
-        if (
-            connection is None
-            or not connection.is_active
-            or not connection.encrypted_refresh_token
-        ):
-            raise RuntimeError(
-                "Automatic publishing channel is unavailable."
+        connections = db.scalars(
+            select(YouTubeConnection).where(
+                YouTubeConnection.id.in_(
+                    connection_ids
+                )
             )
+        ).all()
 
-        existing = db.scalar(
-            select(YouTubePublishJob).where(
-                YouTubePublishJob.video_job_id
-                == video_job.id,
-                YouTubePublishJob.youtube_connection_id
-                == connection.id,
-            )
-        )
+        by_id = {
+            connection.id: connection
+            for connection in connections
+        }
 
-        if existing is not None:
-            if existing.youtube_video_id:
-                return "skipped_already_uploaded"
+        for connection_id in connection_ids:
+            connection = by_id.get(connection_id)
 
-            if existing.status in {
-                "queued",
-                "uploading",
-                "uploaded",
-                "needs_review",
-            }:
-                return (
-                    "skipped_existing_"
-                    + existing.status
+            if (
+                connection is None
+                or not connection.is_active
+                or not connection.encrypted_refresh_token
+            ):
+                raise RuntimeError(
+                    "Automatic publishing channel "
+                    f"{connection_id} is unavailable."
                 )
 
         if video_job.auto_publish_metadata:
@@ -178,7 +201,10 @@ def prepare_and_queue_auto_publish(
                 db.refresh(video_job)
         else:
             metadata = GeneratedYouTubeMetadata(
-                title=(video_job.title or "Untitled Video")[:100],
+                title=(
+                    video_job.title
+                    or "Untitled Video"
+                )[:100],
                 description="",
                 tags=[],
                 category_id="27",
@@ -187,47 +213,94 @@ def prepare_and_queue_auto_publish(
                 stock_credits="",
             )
 
-        draft = save_youtube_publish_draft(
-            db,
-            video_job=video_job,
-            connection=connection,
-            title=metadata.title,
-            description=metadata.description,
-            tags=", ".join(metadata.tags),
-            category_id=metadata.category_id,
-            language=metadata.language,
-            privacy_status=(
-                video_job.auto_publish_privacy
-                or "private"
-            ),
-            scheduled_at=video_job.auto_publish_scheduled_at,
-            made_for_kids=bool(
-                video_job.auto_publish_made_for_kids
-            ),
-            contains_synthetic_media=(
-                package_contains_synthetic_media(
-                    video_job
-                )
-            ),
-            notify_subscribers=bool(
-                video_job.auto_publish_notify_subscribers
-            ),
-            stock_credits=metadata.stock_credits,
-            thumbnail_path=None,
+        synthetic_media = (
+            package_contains_synthetic_media(
+                video_job
+            )
         )
 
-        # Thumbnail image generation is intentionally disabled.
-        # Every completed video receives a Gemini thumbnail prompt
-        # independently in job_runner.py.
-        draft.thumbnail_path = None
-        draft.thumbnail_status = "not_requested"
-        draft.thumbnail_error = None
-        db.commit()
-        db.refresh(draft)
+        results = []
 
-        queue_youtube_publish_job(db, draft)
+        for connection_id in connection_ids:
+            connection = by_id[connection_id]
+
+            existing = db.scalar(
+                select(YouTubePublishJob).where(
+                    YouTubePublishJob.video_job_id
+                    == video_job.id,
+                    YouTubePublishJob.youtube_connection_id
+                    == connection.id,
+                )
+            )
+
+            if existing is not None:
+                if existing.youtube_video_id:
+                    results.append(
+                        f"{connection.id}:already_uploaded"
+                    )
+                    continue
+
+                if existing.status in {
+                    "queued",
+                    "uploading",
+                    "uploaded",
+                    "needs_review",
+                }:
+                    results.append(
+                        f"{connection.id}:"
+                        f"existing_{existing.status}"
+                    )
+                    continue
+
+            draft = save_youtube_publish_draft(
+                db,
+                video_job=video_job,
+                connection=connection,
+                title=metadata.title,
+                description=metadata.description,
+                tags=", ".join(metadata.tags),
+                category_id=metadata.category_id,
+                language=metadata.language,
+                privacy_status=(
+                    video_job.auto_publish_privacy
+                    or "private"
+                ),
+                scheduled_at=(
+                    video_job.auto_publish_scheduled_at
+                ),
+                made_for_kids=bool(
+                    video_job.auto_publish_made_for_kids
+                ),
+                contains_synthetic_media=synthetic_media,
+                notify_subscribers=bool(
+                    video_job.auto_publish_notify_subscribers
+                ),
+                stock_credits=metadata.stock_credits,
+                thumbnail_path=(
+                    video_job.manual_thumbnail_path
+                    or None
+                ),
+            )
+
+            if video_job.manual_thumbnail_path:
+                draft.thumbnail_status = "not_started"
+            else:
+                draft.thumbnail_status = "not_requested"
+
+            draft.thumbnail_error = None
+            db.commit()
+            db.refresh(draft)
+
+            queue_youtube_publish_job(
+                db,
+                draft,
+            )
+
+            results.append(
+                f"{connection.id}:queued_{draft.id}"
+            )
 
         return (
-            f"queued_publish_job_{draft.id}"
-            f"_provider_{metadata.provider}"
+            " | ".join(results)
+            + f" | provider_{metadata.provider}"
         )
