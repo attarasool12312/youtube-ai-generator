@@ -15,6 +15,7 @@ USER_COLUMN_MIGRATIONS = {
 
 
 VIDEO_JOB_COLUMN_MIGRATIONS = {
+    "narration_language": "VARCHAR(10) NOT NULL DEFAULT 'en'",
     "input_mode": "VARCHAR(20) NOT NULL DEFAULT 'title'",
     "source_script": "TEXT",
     "media_source": "VARCHAR(20) NOT NULL DEFAULT 'stock_only'",

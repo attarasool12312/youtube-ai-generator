@@ -73,7 +73,7 @@
           {% else %}
           <div><label>Duration</label><select name="duration_minutes" required><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="8">8 minutes</option><option value="10" selected>10 minutes</option><option value="15">15 minutes</option><option value="20">20 minutes</option><option value="25">25 minutes</option><option value="30">30 minutes</option></select></div>
           {% endif %}
-          <div><label>Language</label><input value="English" disabled></div>
+          <div><label>Language</label><select name="language" required><option value="en" selected>English</option><option value="hi">Hindi</option></select></div>
           <div>
   <label>Video Profile</label>
   <select name="video_style" required>
@@ -110,7 +110,10 @@
                 <optgroup label="Built-in Voices">
                 {% endif %}
                 {% for voice in narrator_voices %}
-                <option value="{{ voice.voice_id }}"{% if voice.voice_id == default_narrator_voice %} selected{% endif %}>{{ voice.display_label }}</option>
+                <option data-narration-lang="en" value="{{ voice.voice_id }}"{% if voice.voice_id == default_narrator_voice %} selected{% endif %}>{{ voice.display_label }}</option>
+                {% endfor %}
+                {% for voice in hindi_narrator_voices %}
+                <option data-narration-lang="hi" value="{{ voice.voice_id }}">{{ voice.display_label }}</option>
                 {% endfor %}
                 {% if cloned_voices %}
                 </optgroup>
@@ -1233,4 +1236,44 @@ document.addEventListener("DOMContentLoaded", function () {
 
   updateAvatarPosition();
 });
+</script>
+
+<script>
+(function () {
+  const form = document.currentScript.previousElementSibling?.matches('form')
+    ? document.currentScript.previousElementSibling
+    : document.querySelector('form[action="/jobs"], form[action="/jobs/script"]');
+  if (!form) return;
+  const lang = form.querySelector('select[name="language"]');
+  const voices = form.querySelector('select[name="narrator_voice"]');
+  if (!lang || !voices) return;
+  function syncLanguage() {
+    const hi = lang.value === 'hi';
+    for (const opt of voices.querySelectorAll('option')) {
+      opt.hidden = hi ? opt.dataset.narrationLang !== 'hi' : opt.dataset.narrationLang === 'hi';
+      opt.disabled = opt.hidden;
+    }
+    if (voices.selectedOptions[0]?.disabled) {
+      const first = [...voices.options].find(o => !o.disabled && o.value);
+      if (first) voices.value = first.value;
+    }
+    for (const opt of form.querySelectorAll('select[name="voice_pool"] option')) {
+      const isHi = /^(hf_|hm_)/.test(opt.value);
+      opt.disabled = hi !== isHi;
+      if (opt.disabled) opt.selected = false;
+    }
+    const captions = form.querySelector('select[name="captions_enabled"]');
+    if (captions && hi) captions.value = 'disabled';
+  }
+  lang.addEventListener('change', syncLanguage);
+  voices.addEventListener('change', () => {
+    const opt = voices.selectedOptions[0];
+    if (opt?.dataset.narrationLang) lang.value = opt.dataset.narrationLang;
+    syncLanguage();
+  });
+  document.addEventListener('click', event => {
+    if (event.target?.id === 'video-preset-load') setTimeout(syncLanguage, 100);
+  });
+  syncLanguage();
+})();
 </script>

@@ -159,6 +159,10 @@
 
       <div class="ttv-controls">
         <div>
+          <label>Language</label>
+          <select id="tts-language"><option value="en" selected>English</option><option value="hi">Hindi</option></select>
+        </div>
+        <div>
           <label>Voice</label>
           <select id="tts-voice" name="voice">
             <optgroup label="Cloned Voices">
@@ -171,7 +175,7 @@
             </optgroup>
             <optgroup label="Built-in Voices">
               {% for voice in builtin_voices %}
-              <option value="builtin:{{ voice.voice_id }}">{{ voice.label }} ({{ voice.gender }}, {{ voice.english_variant }})</option>
+              <option data-narration-lang="{{ 'hi' if voice.pipeline_language == 'h' else 'en' }}" value="builtin:{{ voice.voice_id }}">{{ voice.label }} ({{ voice.gender }}, {{ voice.english_variant }})</option>
               {% endfor %}
             </optgroup>
           </select>
@@ -354,6 +358,21 @@ document.getElementById('clone-form').addEventListener('submit', function(e) {
     });
 });
 
+function syncTTSLanguage() {
+  const hi = document.getElementById('tts-language').value === 'hi';
+  const voices = document.getElementById('tts-voice');
+  for (const opt of voices.options) {
+    const lang = opt.dataset.narrationLang;
+    if (lang) opt.disabled = lang !== (hi ? 'hi' : 'en');
+    else if (opt.value.startsWith('cloned:')) opt.disabled = hi;
+  }
+  if (voices.selectedOptions[0]?.disabled) {
+    const first = [...voices.options].find(o => !o.disabled && o.value);
+    if (first) voices.value = first.value;
+  }
+}
+document.getElementById('tts-language').addEventListener('change', syncTTSLanguage);
+syncTTSLanguage();
 function generateTTS() {
   const text = document.getElementById('tts-text').value.trim();
   if (!text) { alert('Please enter some text.'); return; }
@@ -421,6 +440,7 @@ function generateTTS() {
   formData.append('text', text);
   formData.append('title', document.getElementById('tts-title').value.trim() || 'Untitled');
   formData.append('voice', voice);
+  formData.append('language', document.getElementById('tts-language').value);
   formData.append('speed', speed);
   formData.append('format', format);
 

@@ -31,7 +31,11 @@ def create_preview(voice: str, label: str) -> None:
 
     try:
         generate_narration(
-            PREVIEW_TEXT,
+            (
+                "नमस्ते दोस्तों, यह मेरी आवाज का एक छोटा सा नमूना है।"
+                if voice.startswith(("hf_", "hm_"))
+                else PREVIEW_TEXT
+            ),
             voice,
             1.0,
             wav_file,

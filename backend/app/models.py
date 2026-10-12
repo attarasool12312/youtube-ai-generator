@@ -54,6 +54,7 @@ class VideoJob(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(500))
     duration_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    narration_language: Mapped[str] = mapped_column(String(10), default="en", server_default="en")
     video_style: Mapped[str] = mapped_column(String(30), default="auto")
     orientation: Mapped[str] = mapped_column(String(20), default="landscape")
     media_source: Mapped[str] = mapped_column(String(20), default="stock_only")

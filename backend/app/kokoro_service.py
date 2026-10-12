@@ -55,7 +55,7 @@ def _sentences(text: str) -> list[str]:
         lambda match: f"{match.group(1)}.\ue000",
         text,
     )
-    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"'“‘(])", protected)
+    parts = re.split(r"(?<=[.!?।॥])\s+(?=[^\s])", protected)
     return [part.replace("\ue000", " ").strip() for part in parts if part.strip()]
 
 
@@ -123,7 +123,15 @@ def generate_narration(text, voice, speed, output_path, pipeline_override=None):
     # Normalize all voices to Michael's pace (168 WPM at speed 1.0).
     # Each voice has a correction factor so they all sound the same pace.
     speed = speed * voice_info.speed_correction
-    text_chunks = chunk_narration_text(text)
+    if voice_info.pipeline_language == "h":
+        import re
+        sentences = re.split(r"(?<=[।॥.!?])\s+", text.strip())
+        text_chunks = []
+        for sentence in sentences:
+            if sentence.strip():
+                text_chunks.extend(chunk_narration_text(sentence.strip()))
+    else:
+        text_chunks = chunk_narration_text(text)
     if not text_chunks:
         raise ValueError("Narration text must not be empty.")
     pipeline = pipeline_override or _pipeline_for(voice_info.pipeline_language)

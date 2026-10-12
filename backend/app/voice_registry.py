@@ -19,7 +19,7 @@ class NarratorVoice:
 
     @property
     def pipeline_language(self) -> str:
-        return "b" if self.english_variant == "British English" else "a"
+        return "h" if self.english_variant == "Hindi" else ("b" if self.english_variant == "British English" else "a")
 
     @property
     def display_label(self) -> str:
@@ -61,10 +61,18 @@ _VOICE_ROWS = (
 ENGLISH_NARRATOR_VOICES = tuple(
     NarratorVoice(voice_id=r[0], label=r[1], english_variant=r[2], gender=r[3], approved=r[4], speed_correction=r[5]) for r in _VOICE_ROWS
 )
-APPROVED_NARRATOR_VOICES = tuple(v for v in ENGLISH_NARRATOR_VOICES if v.approved)
+HINDI_NARRATOR_VOICES = (
+    NarratorVoice("hf_alpha", "Alpha", "Hindi", "Female"),
+    NarratorVoice("hf_beta", "Beta", "Hindi", "Female"),
+    NarratorVoice("hm_omega", "Omega", "Hindi", "Male"),
+    NarratorVoice("hm_psi", "Psi", "Hindi", "Male"),
+)
+APPROVED_NARRATOR_VOICES = tuple(
+    v for v in (*ENGLISH_NARRATOR_VOICES, *HINDI_NARRATOR_VOICES) if v.approved
+)
 VOICE_BY_ID = {v.voice_id: v for v in APPROVED_NARRATOR_VOICES}
 DEFAULT_NARRATOR_VOICE = "am_michael"
-DEFAULT_VOICE_POOL_CSV = ",".join(VOICE_BY_ID)
+DEFAULT_VOICE_POOL_CSV = ",".join(v.voice_id for v in ENGLISH_NARRATOR_VOICES if v.approved)
 ADDITIONAL_VOICE_IDS = ("am_fenrir", "af_heart", "af_nova", "bm_george", "bf_emma")
 ADDITIONAL_VOICES = tuple(VOICE_BY_ID[voice_id] for voice_id in ADDITIONAL_VOICE_IDS)
 MIN_VOICE_SPEED = 0.75
@@ -112,7 +120,8 @@ def voice_preview_url(voice_id: str) -> str:
 
 def voice_template_context() -> dict:
     return {
-        "narrator_voices": APPROVED_NARRATOR_VOICES,
+        "narrator_voices": tuple(v for v in APPROVED_NARRATOR_VOICES if v.pipeline_language != "h"),
+        "hindi_narrator_voices": tuple(v for v in APPROVED_NARRATOR_VOICES if v.pipeline_language == "h"),
         "additional_voices": ADDITIONAL_VOICES,
         "default_narrator_voice": DEFAULT_NARRATOR_VOICE,
         "voice_preview_url_root": VOICE_PREVIEW_URL_ROOT,

@@ -1474,6 +1474,7 @@ def add_jobs(
     video_style: str = Form("auto"),
     orientation: str = Form("landscape"),
     media_source: str = Form("stock_only"),
+    language: str = Form("en"),
     narrator_voice: str = Form(DEFAULT_NARRATOR_VOICE),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
@@ -1507,7 +1508,21 @@ def add_jobs(
     video_style = normalize_profile_key(video_style)
 
     title_list = [title.strip() for title in titles.splitlines() if title.strip()]
+    language = language.strip().lower()
+    if language not in ("en", "hi"):
+        return RedirectResponse("/videos/create?success=Invalid language.", status_code=303)
+    from app.voice_registry import get_narrator_voice
+    if language == "hi" and narrator_voice == DEFAULT_NARRATOR_VOICE:
+        narrator_voice = "hf_alpha"
+    if language == "hi":
+        voice_pool = [v for v in voice_pool if v.startswith(("hf_", "hm_"))]
     try:
+        if narrator_voice.startswith("cloned:") and language == "hi":
+            raise ValueError("Hindi cloning is not supported")
+        if not narrator_voice.startswith("cloned:") and (
+            (get_narrator_voice(narrator_voice).pipeline_language == "h") != (language == "hi")
+        ):
+            raise ValueError("Voice/language mismatch")
         selected_voices = validated_voice_pool([narrator_voice, *voice_pool])
         narrator_voice = selected_voices[0]
         voice_speed = validate_voice_speed(voice_speed)
@@ -1517,7 +1532,7 @@ def add_jobs(
             status_code=303,
         )
 
-    captions_enabled_value = captions_enabled == "enabled"
+    captions_enabled_value = captions_enabled == "enabled" and language == "en"
     caption_background_value = caption_background == "on"
 
     allowed_caption_fonts = {
@@ -1804,6 +1819,7 @@ def add_jobs(
         job = VideoJob(
             title=title,
             duration_minutes=duration_minutes,
+            narration_language=language,
             video_style=video_style,
             orientation=orientation,
             media_source=media_source,
@@ -1882,6 +1898,7 @@ def add_script_job(
     video_style: str = Form("auto"),
     orientation: str = Form("landscape"),
     media_source: str = Form("stock_only"),
+    language: str = Form("en"),
     narrator_voice: str = Form(DEFAULT_NARRATOR_VOICE),
     voice_pool: list[str] = Form(default=[]),
     voice_speed: float = Form(1.0),
@@ -1944,7 +1961,21 @@ def add_script_job(
 
     video_style = normalize_profile_key(video_style)
 
+    language = language.strip().lower()
+    if language not in ("en", "hi"):
+        return RedirectResponse("/script-to-video?success=Invalid language.", status_code=303)
+    from app.voice_registry import get_narrator_voice
+    if language == "hi" and narrator_voice == DEFAULT_NARRATOR_VOICE:
+        narrator_voice = "hf_alpha"
+    if language == "hi":
+        voice_pool = [v for v in voice_pool if v.startswith(("hf_", "hm_"))]
     try:
+        if narrator_voice.startswith("cloned:") and language == "hi":
+            raise ValueError("Hindi cloning is not supported")
+        if not narrator_voice.startswith("cloned:") and (
+            (get_narrator_voice(narrator_voice).pipeline_language == "h") != (language == "hi")
+        ):
+            raise ValueError("Voice/language mismatch")
         selected_voices = validated_voice_pool(
             [narrator_voice, *voice_pool]
         )
@@ -1956,7 +1987,7 @@ def add_script_job(
             status_code=303,
         )
 
-    captions_enabled_value = captions_enabled == "enabled"
+    captions_enabled_value = captions_enabled == "enabled" and language == "en"
     caption_background_value = caption_background == "on"
 
     allowed_caption_fonts = {
@@ -2242,6 +2273,7 @@ def add_script_job(
     job = VideoJob(
         title=title,
         duration_minutes=duration_minutes,
+        narration_language=language,
         video_style=video_style,
         orientation=orientation,
         media_source=media_source,
@@ -4583,6 +4615,7 @@ async def text_to_voice_generate(
     request: Request,
     text: str = Form(...),
     voice: str = Form(...),
+    language: str = Form("en"),
     speed: float = Form(1.0),
     format: str = Form("mp3"),
     title: str = Form("Untitled"),
@@ -4602,6 +4635,8 @@ async def text_to_voice_generate(
 
     try:
         if voice.startswith("cloned:"):
+            if language != "en":
+                return JSONResponse({"success": False, "error": "Hindi voice cloning is not supported"}, status_code=400)
             # Cloned voice via Chatterbox
             voice_id = int(voice.split(":")[1])
             db_path = PROJECT_ROOT / "backend" / "data" / "app.db"
@@ -4626,6 +4661,11 @@ async def text_to_voice_generate(
         elif voice.startswith("builtin:"):
             # Built-in Kokoro voice
             voice_id = voice.split(":")[1]
+            from app.voice_registry import get_narrator_voice
+            if language not in ("en", "hi") or (
+                (get_narrator_voice(voice_id).pipeline_language == "h") != (language == "hi")
+            ):
+                return JSONResponse({"success": False, "error": "Language/voice mismatch"}, status_code=400)
             from app.kokoro_service import generate_narration
             generate_narration(text, voice_id, speed, wav_path)
 

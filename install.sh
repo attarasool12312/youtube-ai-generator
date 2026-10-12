@@ -577,9 +577,9 @@ from app.voice_registry import (
 voices = list(APPROVED_NARRATOR_VOICES)
 additional = list(ADDITIONAL_VOICES)
 
-if len(voices) != 28:
+if len(voices) != 32:
     raise SystemExit(
-        f"Expected 28 approved narrator voices, found {len(voices)}."
+        f"Expected 32 approved narrator voices, found {len(voices)}."
     )
 
 if len(additional) != 5:

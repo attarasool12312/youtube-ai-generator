@@ -38,8 +38,8 @@ class VoiceRegistryTests(unittest.TestCase):
         ids = [voice.voice_id for voice in APPROVED_NARRATOR_VOICES]
         self.assertEqual(len(ids), len(set(ids)))
         self.assertTrue(all(v.approved for v in APPROVED_NARRATOR_VOICES))
-        self.assertTrue(all(v.voice_id[:2] in {"af", "am", "bf", "bm"} for v in APPROVED_NARRATOR_VOICES))
-        self.assertTrue(all(v.english_variant in {"American English", "British English"} for v in APPROVED_NARRATOR_VOICES))
+        self.assertTrue(all(v.voice_id[:2] in {"af", "am", "bf", "bm", "hf", "hm"} for v in APPROVED_NARRATOR_VOICES))
+        self.assertTrue(all(v.english_variant in {"American English", "British English", "Hindi"} for v in APPROVED_NARRATOR_VOICES))
 
     def test_existing_six_and_default_remain_valid(self):
         existing = {"am_michael", "am_fenrir", "am_puck", "af_heart", "af_bella", "af_nicole"}
@@ -64,7 +64,7 @@ class VoiceRegistryTests(unittest.TestCase):
         context = voice_template_context()
         self.assertEqual(
             context["narrator_voices"],
-            APPROVED_NARRATOR_VOICES,
+            tuple(v for v in APPROVED_NARRATOR_VOICES if v.english_variant != "Hindi"),
         )
         for template_name in (
             "partials/create_video_form.html",
@@ -76,7 +76,7 @@ class VoiceRegistryTests(unittest.TestCase):
             rendered = environment.from_string(source[start:end]).render(
                 **context,
             )
-            for voice in APPROVED_NARRATOR_VOICES:
+            for voice in (v for v in APPROVED_NARRATOR_VOICES if v.english_variant != "Hindi"):
                 self.assertIn(f'value="{voice.voice_id}"', rendered)
                 self.assertIn(voice.display_label, rendered)
             self.assertIn('value="am_michael" selected', rendered)

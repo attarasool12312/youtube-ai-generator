@@ -1130,6 +1130,7 @@ def generate_video_package_from_script(
     duration_minutes,
     video_style,
     progress_callback=None,
+    language="en",
 ):
     """Build the normal video package from a user-supplied script.
 
@@ -1145,9 +1146,10 @@ def generate_video_package_from_script(
     if progress_callback:
         progress_callback("script_validation", 22)
 
-    validation = validate_script(
-        cleaned_script,
-        duration_minutes,
+    validation = (
+        validate_script(cleaned_script, duration_minutes)
+        if language == "en" else
+        {"valid": True, "word_count": len(cleaned_script.split()), "issues": []}
     )
 
     if progress_callback:
@@ -1192,15 +1194,20 @@ def generate_video_package_from_script(
     }
 
 
-def generate_video_package(title, duration_minutes, video_style, progress_callback=None):
+def generate_video_package(title, duration_minutes, video_style, progress_callback=None, language="en"):
     detected_style = detect_video_style(title, video_style)
 
-    script_result = create_validated_script(
-        title,
-        duration_minutes,
-        detected_style,
-        progress_callback=progress_callback,
-    )
+    if language == "hi":
+        from app.hindi_script import generate_hindi_script
+        script_result = generate_hindi_script(title, duration_minutes)
+        script_result["validation"] = script_result["validation"]
+    else:
+        script_result = create_validated_script(
+            title,
+            duration_minutes,
+            detected_style,
+            progress_callback=progress_callback,
+        )
     validation = script_result["validation"]
     print("SCRIPT_INITIAL_PROVIDER:", script_result["initial_provider"], flush=True)
     print("SCRIPT_REPAIR_PROVIDERS:", script_result["repair_providers"] or ["none"], flush=True)

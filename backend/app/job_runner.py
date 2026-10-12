@@ -130,8 +130,9 @@ def run_job(job_id: int) -> None:
         # AI scene media is currently disabled.
         media_source = "stock_only"
         narrator_voice = job.narrator_voice
+        narration_language = getattr(job, "narration_language", "en") or "en"
         voice_speed = job.voice_speed
-        captions_enabled = bool(job.captions_enabled)
+        captions_enabled = bool(job.captions_enabled) and narration_language == "en"
         caption_font_family = (
             getattr(job, "caption_font_family", None) or "Manrope"
         )
@@ -176,6 +177,7 @@ def run_job(job_id: int) -> None:
                 duration_minutes=duration_minutes,
                 video_style=video_style,
                 progress_callback=progress_callback,
+                language=narration_language,
             )
         else:
             package = generate_video_package(
@@ -183,6 +185,7 @@ def run_job(job_id: int) -> None:
                 duration_minutes=duration_minutes,
                 video_style=video_style,
                 progress_callback=progress_callback,
+                language=narration_language,
             )
 
         _record_timing(
